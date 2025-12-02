@@ -1,0 +1,41 @@
+{
+    "name": "Com.Hapiga.Scheherazade.Common",
+    "rootNamespace": "",
+    "references": [
+        "Unity.Purchasing",
+        "AdjustSdk.Scripts",
+        "MaxSdk.Scripts",
+        "AppMetrica",
+        "Unity.Purchasing.Security",
+        "Unity.Purchasing.SecurityCore",
+        "Unity.Purchasing.SecurityStub",
+        "Google.Play.Common",
+        "Google.Play.Core",
+        "Google.Play.Review"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.purchasing",
+            "expression": "0",
+            "define": "UNITY_PURCHASING"
+        },
+        {
+            "name": "com.applovin.mediation.ads",
+            "expression": "0",
+            "define": "APPLOVIN_MAX"
+        },
+        {
+            "name": "io.appmetrica.analytics",
+            "expression": "0",
+            "define": "TRACKING_APPMETRICA"
+        }
+    ],
+    "noEngineReferences": false
+}

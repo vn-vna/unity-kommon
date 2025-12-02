@@ -1,0 +1,18 @@
+{
+    "name": "Com.Hapiga.Scheherazade.Editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:2e9dccbfa86a47f42b2bae5945194760"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
