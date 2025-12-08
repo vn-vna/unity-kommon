@@ -18,20 +18,29 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         IUserSegmentation
         where T : UserSegmentationBase<T>
     {
+        #region Constants
         private const string SegmentationSaveKey = "__segment_data__";
+        #endregion
 
+        #region Interfaces & Properties
         public bool IsFirstSegmentDetermined => _firstSegmentDetermined;
         public SegmentationInformation SegmentInformation => _userSegmentation;
         public SegmentationDeclaration CurrentSegmentDeclaration => _currentSegmentDeclaration;
+        #endregion
 
+        #region Serialized Fields
         [SerializeField]
         private UserSegmentationConfiguration configuration;
+        #endregion
 
+        #region Private Fields
         private bool _firstSegmentDetermined = false;
         private SegmentationInformation _userSegmentation;
         private SegmentationDeclaration _currentSegmentDeclaration;
         private List<IUserSegmentationTracker> _segmentationTrackers;
+        #endregion
 
+        #region Unity Methods
         protected override void Awake()
         {
             base.Awake();
@@ -39,7 +48,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             _segmentationTrackers = new List<IUserSegmentationTracker>();
             Integration.RegisterManager(this);
         }
+        #endregion
 
+        #region Public Methods
         public void Initialize()
         {
             StartCoroutine(InitializeCoroutine());
@@ -90,7 +101,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
                 "User segmentation data registered and saved."
             );
         }
+        #endregion
 
+        #region Private Methods
         private IEnumerator NotifySegmentationTrackersCoroutine()
         {
             while (!_firstSegmentDetermined)
@@ -141,6 +154,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
                 _segmentationTrackers.Count
             );
         }
+        #endregion
 
     }
 }
