@@ -31,6 +31,7 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
             };
         }
 
+        [HideInCallstack]
         private void LogMessage(string message, string tag = null, LogLevel level = LogLevel.Info)
         {
             string color = "";
@@ -69,6 +70,7 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
 
 
         // ReSharper disable Unity.PerformanceAnalysis
+        [HideInCallstack]
         public static void Log(
             string message, string tag = null, 
             LogLevel level = LogLevel.Info, 
@@ -98,37 +100,44 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
 #endif
         }
 
+        [HideInCallstack]
         // ReSharper disable Unity.PerformanceAnalysis
         public static void Log<T>(string message, LogLevel level = LogLevel.Info, params object[] args)
         {
             Log(message, typeof(T).Name, level, args);
         }
 
+        [HideInCallstack]
         public static void Debug<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Debug, args);
         }
 
+        [HideInCallstack]
         public static void Info<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Info, args);
         }
 
+        [HideInCallstack]
         public static void Warning<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Warning, args);
         }
 
+        [HideInCallstack]
         public static void Error<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Error, args);
         }
 
+        [HideInCallstack]
         public static void Critical<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Critical, args);
         }
 
+        [HideInCallstack]
         public static void SLog(string message, LogLevel level = LogLevel.Debug, params object[] args)
         {
 #if !NO_LOGGING
@@ -148,26 +157,31 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
 #endif
         }
 
+        [HideInCallstack]
         public static void SDebug(string message, params object[] args)
         {
             SLog(message, LogLevel.Debug, args);
         }
 
+        [HideInCallstack]
         public static void SInfo(string message, params object[] args)
         {
             SLog(message, LogLevel.Info, args);
         }
 
+        [HideInCallstack]
         public static void SWarning(string message, params object[] args)
         {
             SLog(message, LogLevel.Warning, args);
         }
 
+        [HideInCallstack]
         public static void SError(string message, params object[] args)
         {
             SLog(message, LogLevel.Error, args);
         }
 
+        [HideInCallstack]
         public static void SCritical(string message, params object[] args)
         {
             SLog(message, LogLevel.Critical, args);
