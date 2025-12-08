@@ -2,6 +2,7 @@
     "name": "Com.Hapiga.Scheherazade.Common",
     "rootNamespace": "",
     "references": [
+        "DOTween.Modules",
         "Unity.Purchasing",
         "AdjustSdk.Scripts",
         "MaxSdk.Scripts",
