@@ -145,8 +145,12 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
             Type callingType = null;
             foreach (StackFrame frame in stackTrace.GetFrames())
             {
-                if (frame.GetMethod().DeclaringType == typeof(QuickLog)) continue;
-                callingType = frame.GetMethod().DeclaringType;
+                Type frameType = frame.GetMethod().DeclaringType;
+                if (frameType == typeof(QuickLog)) continue;
+                if (!frameType.IsVisible) continue;
+                if (frameType.FullName.StartsWith("<")) continue;
+                if (frameType.FullName.Contains("System.")) continue;
+                callingType = frameType;
                 break;
             }
 
