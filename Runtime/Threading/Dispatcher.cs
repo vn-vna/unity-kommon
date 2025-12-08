@@ -27,7 +27,7 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
                 return;
             }
 
-            QuickLog.Debug<Dispatcher>(
+            QuickLog.SDebug(
                 "Dispatching {0} action(s) on main thread.",
                 _actions.Count
             );
@@ -55,8 +55,9 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         {
             if (Instance == null)
             {
-                QuickLog.Critical<Dispatcher>(
-                    "No Dispatcher instance found. Action cannot be dispatched on main thread."
+                QuickLog.SCritical(
+                    "No Dispatcher instance found. " +
+                    "Action cannot be dispatched on main thread."
                 );
                 return;
             }
@@ -68,8 +69,9 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         {
             if (Instance == null)
             {
-                QuickLog.Critical<Dispatcher>(
-                    "No Dispatcher instance found. Delayed action cannot be dispatched on main thread."
+                QuickLog.SCritical(
+                    "No Dispatcher instance found. " +
+                    "Delayed action cannot be dispatched on main thread."
                 );
                 return;
             }
@@ -95,7 +97,7 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         public static void DispatchOnMainThread(this Action action)
             => Dispatcher.DispatchOnMainThread(action);
 
-        public static void DispatchDelayedOnMainThread(this Action action, float delaySeconds) 
+        public static void DispatchDelayedOnMainThread(this Action action, float delaySeconds)
             => Dispatcher.DispatchDelayedOnMainThread(action, delaySeconds);
 
         public static Task DispatchActionAsync(this Action action)
@@ -106,11 +108,11 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
 
         public static void ContinueTaskOnMainThread<T>(this Task<T> task, Action<Task<T>> continuationAction)
             => task.ContinueWith(t => Dispatcher.DispatchOnMainThread(() => continuationAction(t)));
-        
+
         public static void ContinueTaskOnMainThreadAfterDelay(this Task task, Action<Task> continuationAction, float delaySeconds)
             => task.ContinueWith(
                 t => Dispatcher.DispatchDelayedOnMainThread(
-                    () => continuationAction(t), 
+                    () => continuationAction(t),
                     delaySeconds
                 )
             );
