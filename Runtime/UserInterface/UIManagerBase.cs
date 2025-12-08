@@ -86,9 +86,10 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             }
         }
 
-        private void OnDestroy()
+        protected override void OnDestroy()
         {
             this.UnregisterManager();
+            base.OnDestroy();
         }
 
 #if UNITY_EDITOR
