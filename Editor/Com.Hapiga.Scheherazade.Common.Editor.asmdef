@@ -2,7 +2,8 @@
     "name": "Com.Hapiga.Scheherazade.Editor",
     "rootNamespace": "",
     "references": [
-        "GUID:2e9dccbfa86a47f42b2bae5945194760"
+        "GUID:2e9dccbfa86a47f42b2bae5945194760",
+        "GUID:5c49224dd69cf994c99d843f9a4b3548"
     ],
     "includePlatforms": [
         "Editor"
