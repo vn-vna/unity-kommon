@@ -1,6 +1,6 @@
 using System;
+using System.Reflection;
 using DG.Tweening;
-using Sirenix.Utilities;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -304,7 +304,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             }
 
             panelId = GetType()
-                .GetAttribute<UIPanelInfoAttribute>()
+                .GetCustomAttribute<UIPanelInfoAttribute>()
                 ?.PanelId ?? GetType().FullName;
         }
 #endif

@@ -72,15 +72,18 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
         // ReSharper disable Unity.PerformanceAnalysis
         [HideInCallstack]
         public static void Log(
-            string message, string tag = null, 
-            LogLevel level = LogLevel.Info, 
+            string message, string tag = null,
+            LogLevel level = LogLevel.Info,
             object[] args = null
         )
         {
 #if !NO_LOGGING
             for (int i = 0; i < args.Length; i++)
             {
-                if (args[i] is Func<object> func) args[i] = func();
+                if (args[i] is Func<object> func)
+                {
+                    args[i] = func();
+                }
             }
 
             string msg = args != null && args.Length > 0 ? string.Format(message, args) : message;

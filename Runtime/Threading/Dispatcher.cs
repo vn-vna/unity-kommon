@@ -84,6 +84,20 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
             action?.Invoke();
         }
 
+        public static Coroutine DispatchCoroutine(IEnumerator coroutine)
+        {
+            if (Instance == null)
+            {
+                QuickLog.SCritical(
+                    "No Dispatcher instance found. " +
+                    "Coroutine cannot be dispatched on main thread."
+                );
+                return null;
+            }
+
+            return Instance.StartCoroutine(coroutine);
+        }
+
         private static IEnumerator DispatchDelayedInternal(Action action, float delaySeconds)
         {
             yield return new WaitForSeconds(delaySeconds);
@@ -116,5 +130,8 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
                     delaySeconds
                 )
             );
+        
+        public static Coroutine DispatchOnDispatcher(this IEnumerator coroutine)
+            => Dispatcher.DispatchCoroutine(coroutine);
     }
 }
