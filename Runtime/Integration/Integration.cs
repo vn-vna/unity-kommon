@@ -3,7 +3,6 @@ using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.Converter;
 using Com.Hapiga.Scheherazade.Common.Integration.IAR;
 using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.Integration.L18n;
 using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
 using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
@@ -19,7 +18,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
         public static IInAppReviewManager InAppReviewManager { get; set; }
         public static IUserSegmentation UserSegmentation { get; private set; }
         public static ICurrencyConverter CurrencyConverter { get; set; }
-        public static ILocalizationManager LocalizationManager { get; private set; }
 
         internal static void RegisterManager<T>(T manager) where T : class
         {
@@ -45,9 +43,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                     break;
                 case ICurrencyConverter currencyConverter:
                     CurrencyConverter = currencyConverter;
-                    break;
-                case ILocalizationManager localizationManager:
-                    LocalizationManager = localizationManager;
                     break;
                 default:
                     throw new ArgumentException($"Unknown manager type: {typeof(T)}"); 
