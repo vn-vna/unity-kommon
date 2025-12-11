@@ -74,6 +74,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
         {
             Status = AdsManagerStatus.Initializing;
+
+            if (_provider == null)
+            {
+                QuickLog.Error<AdsManagerBase<T>>(
+                    "No provider registered. Cannot initialize AdsManager."
+                );
+                Status = AdsManagerStatus.Uninitialized;
+                yield break;
+            }
+
             _provider.Initialize();
             float timer = 0.0f;
 
