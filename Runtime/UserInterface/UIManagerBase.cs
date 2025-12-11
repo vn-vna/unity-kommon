@@ -105,19 +105,31 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #endregion
 
         #region Public Methods
-        public T RequirePanel<T>()
-            where T : UIPanelBase
+        T IUIManager.RequirePanel<T>()
         {
             Type panelType = typeof(T);
             RequirePanelInternal(panelType, out UIPanelInstanceInfo panelInstance);
             return (T)panelInstance.Panel;
         }
 
-        public void ReleasePanel<T>()
-            where T : UIPanelBase
+        void IUIManager.ReleasePanel<T>()
         {
             Type panelType = typeof(T);
             DisposePanelInternal(panelType);
+        }
+
+        bool IUIManager.CheckInstance<T>(T panel)
+        {
+            if (
+                _panelInstances .TryGetValue(
+                    typeof(T),
+                    out UIPanelInstanceInfo panelInstance
+                )
+            )
+            {
+                return panelInstance.Panel == panel;
+            }
+            return false;
         }
         #endregion
 

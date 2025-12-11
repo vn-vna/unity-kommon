@@ -11,11 +11,23 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         {
             get
             {
+                if (UIHelperClass.CurrentManager == null)
+                {
+                    throw new InvalidOperationException(
+                        "No UI Manager is registered"
+                    );
+                }
+
+                if (!UIHelperClass.CurrentManager.CheckInstance(_panelReference))
+                {
+                    _panelReference = null;
+                }
+
                 if (_panelReference == null)
                 {
                     _panelReference = UIHelperClass.CurrentManager.RequirePanel<T>();
-                    UIHelperClass.CurrentManager.PanelReleased += HandlePanelReleased;
                 }
+
                 return _panelReference;
             }
         }
@@ -25,7 +37,6 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         private void HandlePanelReleased(UIPanelBase panel)
         {
             if (_panelReference == null || panel != _panelReference) return;
-            UIHelperClass.CurrentManager.PanelReleased -= HandlePanelReleased;
             _panelReference = null;
         }
 
@@ -44,14 +55,12 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             if (_panelReference == null)
             {
                 _panelReference = UIHelperClass.CurrentManager.RequirePanel<T>();
-                UIHelperClass.CurrentManager.PanelReleased += HandlePanelReleased;
             }
         }
 
         public void Release()
         {
             if (_panelReference == null) return;
-            UIHelperClass.CurrentManager.PanelReleased -= HandlePanelReleased;
             UIHelperClass.CurrentManager.ReleasePanel<T>();
             _panelReference = null;
         }

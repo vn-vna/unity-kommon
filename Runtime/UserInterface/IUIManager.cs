@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 namespace Com.Hapiga.Scheherazade.Common.UserInterface
 {
-    public interface IUIManager
+    internal interface IUIManager
     {
         public event Action<UIPanelBase> PanelInitialized;
         public event Action<UIPanelBase> PanelReleased;
@@ -17,5 +17,6 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         void ReleasePanel<T>() where T : UIPanelBase;
         T RequirePanel<T>() where T : UIPanelBase;
+        bool CheckInstance<T>(T panel) where T : UIPanelBase;
     }
 }

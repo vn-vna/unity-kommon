@@ -32,7 +32,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         public CanvasGroup CanvasGroup => canvasGroup;
         public UIPanelContentBase PanelContent => content;
         public bool IsVisible { get; private set; }
-        public IUIManager UIManager { get; set; }
+        internal IUIManager UIManager { get; set; }
         public bool IsBusy => _animationTween != null;
         public UIPanelBackgroundBase Background => background;
         public UIPanelContentBase Content => content;
@@ -92,9 +92,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         #region Unity Methods
         private void Start()
-        {
-            content.RectTransform.anchoredPosition = Vector2.zero;
-        }
+        { }
 
         private void OnDestroy()
         {
@@ -107,6 +105,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         {
             _animationTween?.Kill(complete: true);
 
+            gameObject.SetActive(true);
             PreShowPanel?.Invoke();
 
             if (callback != null)
@@ -208,8 +207,6 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #region Private Methods
         protected virtual void HandleShowStarted()
         {
-            gameObject.SetActive(true);
-
             Canvas.ForceUpdateCanvases();
             IsVisible = true;
             ShowStarted?.Invoke();

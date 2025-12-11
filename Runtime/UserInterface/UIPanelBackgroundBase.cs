@@ -14,19 +14,10 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         IUIAnimatedElement
     {
         #region Interfaces & Properties
-        Action IUIAnimatedElement.PreShowCallback => null;
-
-        Tween IUIAnimatedElement.ShowAnimation =>
-            DOTween.Sequence()
-                .AppendCallback(() => image.color = backgroundColor.WithAlpha(0f))
-                .Append(image.DOFade(backgroundAlpha, 0.2f).SetEase(Ease.InOutBounce));
-
-        Action IUIAnimatedElement.PreHideCallback => null;
-
-        Tween IUIAnimatedElement.HideAnimation =>
-            DOTween.Sequence()
-                .AppendCallback(() => image.color = backgroundColor.WithAlpha(backgroundAlpha))
-                .Append(image.DOFade(0f, 0.2f).SetEase(Ease.InOutBounce));
+        Action IUIAnimatedElement.PreShowCallback => PreShowBackgroundAnimation;
+        Tween IUIAnimatedElement.ShowAnimation => PerformShowAnimation();
+        Action IUIAnimatedElement.PreHideCallback => PreHideBackgroundAnimation;
+        Tween IUIAnimatedElement.HideAnimation => PerformHideAnimation();
 
         public RectTransform RectTransform => rectTransform;
         public Image Image => image;
@@ -34,16 +25,12 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         #region Serialized Fields
         [SerializeField]
+        [HideInInspector]
         private RectTransform rectTransform;
 
         [SerializeField]
+        [HideInInspector]
         private Image image;
-
-        [SerializeField]
-        private Color backgroundColor = Color.black;
-
-        [SerializeField]
-        private float backgroundAlpha = 0.5f;
         #endregion
 
         #region Unity Methods
@@ -59,6 +46,13 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             image = GetComponent<Image>();
         }
 #endif
+        #endregion
+
+        #region Protected Methods
+        protected abstract void PreShowBackgroundAnimation();
+        protected abstract Tween PerformShowAnimation();
+        protected abstract void PreHideBackgroundAnimation();
+        protected abstract Tween PerformHideAnimation();
         #endregion
     }
 }
