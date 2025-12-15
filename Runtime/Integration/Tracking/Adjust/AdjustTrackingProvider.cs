@@ -153,6 +153,27 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 e.AdRevenueNetwork = info.NetworkName;
                 e.AdRevenueUnit = info.RevenueUnit;
                 e.AdRevenuePlacement = info.Placement;
+                
+                // Set ad impressions count to 1 for proper iOS revenue tracking
+                // This is required for accurate ad revenue attribution on iOS
+                e.AdImpressionsCount = 1;
+                
+                // Set additional parameters for better revenue attribution
+                if (!string.IsNullOrEmpty(info.AdFormat))
+                {
+                    e.AddCallbackParameter("ad_format", info.AdFormat);
+                }
+                
+                if (!string.IsNullOrEmpty(info.CreativeIdentifier))
+                {
+                    e.AddCallbackParameter("creative_id", info.CreativeIdentifier);
+                }
+                
+                if (!string.IsNullOrEmpty(info.Country))
+                {
+                    e.AddCallbackParameter("country", info.Country);
+                }
+                
                 Adjust.TrackAdRevenue(e);
 
                 QuickLog.Info<AdjustTrackingProvider>(
