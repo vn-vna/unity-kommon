@@ -220,7 +220,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private void ProcessPurchasedOrderForRestoration(ConfirmedOrder order)
         {
             QuickLog.Info<UnityInAppPurchaseProvider>(
-                "Restoring purchase for transaction ID: {0} with receipt: {0}",
+                "Restoring purchase for transaction ID: {0} with receipt: {1}",
                 order.Info.TransactionID, order.Info.Receipt
             );
 

@@ -53,7 +53,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #region Private Fields
 
-        private bool _intersitialFulfilled;
+        private bool _interstitialFulfilled;
         private bool _rewardFulfilled;
         private Action<bool> _interstitialCallback;
         private Action<bool> _rewardedCallback;
@@ -215,7 +215,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             try
             {
-                _intersitialFulfilled = false;
+                _interstitialFulfilled = false;
                 MaxSdk.ShowInterstitial(
                     Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId,
                     placement
@@ -606,7 +606,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Hidden");
-            InvokeAdsCallbackOnce(ref _interstitialCallback, _intersitialFulfilled);
+            InvokeAdsCallbackOnce(ref _interstitialCallback, _interstitialFulfilled);
         }
 
         private void HandleInterstitialAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
@@ -618,7 +618,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Displayed");
-            _intersitialFulfilled = false;
+            _interstitialFulfilled = false;
         }
 
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -630,7 +630,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsInter", "RevenuePaid");
             SendRevenueTracking(info, AdsType.Interstitial);
-            _intersitialFulfilled = true;
+            _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
