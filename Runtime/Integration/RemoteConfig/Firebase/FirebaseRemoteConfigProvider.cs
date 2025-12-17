@@ -41,6 +41,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         public void Initialize()
         {
+            QuickLog.Info<FirebaseRemoteConfigProvider>(
+                "Initializing Firebase Remote Config..."
+            );
+
             if (_tryCount++ > 3)
             {
                 QuickLog.Critical<FirebaseRemoteConfigProvider>(

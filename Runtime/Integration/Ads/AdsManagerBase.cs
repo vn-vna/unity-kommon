@@ -29,6 +29,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
         public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
+        public float InterstitialTimer { get; set; }
         #endregion
 
         #region Serialized Fields
