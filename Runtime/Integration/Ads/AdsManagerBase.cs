@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
-using PlasticPipe.PlasticProtocol.Messages;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
