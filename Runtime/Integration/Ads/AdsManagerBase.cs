@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using PlasticPipe.PlasticProtocol.Messages;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -29,7 +30,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
         public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
-        public float InterstitialTimer { get; set; }
+        public float InterstitialTimer {get { return _interstitialTimer; } set { _interstitialTimer = value; } }
         #endregion
 
         #region Serialized Fields
