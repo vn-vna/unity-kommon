@@ -183,10 +183,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             {
                 switch (overrideConfig.InterAdsIntervalResetType)
                 {
-                    case AdsConfiguration.InterResetType.OnRewardedAdsShow:
+                    case InterResetType.OnRewardedAdsShow:
                         ResetIntersitialInterval();
                         break;
-                    case AdsConfiguration.InterResetType.OnRewardedAdsComplete:
+                    case InterResetType.OnRewardedAdsComplete:
                         callback += ResetIntersitialInterval;
                         break;
                 }

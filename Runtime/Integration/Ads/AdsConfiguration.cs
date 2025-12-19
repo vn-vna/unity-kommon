@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -15,10 +16,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         [SerializeField]
         private InterResetType interAdsIntervalResetType = InterResetType.OnRewardedAdsComplete;
 
-        public enum InterResetType
-        {
-            OnRewardedAdsShow,
-            OnRewardedAdsComplete
-        }
+    }
+
+    [Serializable]
+    public enum InterResetType
+    {
+        OnRewardedAdsShow,
+        OnRewardedAdsComplete
     }
 }
