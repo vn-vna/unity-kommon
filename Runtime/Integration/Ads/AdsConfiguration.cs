@@ -14,14 +14,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private float showInterstitialAdsInterval = 120.0f;
 
         [SerializeField]
-        private InterResetType interAdsIntervalResetType = InterResetType.OnRewardedAdsComplete;
+        private InterResetType interAdsIntervalResetType = InterResetType.OnAdsComplete;
 
     }
 
     [Serializable]
     public enum InterResetType
     {
-        OnRewardedAdsShow,
-        OnRewardedAdsComplete
+        OnAdsShow,
+        OnAdsComplete
     }
 }

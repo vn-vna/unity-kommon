@@ -165,8 +165,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             if (_provider != null)
             {
+                switch (overrideConfig.InterAdsIntervalResetType)
+                {
+                    case InterResetType.OnAdsShow:
+                        ResetIntersitialInterval();
+                        break;
+                    case InterResetType.OnAdsComplete:
+                        callback += ResetIntersitialInterval;
+                        break;
+                }
                 _provider.ShowInterstitialAds(callback, placement);
-                ResetIntersitialInterval();
                 ++InterstitialAdCount;
             }
             else
@@ -183,10 +191,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             {
                 switch (overrideConfig.InterAdsIntervalResetType)
                 {
-                    case InterResetType.OnRewardedAdsShow:
+                    case InterResetType.OnAdsShow:
                         ResetIntersitialInterval();
                         break;
-                    case InterResetType.OnRewardedAdsComplete:
+                    case InterResetType.OnAdsComplete:
                         callback += ResetIntersitialInterval;
                         break;
                 }
