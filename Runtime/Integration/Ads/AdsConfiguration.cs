@@ -7,7 +7,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
     {
         public float ShowInterstitialAdsInterval => showInterstitialAdsInterval;
 
+        public InterResetType InterAdsIntervalResetType => interAdsIntervalResetType;
+
         [SerializeField]
         private float showInterstitialAdsInterval = 120.0f;
+
+        [SerializeField]
+        private InterResetType interAdsIntervalResetType = InterResetType.OnRewardedAdsComplete;
+
+        public enum InterResetType
+        {
+            OnRewardedAdsShow,
+            OnRewardedAdsComplete
+        }
     }
 }
