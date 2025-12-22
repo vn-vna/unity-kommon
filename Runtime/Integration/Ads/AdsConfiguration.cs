@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -7,7 +8,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
     {
         public float ShowInterstitialAdsInterval => showInterstitialAdsInterval;
 
+        public InterResetType InterAdsIntervalResetType => interAdsIntervalResetType;
+
         [SerializeField]
         private float showInterstitialAdsInterval = 120.0f;
+
+        [SerializeField]
+        private InterResetType interAdsIntervalResetType = InterResetType.OnAdsComplete;
+
+    }
+
+    [Serializable]
+    public enum InterResetType
+    {
+        OnAdsShow,
+        OnAdsComplete
     }
 }

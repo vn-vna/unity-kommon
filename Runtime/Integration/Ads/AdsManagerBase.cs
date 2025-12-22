@@ -29,6 +29,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
         public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
+        public float InterstitialTimer {get { return _interstitialTimer; } set { _interstitialTimer = value; } }
         #endregion
 
         #region Serialized Fields
@@ -164,8 +165,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             if (_provider != null)
             {
+                switch (overrideConfig.InterAdsIntervalResetType)
+                {
+                    case InterResetType.OnAdsShow:
+                        ResetIntersitialInterval();
+                        break;
+                    case InterResetType.OnAdsComplete:
+                        callback += ResetIntersitialInterval;
+                        break;
+                }
                 _provider.ShowInterstitialAds(callback, placement);
-                ResetIntersitialInterval();
                 ++InterstitialAdCount;
             }
             else
@@ -180,8 +189,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             if (_provider != null)
             {
+                switch (overrideConfig.InterAdsIntervalResetType)
+                {
+                    case InterResetType.OnAdsShow:
+                        ResetIntersitialInterval();
+                        break;
+                    case InterResetType.OnAdsComplete:
+                        callback += ResetIntersitialInterval;
+                        break;
+                }
                 _provider.ShowRewardAds(callback, placement);
-                ResetIntersitialInterval();
                 ++RewardAdCount;
             }
             else
@@ -214,7 +231,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         protected void ResetIntersitialInterval()
         {
+            QuickLog.Debug<AdsManagerBase<T>>("Resetting interstitial ads interval timer.");
             _interstitialTimer = 0.0f;
+        }
+
+        protected void ResetIntersitialInterval(bool adsAvailable)
+        {
+            ResetIntersitialInterval();
         }
 
         #endregion
