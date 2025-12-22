@@ -38,7 +38,8 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
                 {
                     Action action;
                     action = _actions.Dequeue();
-                    action?.Invoke();
+
+                    TryDispatchAction(action);
                 }
             }
         }
@@ -47,7 +48,23 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         {
             lock (this)
             {
+                _actions ??= new Queue<Action>();
                 _actions.Enqueue(action);
+            }
+        }
+
+        private void TryDispatchAction(Action action)
+        {
+            try
+            {
+                action?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                QuickLog.SError(
+                    "Exception occurred while dispatching action on main thread: {0}",
+                    ex
+                );
             }
         }
 

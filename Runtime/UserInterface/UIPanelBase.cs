@@ -79,6 +79,12 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         [SerializeField]
         protected float autoDisposeDelay = 30f;
+
+        [SerializeField]
+        protected float showAnimationDelay = 0.0f;
+
+        [SerializeField]
+        protected float hideAnimationDelay = 0.0f;
         #endregion
 
         #region Private Fields
@@ -142,7 +148,8 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             _animationTween = DOTween.Sequence()
                 .SetId(this)
                 .OnStart(HandleShowStarted)
-                .Join(backgroundShowAnimation)
+                .AppendInterval(showAnimationDelay)
+                .Append(backgroundShowAnimation)
                 .Join(contentShowAnimation)
                 .OnComplete(() => HandleShowEnded(callback));
 
@@ -193,7 +200,8 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             _animationTween = DOTween.Sequence()
                 .SetId(this)
                 .OnStart(HandleHideStarted)
-                .Join(backgroundHideAnimation)
+                .AppendInterval(hideAnimationDelay)
+                .Append(backgroundHideAnimation)
                 .Join(contentHideAnimation)
                 .OnComplete(() => HandleHideEnded(callback));
 
