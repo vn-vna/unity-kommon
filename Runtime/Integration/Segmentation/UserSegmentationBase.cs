@@ -67,7 +67,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             }
 
             _userSegmentation = LocalFileHandler.Load<SegmentationInformation>(SegmentationSaveKey);
-            DetermineUserSegmention(_userSegmentation);
+            DetermineUserSegmentation(_userSegmentation);
             SegmentationDataUpdated();
             _firstSegmentDetermined = true;
             yield return null;
@@ -91,7 +91,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             );
 
             _userSegmentation = info;
-            DetermineUserSegmention(info);
+            DetermineUserSegmentation(info);
             SegmentationDataUpdated();
             _firstSegmentDetermined = true;
 
@@ -122,7 +122,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             }
         }
 
-        private void DetermineUserSegmention(SegmentationInformation info)
+        private void DetermineUserSegmentation(SegmentationInformation info)
         {
             SegmentationDeclaration matched = null;
             foreach (SegmentationDeclaration declaration in configuration.Declarations)

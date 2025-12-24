@@ -48,13 +48,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
                 module.Initialize();
             }
 
-            while (Status == CurrencyConverterStatus.Initializing)
+            while (true)
             {
-                bool anyInitialied = false;
+                bool anyInitialized = false;
                 foreach (var module in _modules)
                 {
-                    anyInitialied |= module.IsInitialized;
-                    if (anyInitialied) break;
+                    anyInitialized |= module.IsInitialized;
+                    if (anyInitialized) break;
+                }
+
+                if (anyInitialized)
+                {
+                    break;
                 }
 
                 yield return null;
