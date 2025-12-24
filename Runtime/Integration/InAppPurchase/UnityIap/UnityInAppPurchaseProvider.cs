@@ -92,7 +92,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
                 lock (this)
                 {
-                    _storeConnected = true;
+                    _storeConnected ??= true;
                 }
 
                 QuickLog.Info<UnityInAppPurchaseProvider>(
@@ -177,7 +177,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 RefreshProductCatalog();
             }
 
-            _storeController.FetchProducts(_productDefinitions);
+            try
+            {
+                _storeController.FetchProducts(
+                    _productDefinitions, 
+                    new ExponentialBackOffRetryPolicy()
+                );
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<UnityInAppPurchaseProvider>(
+                    "Failed to initiate product fetch: {0}",
+                    ex.Message
+                );
+            }
+
         }
 
         private void RefreshProductCatalog()
