@@ -58,6 +58,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private Action<bool> _interstitialCallback;
         private Action<bool> _rewardedCallback;
         private float _timer;
+        private bool _bannerAutoRefreshing;
 
         #endregion
 
@@ -483,6 +484,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadBannerAds()
         {
+            if (_bannerAutoRefreshing)
+            {
+                return;
+            }
+
             if (IsBannerAvailable)
             {
                 return;
@@ -496,6 +502,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             try
             {
                 MaxSdk.LoadBanner(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.StartBannerAutoRefresh(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
+                _bannerAutoRefreshing = true;
                 SendTrackingAction("AdsBanner", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Banner Ad");
             }
