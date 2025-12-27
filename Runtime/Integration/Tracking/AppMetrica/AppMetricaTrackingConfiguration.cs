@@ -24,6 +24,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         }
 
         public float IapMultiplier => iapMultiplier;
+        public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
 
         [SerializeField]
         [FormerlySerializedAs("apiKey")]
@@ -34,5 +35,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private float iapMultiplier;
+
+        [SerializeField]
+        private ActionSeverity minimumActionSeverity = ActionSeverity.Info;
     }
 }

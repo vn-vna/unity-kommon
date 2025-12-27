@@ -19,6 +19,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public List<ITrackingProvider> Providers => _providers;
         #endregion
 
+        #region Serialized Fields
+        [SerializeField]
+        private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
+        #endregion
+
         #region Private Fields
         private List<ITrackingProvider> _providers;
         private Queue<Action> _pendingActions;
@@ -173,10 +178,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if (info.Severity < minimumActionSeverity)
+            {
+                QuickLog.Info<TrackingManagerBase<T>>(
+                    $"Action severity {info.Severity} is below minimum {minimumActionSeverity}. Skipping."
+                );
+                return;
+            }
+
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
+                if (info.Severity < provider.MinimumActionSeverity) continue;
 
                 provider.TrackAction(info);
             }

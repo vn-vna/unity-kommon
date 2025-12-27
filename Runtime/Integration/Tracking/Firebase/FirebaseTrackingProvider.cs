@@ -18,6 +18,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool IsTrackingEnabled { get; private set; }
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
         public int Priority => 0;
+        public ActionSeverity MinimumActionSeverity => _configuration.MinimumActionSeverity;
 
         private FirebaseTrackingConfiguration _configuration;
 

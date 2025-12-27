@@ -27,6 +27,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         private AdjustConfig _config;
         private int _initializationAttempts = 0;
+        public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
 
         public AdjustTrackingProvider(AdjustConfiguration configuration)
         {

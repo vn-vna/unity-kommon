@@ -340,7 +340,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     },
                     Parameters = new Dictionary<string, object> {
                         { "placement", placement }
-                    }
+                    },
+                    Severity = ActionSeverity.Debug
                 });
         }
 
@@ -521,7 +522,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             Integration.TrackingManager
                 ?.TrackAction(new TrackingActionInfo
                 {
-                    ActionId = $"{kind}_{action}"
+                    ActionId = $"{kind}_{action}",
+                    Severity = ActionSeverity.Debug,
                 });
         }
 

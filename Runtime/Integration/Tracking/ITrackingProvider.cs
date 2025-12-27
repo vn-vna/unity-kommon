@@ -9,6 +9,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         bool IsTrackingEnabled { get; }
         TrackingProviderFeatures Features { get; }
         int Priority { get; }
+        ActionSeverity MinimumActionSeverity { get; }
 
         void Initialize();
         void CleanUp();

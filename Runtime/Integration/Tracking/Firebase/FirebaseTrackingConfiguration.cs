@@ -31,11 +31,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     {
         public FirebaseRevenueTrackingEvent[] RevenueTrackingConfig => adsRevenueTrackingConfig;
         public float IapMultiplier => iapMultiplier;
+        public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
 
         [SerializeField]
         private FirebaseRevenueTrackingEvent[] adsRevenueTrackingConfig;
 
         [SerializeField]
         private float iapMultiplier = 0.7f;
+
+        [SerializeField]
+        private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
     }
 }

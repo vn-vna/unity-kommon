@@ -21,6 +21,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
         public AppMetricaTrackingConfiguration Configuration { get; private set; }
         public int Priority => 1;
+        public ActionSeverity MinimumActionSeverity => Configuration.MinimumActionSeverity;
         public bool IsFirstSession
         {
             get
