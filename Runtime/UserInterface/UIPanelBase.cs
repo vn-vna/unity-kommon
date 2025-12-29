@@ -109,6 +109,8 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #region Public Methods
         public virtual void Show(bool immediate = false, Action callback = null)
         {
+            if (!Canvas.enabled) Canvas.enabled = true;
+
             _animationTween?.Kill(complete: true);
 
             gameObject.SetActive(true);
