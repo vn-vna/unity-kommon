@@ -34,6 +34,11 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #endregion
 
         #region Unity Methods
+        private void Awake()
+        {
+            Image.color = Color.clear;
+        }
+
         private void OnDestroy()
         {
             DOTween.Kill(this);

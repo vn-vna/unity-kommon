@@ -201,7 +201,6 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             newPanelInstance.ResetTransform();
             newPanelInstance.RectTransform.localScale = Vector3.one;
             newPanelInstance.Canvas.overrideSorting = true;
-            newPanelInstance.Canvas.enabled = false;
             _panelInstances[panelType] = new UIPanelInstanceInfo
             {
                 Panel = newPanelInstance,

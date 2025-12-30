@@ -13,10 +13,12 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         SingletonBehavior<Dispatcher>
     {
         private Queue<Action> _actions;
+        private Dictionary<Type, ICommandQueue> _commandQueues;
 
         protected override void Awake()
         {
             _actions = new Queue<Action>();
+            _commandQueues = new Dictionary<Type, ICommandQueue>();
             base.Awake();
         }
 
@@ -41,6 +43,65 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
 
                     TryDispatchAction(action);
                 }
+            }
+
+            foreach (KeyValuePair<Type, ICommandQueue> queuePair in _commandQueues)
+            {
+                var commandQueue = queuePair.Value;
+                commandQueue.ResolveCommands();
+            }
+        }
+
+        public void RegisterCommandQueue<TQueue>(TQueue queue)
+            where TQueue : ICommandQueue
+        {
+            var type = typeof(TQueue);
+            if (!_commandQueues.ContainsKey(type))
+            {
+                _commandQueues[type] = queue;
+            }
+        }
+
+        public TQueue GetCommandQueue<TQueue>()
+            where TQueue : ICommandQueue, new()
+        {
+            var type = typeof(TQueue);
+            if (!_commandQueues.TryGetValue(type, out var queue))
+            {
+                queue = new TQueue();
+                _commandQueues[type] = queue;
+            }
+
+            return (TQueue)queue;
+        }
+
+        public bool HasCommandQueue<TQueue>()
+            where TQueue : ICommandQueue
+        {
+            var type = typeof(TQueue);
+            return _commandQueues.ContainsKey(type);
+        }
+
+        public void RemoveCommandQueue<TQueue>()
+            where TQueue : ICommandQueue
+        {
+            var type = typeof(TQueue);
+            if (_commandQueues.ContainsKey(type))
+            {
+                _commandQueues.Remove(type);
+            }
+        }
+
+        public void ClearCommandQueues()
+        {
+            _commandQueues.Clear();
+        }
+
+        public void ClearActions()
+        {
+            lock (this)
+            {
+                _actions.Clear();
             }
         }
 

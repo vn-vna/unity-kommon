@@ -97,6 +97,12 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #endregion
 
         #region Unity Methods
+        protected virtual void Awake()
+        {
+            Canvas.enabled = false;
+            ResetTransform();
+        }
+
         private void Start()
         { }
 
