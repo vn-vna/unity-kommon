@@ -628,12 +628,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Displayed");
-            _intersitialFulfilled = false;
+            _intersitialFulfilled = true;
         }
 
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Clicked");
+            _intersitialFulfilled = true;
         }
 
         private void HandleInterstitialAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)

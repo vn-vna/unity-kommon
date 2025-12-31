@@ -106,7 +106,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             ResetTransform();
         }
 
-        private void Start()
+        protected virtual void Start()
         {
             _isReady = true;
         }

@@ -1,103 +1,215 @@
 using System;
 using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Hapiga.Scheherazade.Common.Singleton;
 
 namespace Com.Hapiga.Scheherazade.Common
 {
-    public interface ICommand
+    public class CommandInfoAttribute : Attribute
     {
-        Type QueueType { get; }
-        void Execute(ICommandQueue queue);
+        public string CommandId { get; set; }
     }
 
-    public interface ICommand<TQueue> : ICommand
-        where TQueue : ICommandQueue<TQueue>
+    public enum CommandStatus
     {
-        new Type QueueType => typeof(TQueue);
-        void Dispatch(TQueue queue) => queue.Enqueue(this);
+        NotReady,
+        Ready,
+        Executing,
+        Completed,
+        Failed
+    }
+
+    public interface IManagedCommand
+    {
+        Action<IManagedCommand> Started { get; set; }
+        Action<IManagedCommand> Completed { get; set; }
+        Action<IManagedCommand> Failed { get; set; }
+
+        CommandStatus Status { get; }
+        void Execute();
+    }
+
+    public interface IContextualCommand<TContext> : IManagedCommand
+    {
+        TContext Context { get; set; }
     }
 
     public interface ICommandQueue
     {
+        event Action<IManagedCommand> CommandStarted;
+        event Action<IManagedCommand> CommandCompleted;
+        event Action<IManagedCommand> CommandFailed;
+
+        void Enqueue(params IManagedCommand[] commands);
+        void Enqueue(IEnumerable<IManagedCommand> commands);
+        void Clear();
         void ResolveCommands();
     }
 
-    public interface ICommandQueue<TQueue> : ICommandQueue
-        where TQueue : ICommandQueue<TQueue>
+    public interface ICommandManager
     {
-        Queue<ICommand<TQueue>> Commands { get; }
-        LinkedList<ICommand<TQueue>> History { get; }
+        void RegisterCommandQueue<TQueue>(TQueue queue) where TQueue : ICommandQueue;
+        void UnregisterCommandQueue<TQueue>(TQueue queue) where TQueue : ICommandQueue;
 
-        void Enqueue(ICommand<TQueue> command);
+        void ClearAllQueues();
+        void ResolveAllQueues();
     }
 
-    public abstract class CommandQueue : ICommandQueue<CommandQueue>
+    public abstract class SimpleCommandQueue
+        : ICommandQueue
     {
-        public event Action<ICommand<CommandQueue>> CommandExecuted;
-        public event Action CommandResolutionStarted;
-        public event Action CommandResolutionCompleted;
+        public event Action<IManagedCommand> CommandStarted;
+        public event Action<IManagedCommand> CommandCompleted;
+        public event Action<IManagedCommand> CommandFailed;
 
-        public Queue<ICommand<CommandQueue>> Commands { get; private set; }
+        protected LinkedList<IManagedCommand> Commands => _commands;
+        protected IManagedCommand CurrentCommand => _currentCommand;
+        protected int MaxCommandsPerCycle { get; set; } = 10;
 
-        public LinkedList<ICommand<CommandQueue>> History { get; private set; }
+        private readonly LinkedList<IManagedCommand> _commands;
+        private IManagedCommand _currentCommand;
 
-        public int MaxHistoryLength { get; set; } = 100;
-
-        public CommandQueue()
+        protected SimpleCommandQueue()
         {
-            Commands = new Queue<ICommand<CommandQueue>>();
-            History = new LinkedList<ICommand<CommandQueue>>();
+            _commands = new LinkedList<IManagedCommand>();
         }
 
-        public void Enqueue(ICommand<CommandQueue> command)
+        public void Clear()
         {
-            Commands.Enqueue(command);
+            _commands.Clear();
+        }
+
+        public void Enqueue(params IManagedCommand[] commands)
+        {
+            Enqueue((IEnumerable<IManagedCommand>)commands);
+        }
+
+        public void Enqueue(IEnumerable<IManagedCommand> commands)
+        {
+            foreach (var command in commands)
+            {
+                _commands.AddLast(command);
+            }
         }
 
         public void ResolveCommands()
         {
-            CommandResolutionCompleted?.Invoke();
-            while (Commands.Count > 0)
+            bool continueResolving = true;
+            int commandStartedCount = 0;
+
+            while (
+                continueResolving && 
+                commandStartedCount < MaxCommandsPerCycle
+            )
             {
-                var command = Commands.Dequeue();
+                if (_currentCommand == null && !FindNextCommand())
+                {
+                    break;
+                }
+
+                commandStartedCount++;
+
                 try
                 {
-                    HandleCommandExecution(command);
+                    continueResolving = HandleCurrentCommand();
                 }
-                catch (Exception e)
+                catch (Exception ex)
                 {
-                    QuickLog.Error<ICommandQueue<CommandQueue>>(
-                        "Error executing command of type {0}: {1}",
-                        command.GetType().Name,
-                        e.Message
+                    continueResolving = false;
+                    QuickLog.Error<SimpleCommandQueue>(
+                        "Exception occurred while resolving command '{0}': {1}",
+                        _currentCommand.GetType().Name,
+                        ex
                     );
+                    NotifyCommandFailed();
                 }
             }
-            CommandResolutionStarted?.Invoke();
         }
 
-        private void HandleCommandExecution(ICommand<CommandQueue> command)
+        private bool HandleCurrentCommand()
         {
-            if (command == null) return;
-            if (command.QueueType != typeof(CommandQueue))
+            switch (_currentCommand.Status)
             {
-                QuickLog.Error<ICommandQueue<CommandQueue>>(
-                    "Cannot execute command of type {0} on queue of type {1}.",
-                    command.GetType().Name,
-                    typeof(CommandQueue).Name
-                );
-                return;
+                case CommandStatus.Ready:
+                    NotifyCommandStarted();
+                    _currentCommand.Execute();
+                    return true;
+
+                case CommandStatus.Completed:
+                    NotifyCommandCompleted();
+                    return true;
+
+                case CommandStatus.Failed:
+                    NotifyCommandFailed();
+                    return true;
             }
 
-            command.Execute(this);
-            History.AddLast(command);
-
-            if (History.Count > MaxHistoryLength)
-            {
-                History.RemoveFirst();
-            }
-
-            CommandExecuted?.Invoke(command);
+            return false;
         }
+
+        private void NotifyCommandFailed()
+        {
+            InvokeActionSafely(CommandFailed, _currentCommand);
+            InvokeActionSafely(_currentCommand.Failed, _currentCommand);
+            _currentCommand = null;
+        }
+
+        private void NotifyCommandCompleted()
+        {
+            InvokeActionSafely(CommandCompleted, _currentCommand);
+            InvokeActionSafely(_currentCommand.Completed, _currentCommand);
+            _currentCommand = null;
+        }
+
+        private void NotifyCommandStarted()
+        {
+            InvokeActionSafely(CommandStarted, _currentCommand);
+            InvokeActionSafely(_currentCommand.Started, _currentCommand);
+        }
+
+        private void InvokeActionSafely(Action<IManagedCommand> action, IManagedCommand command)
+        {
+            try
+            {
+                action?.Invoke(command);
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<SimpleCommandQueue>(
+                    "Exception occurred while invoking action for command '{0}': {1}",
+                    command.GetType().Name,
+                    ex
+                );
+            }
+        }
+
+        private bool FindNextCommand()
+        {
+            if (_commands.Count == 0)
+            {
+                return false;
+            }
+
+            _currentCommand = _commands.First.Value;
+            _commands.RemoveFirst();
+            return true;
+        }
+    }
+
+    public class Commander :
+        SingletonBehavior<Commander>,
+        ICommandManager
+    {
+        public void ClearAllQueues()
+        { }
+
+        public void RegisterCommandQueue<TQueue>(TQueue queue) where TQueue : ICommandQueue
+        { }
+
+        public void ResolveAllQueues()
+        { }
+
+        public void UnregisterCommandQueue<TQueue>(TQueue queue) where TQueue : ICommandQueue
+        { }
     }
 }
