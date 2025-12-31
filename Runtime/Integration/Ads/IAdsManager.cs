@@ -19,7 +19,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         void ShowBanner();
         void HideBanner();
-        void ShowInterstitialAds(Action<bool> callback, string placement);
+        void ShowInterstitialAds(Action<bool> callback, string placement, bool force = false);
         void ShowRewardAds(Action<bool> callback, string placement);
         void ShowAppOpenAds(Action<bool> callback, string placement);
     }

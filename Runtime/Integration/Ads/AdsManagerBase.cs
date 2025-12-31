@@ -29,6 +29,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
         public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
+        public bool IsIntersitialAdsWillShow =>
+            _interstitialTimer >= ShowInterstitialAdsInterval;
         #endregion
 
         #region Serialized Fields
@@ -153,9 +155,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
         }
 
-        public virtual void ShowInterstitialAds(Action<bool> callback, string placement)
+        public virtual void ShowInterstitialAds(Action<bool> callback, string placement, bool force = false)
         {
-            if (_interstitialTimer < ShowInterstitialAdsInterval)
+            if (_interstitialTimer < ShowInterstitialAdsInterval && !force)
             {
                 Debug.Log($"Interstitial ad request ignored. Interval not met. {_interstitialTimer}/{ShowInterstitialAdsInterval}");
                 callback?.Invoke(false);
