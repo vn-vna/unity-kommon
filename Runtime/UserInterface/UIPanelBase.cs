@@ -38,6 +38,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         public UIPanelContentBase Content => content;
         public bool AutoDisposeOnHide => autoDisposeOnHide;
         public float AutoDisposeDelay => autoDisposeDelay;
+        public bool IsPanelReady => _isReady;
         #endregion
 
         #region Serialized Fields
@@ -89,6 +90,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         #region Private Fields
         private Sequence _animationTween;
+        private bool _isReady = false;
         #endregion
 
         #region CTor
@@ -99,12 +101,15 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #region Unity Methods
         protected virtual void Awake()
         {
+            _isReady = true;
             Canvas.enabled = false;
             ResetTransform();
         }
 
         private void Start()
-        { }
+        {
+            _isReady = true;
+        }
 
         private void OnDestroy()
         {
