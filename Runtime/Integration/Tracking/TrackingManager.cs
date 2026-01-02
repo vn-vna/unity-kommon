@@ -186,6 +186,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            QuickLog.Debug<TrackingManagerBase<T>>(
+                "Tracking action: [ActionId = {0}, Severity = {1}], Parameters = {2}",
+                info.ActionId, info.Severity,
+                (Func<object>)(() =>
+                {
+                    if (info.Parameters == null) return "null";
+                    return "{" + string.Join(", ",
+                        info.Parameters.Select(kv => $"{kv.Key} = {kv.Value}")) + "}";
+                })
+            );
+
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
@@ -201,6 +212,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 #if TRACKING_AD_REVENUE_FILTERED
             QuickLog.Warning<TrackingManagerBase<T>>(
                 "Ad revenue tracking is disabled via compile-time flag. Skipping."
+            );
+            QuickLog.Debug<TrackingManagerBase<T>>(
+                "AdTrackingInfo: [Network = {0}, Placement = {1}, Revenue = {2}, Currency = {3}]",
+                info.NetworkName, info.Placement,
+                info.Revenue, info.RevenueUnit
             );
             return;
 #else
@@ -238,6 +254,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 #if TRACKING_PURCHASE_REVENUE_FILTERED
             QuickLog.Warning<TrackingManagerBase<T>>(
                 "Purchase revenue tracking is disabled via compile-time flag. Skipping."
+            );
+            QuickLog.Debug<TrackingManagerBase<T>>(
+                "PurchaseTrackingInfo: [Id = {0}, ProductId = {1}, Price = {2}, Currency = {3}]",
+                info.TransactionId, info.ProductId,
+                info.Price, info.Currency
             );
             return;
 #else
