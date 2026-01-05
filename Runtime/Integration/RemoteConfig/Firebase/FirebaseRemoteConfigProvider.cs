@@ -8,6 +8,7 @@ using Com.Hapiga.Scheherazade.Common.LocalSave;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using Firebase.RemoteConfig;
+using Newtonsoft.Json.Linq;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 {
@@ -114,45 +115,26 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private static async Task TryApplyCachedDefaults(Dictionary<string, object> defaults)
         {
             string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
-            string[] cachedConfig = await File.ReadAllLinesAsync(path);
+            string json = await File.ReadAllTextAsync(path);
+            JObject jObject = JObject.Parse(json);
 
-            foreach (string line in cachedConfig)
+            List<string> keys = new List<string>(defaults.Keys);
+            foreach (string key in keys)
             {
-                string[] tokens = line.Split('=', StringSplitOptions.RemoveEmptyEntries);
-                if (tokens.Length != 2) continue;
-                string key = tokens[0].Trim();
-                string value = tokens[1].Trim();
-
-                if (defaults.ContainsKey(key))
+                switch (defaults[key])
                 {
-                    var defaultValue = defaults[key];
-                    switch (defaultValue)
-                    {
-                        case string:
-                            defaults[key] = value;
-                            break;
-
-                        case bool:
-                            if (bool.TryParse(value, out bool boolValue))
-                            {
-                                defaults[key] = boolValue;
-                            }
-                            break;
-
-                        case int _:
-                            if (int.TryParse(value, out int intValue))
-                            {
-                                defaults[key] = intValue;
-                            }
-                            break;
-
-                        case float _:
-                            if (float.TryParse(value, out float floatValue))
-                            {
-                                defaults[key] = floatValue;
-                            }
-                            break;
-                    }
+                    case string:
+                        defaults[key] = jObject[key]?.ToString() ?? defaults[key];
+                        break;
+                    case bool:
+                        defaults[key] = jObject[key]?.ToObject<bool>() ?? defaults[key];
+                        break;
+                    case int:
+                        defaults[key] = jObject[key]?.ToObject<int>() ?? defaults[key];
+                        break;
+                    case float:
+                        defaults[key] = jObject[key]?.ToObject<float>() ?? defaults[key];
+                        break;
                 }
             }
         }
@@ -271,22 +253,26 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private async Task CacheRemoteConfig()
         {
             string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
-            List<string> lines = new List<string>();
+            JObject jObject = new JObject();
             foreach ((string key, FirebaseRemoteValueType type) in _cachedKeys)
             {
-                ConfigValue v = FirebaseRemoteConfig.DefaultInstance.GetValue(key);
-                string valueStr = type switch
+                switch (type)
                 {
-                    FirebaseRemoteValueType.String => v.StringValue,
-                    FirebaseRemoteValueType.Boolean => v.BooleanValue.ToString(),
-                    FirebaseRemoteValueType.Integer => v.LongValue.ToString(),
-                    FirebaseRemoteValueType.Float => v.DoubleValue.ToString(),
-                    _ => string.Empty
-                };
-                lines.Add($"{key}={valueStr}");
+                    case FirebaseRemoteValueType.String:
+                        jObject[key] = FirebaseRemoteConfig.DefaultInstance.GetValue(key).StringValue;
+                        break;
+                    case FirebaseRemoteValueType.Boolean:
+                        jObject[key] = FirebaseRemoteConfig.DefaultInstance.GetValue(key).BooleanValue;
+                        break;
+                    case FirebaseRemoteValueType.Integer:
+                        jObject[key] = FirebaseRemoteConfig.DefaultInstance.GetValue(key).LongValue;
+                        break;
+                    case FirebaseRemoteValueType.Float:
+                        jObject[key] = FirebaseRemoteConfig.DefaultInstance.GetValue(key).DoubleValue;
+                        break;
+                }
             }
-
-            await File.WriteAllLinesAsync(path, lines);
+            await File.WriteAllTextAsync(path, jObject.ToString());
         }
 
         private void HandleConfigCachedTaskCompleted(Task task)

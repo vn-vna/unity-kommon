@@ -25,16 +25,11 @@ namespace Com.Hapiga.Scheherazade.Economy
         #endregion
 
         #region Interfaces & Properties
-
-        public TransactionDatabase TransactionDatabase => transactionDatabase;
         public abstract IInventoryManager InventoryManager { get; }
 
         #endregion
 
         #region Serialized Fields
-
-        [SerializeField]
-        private TransactionDatabase transactionDatabase;
 
         #endregion
 

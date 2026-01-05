@@ -1,9 +1,7 @@
-using Com.Hapiga.Scheherazade.Common.LocalSave;
 using System;
 using System.IO;
-
+using Com.Hapiga.Scheherazade.Common.LocalSave;
 using Com.Hapiga.Scheherazade.Common.Logging;
-
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.LocalSave
@@ -20,17 +18,21 @@ namespace Com.Hapiga.Scheherazade.Common.LocalSave
                 if (!Directory.Exists(FolderPath))
                     Directory.CreateDirectory(FolderPath);
 
-                string json = VersionedData<T>.Serialize(data, true);
+                bool prettyPrint = true;
+#if PRODUCTION_BUILD
+                prettyPrint = false;
+#endif
+                string json = VersionedData<T>.Serialize(data, prettyPrint);
                 File.WriteAllText(GetFilePath(fileName), json);
                 QuickLog.Info<LocalFileHandler>(
-                    "Saved '{0}' to: {1}", 
+                    "Saved '{0}' to: {1}",
                     fileName, GetFilePath(fileName)
                 );
             }
             catch (Exception e)
             {
                 QuickLog.Error<LocalFileHandler>(
-                    "Failed to save {0}: {1}", 
+                    "Failed to save {0}: {1}",
                     fileName, e
                 );
             }
