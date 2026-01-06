@@ -102,19 +102,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public void RegisterProvider(ITrackingProvider provider)
         {
             if (provider == null) throw new ArgumentNullException(nameof(provider));
-            
-            // Check if a provider of the same type is already registered
-            foreach (var existingProvider in _providers)
-            {
-                if (existingProvider.GetType() == provider.GetType())
-                {
-                    QuickLog.Warning<TrackingManagerBase<T>>(
-                        "Tracking provider of type {0} is already registered. Skipping.",
-                        provider.GetType().Name
-                    );
-                    return;
-                }
-            }
+            if (_providers.Contains(provider)) return;
 
             provider.TrackingManager = this;
             _providers.Add(provider);
@@ -178,11 +166,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 }
                 else
                 {
-                    // Ensure queue exists for this provider
-                    if (!_queues.ContainsKey(provider))
-                    {
-                        _queues[provider] = new Queue<Action<ITrackingProvider>>();
-                    }
                     _queues[provider].Enqueue(action);
                 }
             }
@@ -190,8 +173,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         private void FlushQueue(ITrackingProvider provider, int budget)
         {
-            if (!_queues.TryGetValue(provider, out var queue)) return;
-            
+            var queue = _queues[provider];
             while (queue.Count > 0 && budget-- > 0)
             {
                 var action = queue.Dequeue();
