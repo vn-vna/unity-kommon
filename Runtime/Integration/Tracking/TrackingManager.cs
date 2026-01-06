@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -16,7 +16,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #region Interfaces & Properties
         public bool AllowTracking { get; set; }
         public TrackingManagerStatus Status { get; private set; }
-        public List<ITrackingProvider> Providers => _providers;
+        public IReadOnlyList<ITrackingProvider> Providers => _providers;
         #endregion
 
         #region Serialized Fields
@@ -25,55 +25,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #endregion
 
         #region Private Fields
-        private List<ITrackingProvider> _providers;
-        private Queue<Action> _pendingActions;
-        private float _timer;
+        private readonly List<ITrackingProvider> _providers = new();
+        private readonly Dictionary<ITrackingProvider, Queue<Action<ITrackingProvider>>> _queues = new();
         #endregion
 
-        #region Constructors
-        public TrackingManagerBase()
-        {
-            _providers = new List<ITrackingProvider>();
-            _pendingActions = new Queue<Action>();
-            Status = TrackingManagerStatus.Uninitialized;
-        }
-        #endregion
-
-        #region Unity Callbacks
+        #region Unity
         protected override void Awake()
         {
             base.Awake();
             Integration.RegisterManager(this);
-            _providers.Clear();
+            Status = TrackingManagerStatus.Uninitialized;
         }
 
         private void Update()
         {
-            if (Status != TrackingManagerStatus.Ready) return;
-
-            while (_pendingActions.Count > 0)
+            foreach (var provider in _providers)
             {
-                Action action = _pendingActions.Dequeue();
-                action?.Invoke();
+                if (!provider.IsInitialized) continue;
+                FlushQueue(provider, budget: 5);
             }
         }
         #endregion
 
-        #region Public Methods
-        public void Initialize(float timeOut)
+        #region Initialization
+        public void Initialize(float timeOut = float.MaxValue)
         {
             StartCoroutine(InitializeCoroutine(timeOut));
-        }
-
-        public void Shutdown()
-        {
-            foreach (ITrackingProvider provider in _providers)
-            {
-                if (!provider.IsInitialized) continue;
-                provider.CleanUp();
-            }
-
-            Status = TrackingManagerStatus.Uninitialized;
         }
 
         public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
@@ -81,212 +58,127 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (!AllowTracking)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping initialization."
+                    "Tracking disabled. Initialization skipped."
                 );
-                Status = TrackingManagerStatus.Uninitialized;
                 yield break;
             }
 
             Status = TrackingManagerStatus.Initializing;
 
-            _providers.Sort((x, y) => x.Priority.CompareTo(y.Priority));
-            foreach (ITrackingProvider provider in _providers)
+            foreach (var provider in _providers.OrderBy(p => p.Priority))
             {
                 provider.Initialize();
             }
 
-            _timer = 0.0f;
-
-            while (true)
+            float timer = 0f;
+            while (timer < timeOut)
             {
                 if (_providers.Any(p => p.IsInitialized))
                 {
                     Status = TrackingManagerStatus.Ready;
                     yield break;
                 }
-
-                if (_timer > timeOut)
-                {
-                    QuickLog.Error<TrackingManagerBase<T>>(
-                        "Tracking initialization timed out."
-                    );
-                    Status = TrackingManagerStatus.Uninitialized;
-                    yield break;
-                }
-
-                _timer += Time.deltaTime;
+                timer += Time.deltaTime;
                 yield return null;
             }
+
+            QuickLog.Error<TrackingManagerBase<T>>("Tracking init timeout.");
+            Status = TrackingManagerStatus.Uninitialized;
         }
 
+        public void Shutdown()
+        {
+            foreach (var provider in _providers)
+            {
+                if (provider.IsInitialized)
+                    provider.CleanUp();
+            }
+            _queues.Clear();
+            Status = TrackingManagerStatus.Uninitialized;
+        }
+        #endregion
+
+        #region Provider Registration
         public void RegisterProvider(ITrackingProvider provider)
         {
             if (provider == null) throw new ArgumentNullException(nameof(provider));
-            foreach (ITrackingProvider existingProvider in _providers)
-            {
-                if (existingProvider.GetType() == provider.GetType())
-                {
-                    QuickLog.Warning<TrackingManagerBase<T>>(
-                        "Tracking provider of type {0} is already registered. Skipping.",
-                        provider.GetType().Name
-                    );
-                    return;
-                }
-            }
+            if (_providers.Contains(provider)) return;
 
             provider.TrackingManager = this;
             _providers.Add(provider);
+            _queues[provider] = new Queue<Action<ITrackingProvider>>();
         }
+        #endregion
 
+        #region Tracking APIs
         public void TrackScreen(string screenId)
         {
-            if (!AllowTracking)
+            Dispatch(provider =>
             {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping screen tracking."
-                );
-                return;
-            }
-
-            if (Status != TrackingManagerStatus.Ready)
-            {
-                _pendingActions.Enqueue(() => TrackScreen(screenId));
-                return;
-            }
-
-            foreach (ITrackingProvider provider in _providers)
-            {
-                if (!provider.IsTrackingEnabled) continue; 
-                if ((provider.Features & TrackingProviderFeatures.ScreenView) == 0) continue;
+                if ((provider.Features & TrackingProviderFeatures.ScreenView) == 0) return;
                 provider.TrackScreen(screenId);
-            }
+            });
         }
 
         public void TrackAction(TrackingActionInfo info)
         {
-            if (!AllowTracking)
+            if (info.Severity < minimumActionSeverity) return;
+
+            Dispatch(provider =>
             {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping screen tracking."
-                );
-                return;
-            }
-
-            if (Status != TrackingManagerStatus.Ready)
-            {
-                _pendingActions.Enqueue(() => TrackAction(info));
-                return;
-            }
-
-            if (info.Severity < minimumActionSeverity)
-            {
-                QuickLog.Info<TrackingManagerBase<T>>(
-                    $"Action severity {info.Severity} is below minimum {minimumActionSeverity}. Skipping."
-                );
-                return;
-            }
-
-            QuickLog.Debug<TrackingManagerBase<T>>(
-                "Tracking action: [ActionId = {0}, Severity = {1}], Parameters = {2}",
-                info.ActionId, info.Severity,
-                (Func<object>)(() =>
-                {
-                    if (info.Parameters == null) return "null";
-                    return "{" + string.Join(", ",
-                        info.Parameters.Select(kv => $"{kv.Key} = {kv.Value}")) + "}";
-                })
-            );
-
-            foreach (ITrackingProvider provider in _providers)
-            {
-                if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
-                if (info.Severity < provider.MinimumActionSeverity) continue;
-
+                if ((provider.Features & TrackingProviderFeatures.IngameAction) == 0) return;
+                if (info.Severity < provider.MinimumActionSeverity) return;
                 provider.TrackAction(info);
-            }
+            });
         }
 
         public void TrackAdRevenue(AdTrackingInfo info)
         {
-#if TRACKING_AD_REVENUE_FILTERED
-            QuickLog.Warning<TrackingManagerBase<T>>(
-                "Ad revenue tracking is disabled via compile-time flag. Skipping."
-            );
-            QuickLog.Debug<TrackingManagerBase<T>>(
-                "AdTrackingInfo: [Network = {0}, Placement = {1}, Revenue = {2}, Currency = {3}]",
-                info.NetworkName, info.Placement,
-                info.Revenue, info.RevenueUnit
-            );
-            return;
-#else
-
-            if (!AllowTracking)
+            Dispatch(provider =>
             {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping screen tracking."
-                );
-                return;
-            }
-
-            if (Status != TrackingManagerStatus.Ready)
-            {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking manager is not ready. Queuing ad revenue tracking."
-                );
-
-                _pendingActions.Enqueue(() => TrackAdRevenue(info));
-                return;
-            }
-
-            foreach (ITrackingProvider provider in _providers)
-            {
-                if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.AdRevenue) == 0) continue;
-
+                if ((provider.Features & TrackingProviderFeatures.AdRevenue) == 0) return;
                 provider.TrackAdRevenue(info);
-            }
-#endif
+            });
         }
 
         public void TrackPurchaseRevenue(PurchaseTrackingInfo info)
         {
-#if TRACKING_PURCHASE_REVENUE_FILTERED
-            QuickLog.Warning<TrackingManagerBase<T>>(
-                "Purchase revenue tracking is disabled via compile-time flag. Skipping."
-            );
-            QuickLog.Debug<TrackingManagerBase<T>>(
-                "PurchaseTrackingInfo: [Id = {0}, ProductId = {1}, Price = {2}, Currency = {3}]",
-                info.TransactionId, info.ProductId,
-                info.Price, info.Currency
-            );
-            return;
-#else
-            if (!AllowTracking)
+            Dispatch(provider =>
             {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping screen tracking."
-                );
-                return;
-            }
-
-            if (Status != TrackingManagerStatus.Ready)
-            {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking manager is not ready. Queuing purchase revenue tracking."
-                );
-
-                _pendingActions.Enqueue(() => TrackPurchaseRevenue(info));
-                return;
-            }
-
-            foreach (ITrackingProvider provider in _providers)
-            {
-                if (!provider.IsTrackingEnabled) continue; 
-                if ((provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) continue;
+                if ((provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) return;
                 provider.TrackPurchaseRevenue(info);
+            });
+        }
+        #endregion
+
+        #region Core Dispatch Logic
+        private void Dispatch(Action<ITrackingProvider> action)
+        {
+            if (!AllowTracking) return;
+
+            foreach (var provider in _providers)
+            {
+                if (!provider.IsTrackingEnabled) continue;
+
+                if (provider.IsInitialized)
+                {
+                    action(provider);
+                }
+                else
+                {
+                    _queues[provider].Enqueue(action);
+                }
             }
-#endif
+        }
+
+        private void FlushQueue(ITrackingProvider provider, int budget)
+        {
+            var queue = _queues[provider];
+            while (queue.Count > 0 && budget-- > 0)
+            {
+                var action = queue.Dequeue();
+                action(provider);
+            }
         }
         #endregion
     }
