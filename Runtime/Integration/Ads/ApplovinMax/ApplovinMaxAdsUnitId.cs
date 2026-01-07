@@ -1,5 +1,3 @@
-#if APPLOVIN_MAX
-
 using System;
 using UnityEngine;
 
@@ -31,5 +29,3 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private string iosUnitId;
     }
 }
-
-#endif
