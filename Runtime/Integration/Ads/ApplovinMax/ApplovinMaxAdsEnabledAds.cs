@@ -1,5 +1,3 @@
-#if APPLOVIN_MAX
-
 using System;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -14,5 +12,3 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         Rewarded = 1 << 3
     }
 }
-
-#endif
