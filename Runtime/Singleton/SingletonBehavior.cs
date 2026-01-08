@@ -6,12 +6,22 @@ using UnityEngine;
 namespace Com.Hapiga.Scheherazade.Common.Singleton
 {
 
+    [AttributeUsage(
+        AttributeTargets.Class,
+        Inherited = false,
+        AllowMultiple = false
+    )]
     public class DontDestroyOnLoadAttribute : Attribute
     {
         public DontDestroyOnLoadAttribute()
         { }
     }
 
+    [AttributeUsage(
+        AttributeTargets.Class,
+        Inherited = false,
+        AllowMultiple = false
+    )]
     public class AutoRegisterGlobalAttribute : Attribute
     {
         public Type ResgistrationHolder { get; }
