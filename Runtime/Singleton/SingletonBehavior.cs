@@ -67,51 +67,59 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
                 .ResgistrationHolder
                 .GetProperty(autoRegisterAttribute.RegistrationName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 
-            if (_registrationHolderProperty == null)
+            try
+            {
+                _registrationHolderProperty.SetValue(
+                    null,
+                    _instance
+                );
+
+#if !PRODUCTION_BUILD
+                Debug.Log(
+                    $"Auto-registering singleton {typeof(T).Name} " +
+                    $"to {autoRegisterAttribute.ResgistrationHolder.Name}.{autoRegisterAttribute.RegistrationName}."
+                );
+#endif
+            }
+            catch (Exception ex)
             {
                 Debug.LogError(
-                    $"Auto-registration failed for singleton {typeof(T).Name}. " +
-                    $"Property {autoRegisterAttribute.RegistrationName} not found on type {autoRegisterAttribute.ResgistrationHolder.Name}."
+                    $"Failed to auto-register singleton {typeof(T).Name} " +
+                    $"to {autoRegisterAttribute.ResgistrationHolder.Name}.{autoRegisterAttribute.RegistrationName}.\n" +
+                    $"Exception: {ex}"
                 );
-                return;
             }
-
-            _registrationHolderProperty.SetValue(
-                null,
-                _instance
-            );
-
-            Debug.Log(
-                $"Auto-registering singleton {typeof(T).Name} " +
-                $"to {autoRegisterAttribute.ResgistrationHolder.Name}.{autoRegisterAttribute.RegistrationName}."
-            );
 
         }
 
         protected virtual void OnDestroy()
         {
-            Debug.Log($"Destroying singleton instance of {typeof(T).Name}.");
-
-            if (_instance != null && _instance == this)
-            {
-                _instance = null;
-                Unregister();
-            }
+            if (_instance == null || _instance != this) return;
+            Unregister();
+            _instance = null;
         }
 
         private void Unregister()
         {
-            if (_registrationHolderProperty == null)
+            try
             {
-                return;
+                _registrationHolderProperty.SetValue(null, null);
+
+#if !PRODUCTION_BUILD
+                Debug.Log(
+                    $"Un-registering singleton {typeof(T).Name} " +
+                    $"from {_registrationHolderProperty.DeclaringType.Name}.{_registrationHolderProperty.Name}."
+                );
+#endif
             }
-
-            _registrationHolderProperty.SetValue(null, null);
-
-            Debug.Log(
-                $"Un-registering singleton {typeof(T).Name} " +
-                $"from {_registrationHolderProperty.DeclaringType.Name}.{_registrationHolderProperty.Name}."
-            );
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    $"Failed to un-register singleton {typeof(T).Name} " +
+                    $"from {_registrationHolderProperty.DeclaringType.Name}.{_registrationHolderProperty.Name}.\n" +
+                    $"Exception: {ex}"
+                );
+            }
         }
 
     }
