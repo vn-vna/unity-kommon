@@ -5,7 +5,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
     public interface ITrackingManager
     {
-        List<ITrackingProvider> Providers { get; }
+        IReadOnlyList<ITrackingProvider> Providers { get; }
         bool AllowTracking { get; set; }
         TrackingManagerStatus Status { get; }
         void Initialize(float timeOut);
