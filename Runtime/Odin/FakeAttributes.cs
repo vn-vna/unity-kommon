@@ -5,6 +5,17 @@ using UnityEngine;
 using System;
 #endif
 
+// <summary>
+// This file contains fake/stub implementations of Odin Inspector attributes.
+// These stubs allow code using Odin Inspector attributes to compile even when
+// Odin Inspector is not installed in the project. When Odin Inspector is present,
+// these fake attributes are replaced by the real implementations from Sirenix.OdinInspector.
+// 
+// Usage: Simply use Odin Inspector attributes in your code as normal. If Odin is not installed,
+// these stubs will be used and the attributes will have no effect. If Odin is installed,
+// the real attributes will provide full Inspector functionality.
+// </summary>
+
 #if !FAKE_ODIN_NAMESPACE && !ODIN_INSPECTOR
 namespace Com.Hapiga.Scheherazade.Common.OdinInspector
 #else
@@ -12,6 +23,9 @@ namespace Sirenix.OdinInspector
 #endif
 {
 #if !ODIN_INSPECTOR
+    /// <summary>
+    /// Fake stub for Odin Inspector's Button attribute.
+    /// </summary>
     [AttributeUsage(AttributeTargets.All, Inherited = true, AllowMultiple = true)]
     public class ButtonAttribute : Attribute
     {
@@ -19,6 +33,9 @@ namespace Sirenix.OdinInspector
         public ButtonAttribute(object size) { }
     }
 
+    /// <summary>
+    /// Fake stub for Odin Inspector's BoxGroup attribute.
+    /// </summary>
     [AttributeUsage(AttributeTargets.All, Inherited = true, AllowMultiple = true)]
     public class BoxGroupAttribute : Attribute
     {
