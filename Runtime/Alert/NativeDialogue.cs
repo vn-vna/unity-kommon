@@ -2,13 +2,42 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Alert
 {
-
+    /// <summary>
+    /// Provides native platform dialog functionality for displaying alerts to users.
+    /// </summary>
+    /// <remarks>
+    /// This class creates native Android dialogs when running on Android devices and falls back to
+    /// Unity Debug.Log for editor and other platforms. It manages callbacks for button interactions
+    /// through Unity's message system.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Show a simple alert
+    /// NativeDialogue.ShowSimpleAlert("Notice", "This is a simple alert message");
+    /// 
+    /// // Show an alert with custom buttons and callbacks
+    /// NativeDialogue.ShowAlert(
+    ///     "Confirm Action",
+    ///     "Are you sure you want to continue?",
+    ///     "Yes",
+    ///     "No",
+    ///     onPositive: () => Debug.Log("User clicked Yes"),
+    ///     onNegative: () => Debug.Log("User clicked No")
+    /// );
+    /// </code>
+    /// </example>
     public class NativeDialogue : MonoBehaviour
     {
         private static NativeDialogue instance;
 
-        // Callback events
+        /// <summary>
+        /// Event triggered when the positive button is clicked.
+        /// </summary>
         public System.Action OnPositiveButtonClicked;
+        
+        /// <summary>
+        /// Event triggered when the negative button is clicked.
+        /// </summary>
         public System.Action OnNegativeButtonClicked;
 
         void Awake()
@@ -82,7 +111,10 @@ namespace Com.Hapiga.Scheherazade.Common.Alert
 #endif
         }
 
-        // This method is called from Java via UnitySendMessage
+        /// <summary>
+        /// Callback method invoked from native Android code via UnitySendMessage.
+        /// </summary>
+        /// <param name="buttonType">The type of button clicked ("positive" or "negative").</param>
         void OnDialogCallback(string buttonType)
         {
             Debug.Log("Dialog callback received: " + buttonType);

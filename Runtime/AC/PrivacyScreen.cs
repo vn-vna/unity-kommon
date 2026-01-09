@@ -5,6 +5,24 @@ using UnityEngine;
 
 namespace Com.Hapiga.FallAway.AC
 {
+    /// <summary>
+    /// Provides privacy screen functionality for anti-cheat purposes by displaying a cover when the application loses focus.
+    /// </summary>
+    /// <remarks>
+    /// This component is a singleton that manages the display of a privacy cover on Android devices
+    /// to prevent screen recording or capturing of sensitive game data when the app is in the background.
+    /// Currently supports Android platform with iOS implementation pending.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // PrivacyScreen is automatically managed as a singleton
+    /// // Add to a GameObject in your scene:
+    /// GameObject privacyManager = new GameObject("PrivacyScreen");
+    /// privacyManager.AddComponent&lt;PrivacyScreen&gt;();
+    /// 
+    /// // The screen cover will automatically show/hide based on app focus
+    /// </code>
+    /// </example>
     [AddComponentMenu("Scheherazade/Anti Cheat/Privacy Screen")]
     public sealed class PrivacyScreen
         : SingletonBehavior<PrivacyScreen>
