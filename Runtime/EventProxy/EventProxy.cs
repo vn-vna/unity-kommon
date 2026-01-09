@@ -7,13 +7,39 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.EventProxy
 {
-
+    /// <summary>
+    /// Manages automatic event wiring between publisher and subscriber MonoBehaviours using reflection.
+    /// </summary>
+    /// <remarks>
+    /// This component scans publishers and subscribers for EventPublisher and EventSubscriber attributes,
+    /// then automatically connects matching events and methods. This provides a decoupled way to wire
+    /// events without hard-coding references. Events can be attached/detached dynamically.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Setup in Inspector or code
+    /// var proxy = gameObject.AddComponent&lt;EventProxy&gt;();
+    /// proxy.AddPublisher(myPublisher);
+    /// proxy.AddSubscriber(mySubscriber);
+    /// proxy.AttachAllEvents();
+    /// 
+    /// // Later, detach when done
+    /// proxy.DetatchAllEvents();
+    /// </code>
+    /// </example>
     [AddComponentMenu("Scheherazade/Event Proxy")]
     public class EventProxy : MonoBehaviour
     {
         #region Interfaces
 
+        /// <summary>
+        /// Gets the list of publisher MonoBehaviours.
+        /// </summary>
         public List<MonoBehaviour> Publishers => publishers;
+        
+        /// <summary>
+        /// Gets the list of subscriber MonoBehaviours.
+        /// </summary>
         public List<MonoBehaviour> Subscribers => subscribers;
 
         #endregion
@@ -63,6 +89,11 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
 
         #region Methods
 
+        /// <summary>
+        /// Adds a publisher to the event proxy.
+        /// </summary>
+        /// <typeparam name="T">The type of the publisher MonoBehaviour.</typeparam>
+        /// <param name="publisher">The publisher to add.</param>
         public void AddPublisher<T>(T publisher)
             where T : MonoBehaviour
         {
@@ -71,6 +102,11 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Removes a publisher from the event proxy.
+        /// </summary>
+        /// <typeparam name="T">The type of the publisher MonoBehaviour.</typeparam>
+        /// <param name="publisher">The publisher to remove.</param>
         public void RemovePublisher<T>(T publisher)
             where T : MonoBehaviour
         {
@@ -79,6 +115,11 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Adds a subscriber to the event proxy.
+        /// </summary>
+        /// <typeparam name="T">The type of the subscriber MonoBehaviour.</typeparam>
+        /// <param name="subscriber">The subscriber to add.</param>
         public void AddSubscriber<T>(T subscriber)
             where T : MonoBehaviour
         {
@@ -87,6 +128,11 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Removes a subscriber from the event proxy.
+        /// </summary>
+        /// <typeparam name="T">The type of the subscriber MonoBehaviour.</typeparam>
+        /// <param name="subscriber">The subscriber to remove.</param>
         public void RemoveSubscriber<T>(T subscriber)
             where T : MonoBehaviour
         {
@@ -95,18 +141,31 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Clears all publishers from the event proxy.
+        /// </summary>
         public void ClearAllPublishers()
         {
             publishers.Clear();
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Clears all subscribers from the event proxy.
+        /// </summary>
         public void ClearAllSubscribers()
         {
             subscribers.Clear();
             _requireScan = true;
         }
 
+        /// <summary>
+        /// Scans all publishers and subscribers to collect event and subscription information.
+        /// </summary>
+        /// <remarks>
+        /// This method uses reflection to find EventPublisher and EventSubscriber attributes,
+        /// then builds internal data structures for event wiring.
+        /// </remarks>
         public void CollectEventProxyData()
         {
             _eventInformations = new Dictionary<string, EventInformation>();
@@ -169,6 +228,13 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
                     .ForEach(subscriberInformation => { _subscriberInformations.Add(subscriberInformation); });
         }
 
+        /// <summary>
+        /// Attaches all subscriber methods to their corresponding publisher events.
+        /// </summary>
+        /// <remarks>
+        /// Call this method after adding publishers and subscribers to activate event connections.
+        /// If changes have been made since the last scan, it will automatically rescan.
+        /// </remarks>
         public void AttachAllEvents()
         {
             if (_requireScan)
@@ -186,6 +252,12 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
                 }
         }
 
+        /// <summary>
+        /// Detaches all subscriber methods from their corresponding publisher events.
+        /// </summary>
+        /// <remarks>
+        /// Call this method to disconnect all event subscriptions, typically during cleanup.
+        /// </remarks>
         public void DetatchAllEvents()
         {
             foreach (var subscriberInformation in _subscriberInformations)
@@ -201,18 +273,50 @@ namespace Com.Hapiga.Scheherazade.Common.EventProxy
 
         #region Nested Classes
 
+        /// <summary>
+        /// Contains information about a published event including its accessor methods.
+        /// </summary>
         public struct EventInformation
         {
+            /// <summary>
+            /// Gets or sets the unique name of the event.
+            /// </summary>
             public string EventName { get; set; }
+            
+            /// <summary>
+            /// Gets or sets the method used to add subscribers to the event.
+            /// </summary>
             public MethodInfo AdderMethod { get; set; }
+            
+            /// <summary>
+            /// Gets or sets the method used to remove subscribers from the event.
+            /// </summary>
             public MethodInfo RemoverMethod { get; set; }
+            
+            /// <summary>
+            /// Gets or sets the MonoBehaviour that publishes this event.
+            /// </summary>
             public MonoBehaviour Publisher { get; set; }
         }
 
+        /// <summary>
+        /// Contains information about a subscriber method and its target event.
+        /// </summary>
         private struct SubscriberInformation
         {
+            /// <summary>
+            /// Gets or sets the unique name of the event being subscribed to.
+            /// </summary>
             public string EventName { get; set; }
+            
+            /// <summary>
+            /// Gets or sets the delegate representing the subscriber method.
+            /// </summary>
             public Delegate Delegate { get; set; }
+            
+            /// <summary>
+            /// Gets or sets the MonoBehaviour that publishes the event.
+            /// </summary>
             public MonoBehaviour Publisher { get; set; }
         }
 
