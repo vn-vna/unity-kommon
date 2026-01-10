@@ -126,7 +126,7 @@ namespace Com.Hapiga.Schehrazade.IS
         public InventoryItem FindOneByItemId(string itemId)
         {
             if (string.IsNullOrEmpty(itemId)) throw new ArgumentNullException(nameof(itemId));
-            if (_itemLookup.TryGetValue(itemId, out var items)) return null;
+            if (!_itemLookup.TryGetValue(itemId, out var items)) return null;
             return items.First.Value;
         }
 
