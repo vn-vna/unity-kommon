@@ -17,7 +17,7 @@ namespace Com.Hapiga.Schehrazade.IS
         public ItemData ItemData { get; set; }
         public string ItemName => itemName;
         public string ItemDescription => itemDescription;
-        public int MaxStack => maxStack;
+        public virtual int MaxStack => maxStack;
 
         [SerializeField]
         private string itemName;
