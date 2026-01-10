@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using Com.Hapiga.FallAway.Inventory;
 using Com.Hapiga.Scheherazade.Common.Chrono;
 using Com.Hapiga.Scheherazade.Common.LocalSave;
-
+using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
 namespace Com.Hapiga.Schehrazade.IS
@@ -63,7 +63,7 @@ namespace Com.Hapiga.Schehrazade.IS
         public InventoryItem FindOneByType<T>()
             where T : ItemDefinition
         {
-            if (_itemLookupByType.TryGetValue(typeof(T), out var items) && items.Count > 0) return items.First.Value;
+            if (_itemLookupByType.TryGetValue(typeof(T), out LinkedList<InventoryItem> items) && items.Count > 0) return items.First.Value;
             return null;
         }
 
@@ -75,8 +75,8 @@ namespace Com.Hapiga.Schehrazade.IS
 
         public IEnumerable<InventoryItem> FindManyByType(Type type)
         {
-            if (_itemLookupByType.TryGetValue(type, out var items))
-                foreach (var item in items)
+            if (_itemLookupByType.TryGetValue(type, out LinkedList<InventoryItem> items))
+                foreach (InventoryItem item in items)
                     yield return item;
         }
 
@@ -88,7 +88,7 @@ namespace Com.Hapiga.Schehrazade.IS
 
         public int CountByType(Type type)
         {
-            if (_itemLookupByType.TryGetValue(type, out var items)) return items.Count;
+            if (_itemLookupByType.TryGetValue(type, out LinkedList<InventoryItem> items)) return items.Count;
             return 0;
         }
 
@@ -100,10 +100,10 @@ namespace Com.Hapiga.Schehrazade.IS
 
         public int CountStackByType(Type type)
         {
-            if (_itemLookupByType.TryGetValue(type, out var items))
+            if (_itemLookupByType.TryGetValue(type, out LinkedList<InventoryItem> items))
             {
                 var totalCount = 0;
-                foreach (var item in items) totalCount += item.Count;
+                foreach (InventoryItem item in items) totalCount += item.Count;
                 return totalCount;
             }
 
@@ -113,10 +113,10 @@ namespace Com.Hapiga.Schehrazade.IS
         public int CountStackByItemId(string itemId)
         {
             if (string.IsNullOrEmpty(itemId)) throw new ArgumentNullException(nameof(itemId));
-            if (_itemLookup.TryGetValue(itemId, out var items))
+            if (_itemLookup.TryGetValue(itemId, out LinkedList<InventoryItem> items))
             {
                 var totalCount = 0;
-                foreach (var item in items) totalCount += item.Count;
+                foreach (InventoryItem item in items) totalCount += item.Count;
                 return totalCount;
             }
 
@@ -126,22 +126,22 @@ namespace Com.Hapiga.Schehrazade.IS
         public InventoryItem FindOneByItemId(string itemId)
         {
             if (string.IsNullOrEmpty(itemId)) throw new ArgumentNullException(nameof(itemId));
-            if (!_itemLookup.TryGetValue(itemId, out var items)) return null;
+            if (!_itemLookup.TryGetValue(itemId, out LinkedList<InventoryItem> items)) return null;
             return items.First.Value;
         }
 
         public IEnumerable<InventoryItem> FindManyByItemId(string itemId)
         {
             if (string.IsNullOrEmpty(itemId)) throw new ArgumentNullException(nameof(itemId));
-            if (_itemLookup.TryGetValue(itemId, out var items))
-                foreach (var item in items)
+            if (_itemLookup.TryGetValue(itemId, out LinkedList<InventoryItem> items))
+                foreach (InventoryItem item in items)
                     yield return item;
         }
 
         public int CountByItemId(string itemId)
         {
             if (string.IsNullOrEmpty(itemId)) throw new ArgumentNullException(nameof(itemId));
-            if (_itemLookup.TryGetValue(itemId, out var items)) return items.Count;
+            if (_itemLookup.TryGetValue(itemId, out LinkedList<InventoryItem> items)) return items.Count;
             return 0;
         }
 
@@ -149,7 +149,7 @@ namespace Com.Hapiga.Schehrazade.IS
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
 
-            foreach (var item in _inventoryItems)
+            foreach (InventoryItem item in _inventoryItems)
                 if (item.Id == id)
                     return item;
 
@@ -163,7 +163,7 @@ namespace Com.Hapiga.Schehrazade.IS
 
         public void AddItem(string itemId, int count = 1, DateTime? expired = null)
         {
-            if (!ItemDatabase.ItemMapping.TryGetValue(itemId, out var data)) return;
+            if (!ItemDatabase.ItemMapping.TryGetValue(itemId, out ItemData data)) return;
             AddItem(data.ItemDefinition, count, expired);
         }
 
@@ -174,7 +174,7 @@ namespace Com.Hapiga.Schehrazade.IS
 
         public void AddItem(string itemId, int count = 1, TimeSpan? expired = null)
         {
-            if (!ItemDatabase.ItemMapping.TryGetValue(itemId, out var data)) return;
+            if (!ItemDatabase.ItemMapping.TryGetValue(itemId, out ItemData data)) return;
             AddItem(data.ItemDefinition, count, expired);
         }
 
@@ -201,13 +201,13 @@ namespace Com.Hapiga.Schehrazade.IS
             _itemLookup = new Dictionary<string, LinkedList<InventoryItem>>();
             _itemLookupByType = new Dictionary<Type, LinkedList<InventoryItem>>();
 
-            foreach (var item in _inventoryItems)
+            foreach (InventoryItem item in _inventoryItems)
             {
                 item.Inventory = this;
                 item.ItemData = ItemDatabase.ItemMapping[item.ItemId];
             }
 
-            foreach (var item in _inventoryItems)
+            foreach (InventoryItem item in _inventoryItems)
             {
                 if (!_itemLookup.ContainsKey(item.ItemId)) _itemLookup[item.ItemId] = new LinkedList<InventoryItem>();
                 _itemLookup[item.ItemId].AddLast(item);
@@ -239,25 +239,74 @@ namespace Com.Hapiga.Schehrazade.IS
         public override bool UpdateInventory()
         {
             // Check item expiration
-            var now = ChronoDirector.Instance.TimeProvider.UtcNow;
-            foreach (var item in _inventoryItems)
-                if (item.Expired.HasValue && item.Expired.Value < now)
+            DateTime now = ChronoDirector.Instance.TimeProvider.UtcNow;
+
+            foreach (InventoryItem item in _inventoryItems)
+            {
+                try
+                {
+                    if (!item.Expired.HasValue || item.Expired.Value >= now) continue;
                     RemoveItem(item);
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Critical<Inventory<SelfT>>(
+                        "Failed to check expiration for item {0}: {1}",
+                        item.Id, ex
+                    );
+                }
+            }
 
             // Resolve all items in the remove queue
             var changed = _removeQueue.Count > 0;
             while (_removeQueue.Count > 0)
             {
-                var item = _removeQueue.Dequeue();
-                if (item == null) continue;
-
-                _inventoryItems.Remove(item);
-                _itemLookup[item.ItemId].Remove(item);
-                _itemLookupByType[item.ItemData.ItemDefinition.GetType()].Remove(item);
-                item.Inventory = null;
+                try
+                {
+                    InventoryItem item = _removeQueue.Dequeue();
+                    if (item == null) continue;
+                    RemoveItemFromTypeLookupCache(item);
+                    RemoveItemFromLookupCache(item);
+                    item.Inventory = null;
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Critical<Inventory<SelfT>>(
+                        "Failed to remove item from inventory: {0}",
+                        ex
+                    );
+                }
             }
 
             return changed;
+        }
+
+        private void RemoveItemFromLookupCache(InventoryItem item)
+        {
+            if (_itemLookupByType.TryGetValue(
+                item.ItemData.ItemDefinition.GetType(),
+                out LinkedList<InventoryItem> typeList)
+            )
+            {
+                typeList.Remove(item);
+                if (typeList.Count == 0)
+                {
+                    _itemLookupByType.Remove(item.ItemData.ItemDefinition.GetType());
+                }
+            }
+        }
+
+        private void RemoveItemFromTypeLookupCache(InventoryItem item)
+        {
+            _inventoryItems.Remove(item);
+            if (_itemLookup.TryGetValue(item.ItemId, out LinkedList<InventoryItem> itemList))
+            {
+                itemList.Remove(item);
+                if (itemList.Count == 0)
+                {
+                    _itemLookup.Remove(item.ItemId);
+                }
+            }
         }
     }
 }

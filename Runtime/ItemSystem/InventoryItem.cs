@@ -1,8 +1,5 @@
 using System;
 
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common.Extensions;
-
 using UnityEngine;
 
 namespace Com.Hapiga.Schehrazade.IS
