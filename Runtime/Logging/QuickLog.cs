@@ -6,10 +6,35 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Logging
 {
+    /// <summary>
+    /// Singleton logging system providing formatted, color-coded console output with filtering.
+    /// </summary>
+    /// <remarks>
+    /// QuickLog offers static methods for easy logging from anywhere in the codebase.
+    /// It supports automatic tag generation from calling type, log level filtering, and custom colors.
+    /// Define NO_LOGGING to completely disable logging in builds.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Log with explicit type tag
+    /// QuickLog.Info&lt;MyClass&gt;("Initialization complete");
+    /// QuickLog.Error&lt;MyClass&gt;("Failed to load: {0}", fileName);
+    /// 
+    /// // Log with automatic tag from stack trace
+    /// QuickLog.SDebug("Player health: {0}", health);
+    /// QuickLog.SWarning("Low memory detected");
+    /// 
+    /// // Log with custom tag and level
+    /// QuickLog.Log("Custom message", "MyTag", LogLevel.Info);
+    /// </code>
+    /// </example>
     [AddComponentMenu("Scheherazade/Logging/Quick Log")]
     public class QuickLog :
         SingletonBehavior<QuickLog>
     {
+        /// <summary>
+        /// Gets or sets the logging configuration containing colors and settings.
+        /// </summary>
         public LoggingConfiguration Configuration;
 
         protected override void Awake()
@@ -69,7 +94,16 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
         }
 
 
-        // ReSharper disable Unity.PerformanceAnalysis
+        /// <summary>
+        /// Logs a message with the specified tag and level.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="tag">Optional tag to identify the message source.</param>
+        /// <param name="level">The log level (default: Info).</param>
+        /// <param name="args">Optional format arguments. Func&lt;object&gt; values are evaluated lazily.</param>
+        /// <remarks>
+        /// This is the core logging method. Messages below the configured minimum log level are filtered out.
+        /// </remarks>
         [HideInCallstack]
         public static void Log(
             string message, string tag = null,
@@ -103,6 +137,13 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
 #endif
         }
 
+        /// <summary>
+        /// Logs a message with a tag derived from the specified type.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="level">The log level (default: Info).</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         // ReSharper disable Unity.PerformanceAnalysis
         public static void Log<T>(string message, LogLevel level = LogLevel.Info, params object[] args)
@@ -110,36 +151,76 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
             Log(message, typeof(T).Name, level, args);
         }
 
+        /// <summary>
+        /// Logs a debug message with the specified type tag.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void Debug<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Debug, args);
         }
 
+        /// <summary>
+        /// Logs an info message with the specified type tag.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void Info<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Info, args);
         }
 
+        /// <summary>
+        /// Logs a warning message with the specified type tag.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void Warning<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Warning, args);
         }
 
+        /// <summary>
+        /// Logs an error message with the specified type tag.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void Error<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Error, args);
         }
 
+        /// <summary>
+        /// Logs a critical message with the specified type tag.
+        /// </summary>
+        /// <typeparam name="T">The type to use for the tag.</typeparam>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void Critical<T>(string message, params object[] args)
         {
             Log(message, typeof(T).Name, LogLevel.Critical, args);
         }
 
+        /// <summary>
+        /// Logs a message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="level">The log level (default: Debug).</param>
+        /// <param name="args">Format arguments.</param>
+        /// <remarks>
+        /// The 'S' prefix means "Stack" - the tag is automatically extracted from the calling method's type.
+        /// This is convenient but slightly slower than explicit tags due to stack trace analysis.
+        /// </remarks>
         [HideInCallstack]
         public static void SLog(string message, LogLevel level = LogLevel.Debug, params object[] args)
         {
@@ -164,30 +245,55 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
 #endif
         }
 
+        /// <summary>
+        /// Logs a debug message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void SDebug(string message, params object[] args)
         {
             SLog(message, LogLevel.Debug, args);
         }
 
+        /// <summary>
+        /// Logs an info message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void SInfo(string message, params object[] args)
         {
             SLog(message, LogLevel.Info, args);
         }
 
+        /// <summary>
+        /// Logs a warning message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void SWarning(string message, params object[] args)
         {
             SLog(message, LogLevel.Warning, args);
         }
 
+        /// <summary>
+        /// Logs an error message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void SError(string message, params object[] args)
         {
             SLog(message, LogLevel.Error, args);
         }
 
+        /// <summary>
+        /// Logs a critical message with tag automatically determined from the call stack.
+        /// </summary>
+        /// <param name="message">The message format string.</param>
+        /// <param name="args">Format arguments.</param>
         [HideInCallstack]
         public static void SCritical(string message, params object[] args)
         {

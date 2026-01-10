@@ -5,13 +5,52 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Extensions
 {
+    /// <summary>
+    /// Provides extension methods for collection types including arrays and IEnumerable.
+    /// </summary>
+    /// <remarks>
+    /// This class extends arrays and collections with safe access methods, iteration utilities,
+    /// and random element selection capabilities.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Safe 2D array access
+    /// T[,] grid = new T[10, 10];
+    /// var value = grid.Access(new Vector2Int(5, 3));
+    /// 
+    /// // Iterate with index
+    /// myList.IterateThrough((item, index) => {
+    ///     Debug.Log($"{index}: {item}");
+    /// });
+    /// 
+    /// // Get random element
+    /// var randomItem = myList.Random();
+    /// </code>
+    /// </example>
     public static class CollectionExtensions
     {
+        /// <summary>
+        /// Safely accesses a 2D array element using a Vector2Int index.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="array">The 2D array to access.</param>
+        /// <param name="index">The 2D index as a Vector2Int.</param>
+        /// <returns>The element at the specified index.</returns>
+        /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds.</exception>
         public static T Access<T>(this T[,] array, Vector2Int index)
         {
             return Access(array, index.x, index.y);
         }
 
+        /// <summary>
+        /// Safely accesses a 2D array element using X and Y indices.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="array">The 2D array to access.</param>
+        /// <param name="x">The X index.</param>
+        /// <param name="y">The Y index.</param>
+        /// <returns>The element at the specified indices.</returns>
+        /// <exception cref="IndexOutOfRangeException">Thrown when indices are out of bounds.</exception>
         public static T Access<T>(this T[,] array, int x, int y)
         {
             if (x < 0 || x >= array.GetLength(0))
@@ -22,11 +61,29 @@ namespace Com.Hapiga.Scheherazade.Common.Extensions
             return array[x, y];
         }
 
+        /// <summary>
+        /// Safely accesses a 3D array element using a Vector3Int index.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="array">The 3D array to access.</param>
+        /// <param name="index">The 3D index as a Vector3Int.</param>
+        /// <returns>The element at the specified index.</returns>
+        /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds.</exception>
         public static T Access<T>(this T[,,] array, Vector3Int index)
         {
             return Access(array, index.x, index.y, index.z);
         }
 
+        /// <summary>
+        /// Safely accesses a 3D array element using X, Y, and Z indices.
+        /// </summary>
+        /// <typeparam name="T">The array element type.</typeparam>
+        /// <param name="array">The 3D array to access.</param>
+        /// <param name="x">The X index.</param>
+        /// <param name="y">The Y index.</param>
+        /// <param name="z">The Z index.</param>
+        /// <returns>The element at the specified indices.</returns>
+        /// <exception cref="IndexOutOfRangeException">Thrown when indices are out of bounds.</exception>
         public static T Access<T>(this T[,,] array, int x, int y, int z)
         {
             if (x < 0 || x >= array.GetLength(0))
@@ -39,6 +96,13 @@ namespace Com.Hapiga.Scheherazade.Common.Extensions
             return array[x, y, z];
         }
 
+        /// <summary>
+        /// Iterates through a collection, invoking an action for each element with its index.
+        /// </summary>
+        /// <typeparam name="T">The element type.</typeparam>
+        /// <param name="array">The collection to iterate.</param>
+        /// <param name="action">The action to invoke for each element, receiving the element and its index.</param>
+        /// <returns>The total number of elements processed.</returns>
         public static int IterateThrough<T>(this IEnumerable<T> array, Action<T, int> action)
         {
             int count = 0;
