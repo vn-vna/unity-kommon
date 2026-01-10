@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using Com.Hapiga.Scheherazade.Common.Chrono;
-
+using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
 namespace Com.Hapiga.Schehrazade.IS
@@ -57,7 +57,31 @@ namespace Com.Hapiga.Schehrazade.IS
         public virtual void AddItem(Inventory ingameInventory, int amount, TimeSpan? expiration)
         {
             DateTime? expiryDate = null;
-            if (expiration.HasValue) expiryDate = ChronoDirector.Instance.TimeProvider.UtcNow.Add(expiration.Value);
+
+            if (!ChronoDirector.Instance)
+            {
+                QuickLog.Critical<ItemDefinition>(
+                    "ChronoDirector instance not found. Cannot set expiration " +
+                    "date for item '{0}'. Adding item without expiration.",
+                    ItemName
+                );
+                return;
+            }
+
+            if (ChronoDirector.Instance.TimeProvider == null)
+            {
+                QuickLog.Critical<ItemDefinition>(
+                    "TimeProvider not found in ChronoDirector. Cannot set expiration " +
+                    "date for item '{0}'. Adding item without expiration.",
+                    ItemName
+                );
+                return;
+            }
+
+             if (expiration.HasValue)
+            {
+                expiryDate = ChronoDirector.Instance.TimeProvider.UtcNow.Add(expiration.Value);
+            }
             AddItem(ingameInventory, amount, expiryDate);
         }
     }
