@@ -2,7 +2,7 @@ using System;
 
 namespace Com.Hapiga.Scheherazade.Common.UserInterface
 {
-    public struct UIPanelInstance<T>
+    public struct UIPanelInstance<T> : IDisposable
         where T : UIPanelBase
     {
         public bool IsVisible => Panel != null && _panelReference.IsVisible;
@@ -63,6 +63,13 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             if (_panelReference == null) return;
             UIHelperClass.CurrentManager.ReleasePanel<T>();
             _panelReference = null;
+        }
+
+        public void Dispose()
+        {
+            if (_panelReference == null) return;
+            if (UIHelperClass.CurrentManager == null) return;
+            UIHelperClass.CurrentManager.PanelReleased -= HandlePanelReleased;
         }
     }
 }
