@@ -54,7 +54,21 @@ namespace Com.Hapiga.Scheherazade.Economy
                 return TimeSpan.FromSeconds(expiryDuration);
             }
         }
-        public ExpirationMode ExpiryMode => expirationMode;
+        public ExpirationMode ExpiryMode
+        {
+            get
+            {
+                if (overrideProvider)
+                {
+                    ExpirationMode? overrideMode = overrideProvider.ExpiryMode;
+                    if (overrideMode.HasValue)
+                    {
+                        return overrideMode.Value;
+                    }
+                }
+                return expirationMode;
+            }
+        }
 
         [SerializeField]
         private ItemDefinition item;

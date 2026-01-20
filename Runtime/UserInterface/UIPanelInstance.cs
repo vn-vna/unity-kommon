@@ -34,12 +34,6 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         private T _panelReference;
 
-        private void HandlePanelReleased(UIPanelBase panel)
-        {
-            if (_panelReference == null || panel != _panelReference) return;
-            _panelReference = null;
-        }
-
         public void Show(bool immediate = false, Action callback = null)
         {
             Panel.Show(immediate, callback);
