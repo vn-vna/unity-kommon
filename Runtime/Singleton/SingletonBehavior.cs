@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
