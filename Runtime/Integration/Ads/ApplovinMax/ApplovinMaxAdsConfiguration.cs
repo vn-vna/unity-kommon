@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Com.Hapiga.Scheherazade.Common.MappedList;
 using UnityEngine;
 
@@ -49,5 +50,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             => new MappedList<AdsType, ApplovinMaxAdsUnitId>(
                 unitIds, (uid) => uid.Type
             );
+
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void EditorRefreshOnLoad()
+        {
+            var configurations = UnityEditor.AssetDatabase.FindAssets("t: ApplovinMaxAdsConfiguration")
+                .Select(UnityEditor.AssetDatabase.GUIDToAssetPath)
+                .Select(UnityEditor.AssetDatabase.LoadAssetAtPath<ApplovinMaxAdsConfiguration>)
+                .Where(asset => asset != null);
+
+            foreach (var config in configurations)
+            {
+                config._unitIdsMapping = null;
+            }
+        }
+#endif
     }
 }

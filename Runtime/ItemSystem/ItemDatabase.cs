@@ -1,11 +1,8 @@
 using System;
 using System.Collections.Generic;
-
-using Com.Hapiga.Scheherazade.Common.MappedList;
-
-using UnityEngine;
-
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.MappedList;
+using UnityEngine;
 
 namespace Com.Hapiga.Schehrazade.IS
 {
@@ -30,5 +27,21 @@ namespace Com.Hapiga.Schehrazade.IS
         {
             return new MappedList<string, ItemData>(allItems, (item) => item.ItemId);
         }
+
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void EditorRefreshDatabaseOnLoad()
+        {
+            var databases = UnityEditor.AssetDatabase.FindAssets($"t:{nameof(ItemDatabase)}")
+                .Select(UnityEditor.AssetDatabase.GUIDToAssetPath)
+                .Select(UnityEditor.AssetDatabase.LoadAssetAtPath<ItemDatabase>)
+                .Where(asset => asset != null);
+
+            foreach (var database in databases)
+            {
+                database._itemMapping = null;
+            }
+        }
+#endif
     }
 }
