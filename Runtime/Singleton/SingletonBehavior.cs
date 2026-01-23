@@ -259,6 +259,8 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
 
         private void Unregister()
         {
+            if (_registrationHolderProperty == null) return;
+
             try
             {
                 _registrationHolderProperty.SetValue(null, null);
