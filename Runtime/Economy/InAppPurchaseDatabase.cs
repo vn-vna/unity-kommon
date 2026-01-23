@@ -47,6 +47,20 @@ namespace Com.Hapiga.Scheherazade.Economy
                 .Where(asset => asset != null)
                 .ToList();
         }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void EditorRefreshDatabaseOnLoad()
+        {
+            var databases = UnityEditor.AssetDatabase.FindAssets("t: InAppPurchaseDatabase")
+                .Select(UnityEditor.AssetDatabase.GUIDToAssetPath)
+                .Select(UnityEditor.AssetDatabase.LoadAssetAtPath<InAppPurchaseDatabase>)
+                .Where(asset => asset != null);
+
+            foreach (var database in databases)
+            {
+                database._packMapping = new Lazy<MappedList<string, InAppPurchasePack>>(database.CreatePackMapping);
+            }
+        }
 #endif
     }
 }
