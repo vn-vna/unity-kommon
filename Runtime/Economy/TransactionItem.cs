@@ -54,7 +54,21 @@ namespace Com.Hapiga.Scheherazade.Economy
                 return TimeSpan.FromSeconds(expiryDuration);
             }
         }
-        public ExpirationMode ExpiryMode => expirationMode;
+        public ExpirationMode ExpiryMode
+        {
+            get
+            {
+                if (overrideProvider)
+                {
+                    ExpirationMode? overrideMode = overrideProvider.ExpiryMode;
+                    if (overrideMode.HasValue)
+                    {
+                        return overrideMode.Value;
+                    }
+                }
+                return expirationMode;
+            }
+        }
 
         [SerializeField]
         private ItemDefinition item;
@@ -73,6 +87,32 @@ namespace Com.Hapiga.Scheherazade.Economy
 
         [SerializeField]
         private TransactionItemOverrideProvider overrideProvider;
+
+        public TransactionItem()
+        { }
+
+        public TransactionItem(ItemDefinition itemDefinition, int itemCount)
+        {
+            item = itemDefinition;
+            count = itemCount;
+            expirationMode = ExpirationMode.NoExpiration;
+        }
+
+        public TransactionItem(ItemDefinition itemDefinition, int itemCount, DateTime expiryDateTime)
+        {
+            item = itemDefinition;
+            count = itemCount;
+            expirationMode = ExpirationMode.AtDate;
+            expiryDate = expiryDateTime.ToString("o");
+        }
+
+        public TransactionItem(ItemDefinition itemDefinition, int itemCount, TimeSpan expiryDurationTimeSpan)
+        {
+            item = itemDefinition;
+            count = itemCount;
+            expirationMode = ExpirationMode.AfterDuration;
+            expiryDuration = (float)expiryDurationTimeSpan.TotalSeconds;
+        }
     }
 
     public enum ExpirationMode

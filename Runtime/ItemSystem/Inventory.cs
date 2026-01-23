@@ -47,6 +47,7 @@ namespace Com.Hapiga.Schehrazade.IS
         internal Queue<InventoryItem> _removeQueue;
         internal Dictionary<string, LinkedList<InventoryItem>> _itemLookup;
         internal Dictionary<Type, LinkedList<InventoryItem>> _itemLookupByType;
+        internal Dictionary<string, InventoryItem> _itemLookupById;
 
         #endregion
 
@@ -149,9 +150,8 @@ namespace Com.Hapiga.Schehrazade.IS
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
 
-            foreach (var item in _inventoryItems)
-                if (item.Id == id)
-                    return item;
+            if (_itemLookupById.TryGetValue(id, out var item))
+                return item;
 
             return null;
         }
@@ -200,6 +200,7 @@ namespace Com.Hapiga.Schehrazade.IS
             _removeQueue = new Queue<InventoryItem>();
             _itemLookup = new Dictionary<string, LinkedList<InventoryItem>>();
             _itemLookupByType = new Dictionary<Type, LinkedList<InventoryItem>>();
+            _itemLookupById = new Dictionary<string, InventoryItem>();
 
             foreach (var item in _inventoryItems)
             {
@@ -215,6 +216,8 @@ namespace Com.Hapiga.Schehrazade.IS
                 if (!_itemLookupByType.ContainsKey(item.ItemData.ItemDefinition.GetType()))
                     _itemLookupByType[item.ItemData.ItemDefinition.GetType()] = new LinkedList<InventoryItem>();
                 _itemLookupByType[item.ItemData.ItemDefinition.GetType()].AddLast(item);
+
+                _itemLookupById[item.Id] = item;
             }
         }
 
@@ -227,6 +230,8 @@ namespace Com.Hapiga.Schehrazade.IS
             if (!_itemLookupByType.ContainsKey(item.ItemData.ItemDefinition.GetType()))
                 _itemLookupByType[item.ItemData.ItemDefinition.GetType()] = new LinkedList<InventoryItem>();
             _itemLookupByType[item.ItemData.ItemDefinition.GetType()].AddLast(item);
+
+            _itemLookupById[item.Id] = item;
 
             ItemAdded?.Invoke(item);
         }
@@ -254,6 +259,7 @@ namespace Com.Hapiga.Schehrazade.IS
                 _inventoryItems.Remove(item);
                 _itemLookup[item.ItemId].Remove(item);
                 _itemLookupByType[item.ItemData.ItemDefinition.GetType()].Remove(item);
+                _itemLookupById.Remove(item.Id);
                 item.Inventory = null;
             }
 

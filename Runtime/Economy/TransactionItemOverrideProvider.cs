@@ -5,8 +5,9 @@ namespace Com.Hapiga.Scheherazade.Economy
     public abstract class TransactionItemOverrideProvider :    
         ScriptableObject
     {
-        public abstract int? ItemCount { get; }
-        public abstract string ExpiryDate { get; }
-        public abstract float? ExpiryDuration { get; }
+        public virtual int? ItemCount => null;
+        public virtual ExpirationMode? ExpiryMode => null;
+        public virtual string ExpiryDate => null;
+        public virtual float? ExpiryDuration => null;
     }
 }
