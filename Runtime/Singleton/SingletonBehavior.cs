@@ -26,24 +26,7 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
             List<Type> holderTypes = new List<Type>();
             foreach (Assembly assembly in assemblies)
             {
-                try
-                {
-                    foreach (Type type in assembly.GetTypes())
-                    {
-                        if (
-                            type.GetCustomAttribute(
-                                typeof(GlobalReferenceHolderAttribute), false
-                            ) is GlobalReferenceHolderAttribute
-                        )
-                        {
-                            holderTypes.Add(type);
-                        }
-                    }
-                }
-                catch
-                {
-                    // Ignore assemblies that can't be loaded
-                }
+                DiscoverAssembly(holderTypes, assembly);
             }
 
             if (holderTypes.Count == 0)
@@ -73,17 +56,42 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
                 BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
             ))
             {
-                if (property.PropertyType.IsClass || property.PropertyType.IsInterface)
+                if (!property.PropertyType.IsClass && !property.PropertyType.IsInterface)
                 {
-                    _registrationProperties[property.PropertyType] = property;
-
-                    QuickLog.Debug<GlobalReferenceHelper>(
-                        "Registered global reference property: {0}.{1} of type {2}",
-                        _holderType.Name,
-                        property.Name,
-                        property.PropertyType.Name
-                    );
+                    continue;
                 }
+
+                _registrationProperties[property.PropertyType] = property;
+
+                QuickLog.Debug<GlobalReferenceHelper>(
+                    "Registered global reference property: {0}.{1} of type {2}",
+                    _holderType.Name,
+                    property.Name,
+                    property.PropertyType.Name
+                );
+            }
+        }
+
+        private static void DiscoverAssembly(List<Type> holderTypes, Assembly assembly)
+        {
+            try
+            {
+                foreach (Type type in assembly.GetTypes())
+                {
+                    if (
+                        type.GetCustomAttribute(
+                            typeof(GlobalReferenceHolderAttribute), false
+                        ) is not GlobalReferenceHolderAttribute
+                    )
+                    {
+                        continue;
+                    }
+                    holderTypes.Add(type);
+                }
+            }
+            catch
+            {
+                // Ignore assemblies that can't be loaded
             }
         }
 
