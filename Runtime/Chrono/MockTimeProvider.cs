@@ -16,7 +16,7 @@ namespace Com.Hapiga.Scheherazade.Common.Chrono
 
         public MockTimeProvider(DateTime mockDateTime)
         {
-            _mockDateTime = mockDateTime;
+            _mockDateTime = mockDateTime.ToLocalTime();
         }
 
         public DateTime Now => _mockDateTime;
