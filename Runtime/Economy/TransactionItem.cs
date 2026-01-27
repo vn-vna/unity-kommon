@@ -32,10 +32,10 @@ namespace Com.Hapiga.Scheherazade.Economy
                     string overrideDate = overrideProvider.ExpiryDate;
                     if (!string.IsNullOrEmpty(overrideDate))
                     {
-                        return DateTime.Parse(overrideDate);
+                        return DateTime.Parse(overrideDate).ToUniversalTime();
                     }
                 }
-                return DateTime.Parse(expiryDate);
+                return DateTime.Parse(expiryDate).ToUniversalTime();
             }
         }
         public TimeSpan? ExpiryDuration
