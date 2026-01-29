@@ -9,6 +9,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
     public class SegmentationInformation
         : IVersionedData
     {
+        public string Network;
         public string CampaignName;
         public string CreativeName;
         public string CreativeHash;
