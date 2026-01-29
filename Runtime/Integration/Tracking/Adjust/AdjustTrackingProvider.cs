@@ -189,13 +189,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 AdjustEvent e = new AdjustEvent(Configuration.IapEventName);
                 e.SetRevenue(info.Price * Configuration.IapMultiplier, info.Currency);
                 e.ProductId = info.ProductId;
-                e.TransactionId = info.TransactionId;
+                e.TransactionId = info.OrderId;
                 e.PurchaseToken = info.ReceiptRaw;
                 Adjust.TrackEvent(e);
 
                 QuickLog.Info<AdjustTrackingProvider>(
                     "Logged purchase revenue to Adjust: {0} {1} for product {2} (Transaction ID: {3})",
-                    info.Price, info.Currency, info.ProductId, info.TransactionId
+                    info.Price, info.Currency, info.ProductId, info.OrderId
                 );
             }
             catch (Exception ex)

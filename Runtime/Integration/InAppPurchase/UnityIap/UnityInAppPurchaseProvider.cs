@@ -286,6 +286,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 {
                     Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(prod));
                 }
+                SendPurchasingFailTrackingEvent(prod, order);
             }
         }
 
@@ -404,11 +405,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
             Integration.TrackingManager.TrackPurchaseRevenue(new PurchaseTrackingInfo
             {
+                Status = "Success",
                 Currency = price?.IsoCurrencyCode ?? "USD",
                 Price = (double)(price?.Amount ?? 0),
                 ProductId = product.ProductId,
                 ReceiptRaw = order.Info.Receipt,
-                TransactionId = order.Info.TransactionID
+                OrderId = order.Info.TransactionID
+            });
+        }
+
+        private void SendPurchasingFailTrackingEvent(IInAppPurchaseProduct product, FailedOrder order)
+        {
+            if (Integration.TrackingManager == null) return;
+
+            var price = GetProductPrice(product.ProductId);
+
+            Integration.TrackingManager.TrackPurchaseRevenue(new PurchaseTrackingInfo
+            {
+                Currency = "USD",
+                Price = (double)(price?.Amount ?? 0),
+                ProductId = product.ProductId,
+                ReceiptRaw = order.Info.Receipt,
+                OrderId = order.Info.TransactionID,
+                Status = "Failed",
+                FailureReason = order.FailureReason.ToString()
             });
         }
 
