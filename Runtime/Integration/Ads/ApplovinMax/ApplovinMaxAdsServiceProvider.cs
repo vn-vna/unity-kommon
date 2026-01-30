@@ -5,9 +5,7 @@ using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
-using log4net.Core;
 using UnityEngine;
-using UnityEngine.iOS;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 {
