@@ -12,7 +12,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         InterstitialAdsRevenue = 1 << 1,
         RewardedAdsRevenue = 1 << 2,
         AppOpenAdsRevenue = 1 << 3,
-        IapRevenue = 1 << 4,
+        InterstitialAdsDisplayRevenue = 1 << 4,
+        RewardedAdsDisplayRevenue = 1 << 5,
+        AppOpenAdsDisplayRevenue = 1 << 6,
+        IapRevenue = 1 << 7,
     }
 
     [Serializable]

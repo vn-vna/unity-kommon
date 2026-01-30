@@ -219,10 +219,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     => options.HasFlag(FirebaseRevenueTrackingOptions.InterstitialAdsRevenue),
                 AdsType.Rewarded
                     => options.HasFlag(FirebaseRevenueTrackingOptions.RewardedAdsRevenue),
-                AdsType.AppOpen
+                AdsType.OpenApp
                     => options.HasFlag(FirebaseRevenueTrackingOptions.AppOpenAdsRevenue),
                 AdsType.Banner
                     => options.HasFlag(FirebaseRevenueTrackingOptions.BannerAdsRevenue),
+                AdsType.InterstitialDisplay
+                    => options.HasFlag(FirebaseRevenueTrackingOptions.InterstitialAdsDisplayRevenue),
+                AdsType.RewardedDisplay
+                    => options.HasFlag(FirebaseRevenueTrackingOptions.RewardedAdsDisplayRevenue),
+                AdsType.OpenAppDisplay  
+                    => options.HasFlag(FirebaseRevenueTrackingOptions.AppOpenAdsDisplayRevenue),
 
                 _ => false,
             };

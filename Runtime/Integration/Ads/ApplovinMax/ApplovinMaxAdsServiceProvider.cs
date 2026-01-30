@@ -578,7 +578,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleRewardedAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsReward", "Displayed");
-            SendRevenueTracking(info, AdsType.Rewarded);
+            SendRevenueTracking(info, AdsType.RewardedDisplay);
             _rewardFulfilled = false;
         }
 
@@ -625,7 +625,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Displayed");
-            SendRevenueTracking(info, AdsType.Interstitial);
+            SendRevenueTracking(info, AdsType.InterstitialDisplay);
             _intersitialFulfilled = false;
         }
 
@@ -696,7 +696,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleAppOpenAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsAppOpen", "Displayed");
-            SendRevenueTracking(info, AdsType.OpenApp);
+            SendRevenueTracking(info, AdsType.OpenAppDisplay);
         }
 
         private void HandleAppOpenAdClicked(string arg1, MaxSdkBase.AdInfo info)
