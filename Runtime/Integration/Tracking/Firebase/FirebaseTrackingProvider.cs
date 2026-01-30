@@ -132,6 +132,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
+                {"ad_session_id",   info.AdSessionId},
+                {"play_id",         info.PlayId},
                 {"ad_platform",     info.NetworkName},
                 {"ad_source",       info.NetworkName},
                 {"ad_unit_name",    info.RevenueUnit},
@@ -140,6 +142,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 {"country",         info.Country},
                 {"value",           info.Revenue},
                 {"currency",        CurrencyCode.USD.ToUpper()},
+                {"precision",      info.Precision},
             };
 
             foreach (FirebaseRevenueTrackingEvent conf in _configuration.RevenueTrackingConfig)

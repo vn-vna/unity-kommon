@@ -6,6 +6,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     {
         public IAdsServiceProvider Provider { get; set; }
         public AdsType AdType { get; set; }
+        public string AdSessionId { get; set; }
+        public string PlayId { get; set; }
+        public int currentStage { get; set; }
         public double Revenue { get; set; }
         public string NetworkName { get; set; }
         public string RevenueUnit { get; set; }
@@ -13,5 +16,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public string AdFormat { get; set; }
         public string CreativeIdentifier { get; set; }
         public string Country { get; set; }
+        public string Precision { get; set; }
     }
 }

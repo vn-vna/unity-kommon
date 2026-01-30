@@ -5,7 +5,9 @@ using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
+using log4net.Core;
 using UnityEngine;
+using UnityEngine.iOS;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 {
@@ -15,7 +17,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         #region Interfaces & Properties
 
         public string DeviceAdvertisingId => PlayerPrefs.GetString("advertising_id", string.Empty);
-
+        public string AdSessionId => _adSessionId;
         public IAdsManager AdsManager { get; set; }
         public bool IsInitialized { get; private set; }
 
@@ -55,6 +57,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private bool _intersitialFulfilled;
         private bool _rewardFulfilled;
+        private string _adSessionId;
         private Action<bool> _interstitialCallback;
         private Action<bool> _rewardedCallback;
         private float _timer;
@@ -111,6 +114,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent += HandleBannerAdRevenuePaid;
 
             MaxSdk.InitializeSdk();
+            _adSessionId = Guid.NewGuid().ToString();
         }
 
         public void CleanUp()
@@ -524,13 +528,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 {
                     Provider = this,
                     NetworkName = "Applovin",
+                    AdSessionId = _adSessionId,
+                    PlayId = Integration.TrackingManager.SessionPlayId,
                     AdType = type,
                     RevenueUnit = Configuration.UnitIdsMapping[type].UnitId,
                     Placement = info.Placement,
                     Revenue = info.Revenue,
                     AdFormat = info.AdFormat,
                     CreativeIdentifier = info.CreativeIdentifier,
-                    Country = MaxSdk.GetSdkConfiguration().CountryCode
+                    Country = MaxSdk.GetSdkConfiguration().CountryCode,
+                    currentStage = Integration.TrackingManager.CurrentStage,
+                    Precision = info.RevenuePrecision
                 });
         }
 
@@ -572,6 +580,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleRewardedAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsReward", "Displayed");
+            SendRevenueTracking(info, AdsType.Rewarded);
             _rewardFulfilled = false;
         }
 
@@ -618,6 +627,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Displayed");
+            SendRevenueTracking(info, AdsType.Interstitial);
             _intersitialFulfilled = false;
         }
 
@@ -688,6 +698,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleAppOpenAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsAppOpen", "Displayed");
+            SendRevenueTracking(info, AdsType.OpenApp);
         }
 
         private void HandleAppOpenAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -712,6 +723,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Open App Ad is loaded and ready to be shown."
             );
+        }
+
+        public void OnAdDisplayedEvent()
+        {
+
+        }
+
+        public void OnAdRevenuePaidEvent()
+        {
+
         }
 
         #endregion

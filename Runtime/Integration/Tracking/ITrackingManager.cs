@@ -6,10 +6,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     public interface ITrackingManager
     {
         List<ITrackingProvider> Providers { get; }
+        string SessionPlayId { get; }
+        int CurrentStage { get; }
         bool AllowTracking { get; set; }
         TrackingManagerStatus Status { get; }
-        void Initialize(float timeOut);
-        IEnumerator InitializeCoroutine(float timeOut);
+        void Initialize(int currentStage, float timeOut);
+        IEnumerator InitializeCoroutine(int currentStage, float timeOut);
         void Shutdown();
 
         void TrackScreen(string screenId);

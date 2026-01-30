@@ -15,6 +15,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     {
         #region Interfaces & Properties
         public bool AllowTracking { get; set; }
+        public string SessionPlayId { get; set; }
+        public int CurrentStage { get; set; }
         public TrackingManagerStatus Status { get; private set; }
         public List<ITrackingProvider> Providers => _providers;
         #endregion
@@ -55,9 +57,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #endregion
 
         #region Public Methods
-        public void Initialize(float timeOut)
+        public void Initialize(int currentStage, float timeOut)
         {
-            StartCoroutine(InitializeCoroutine(timeOut));
+            CurrentStage = currentStage;
+            StartCoroutine(InitializeCoroutine(currentStage, timeOut));
         }
 
         public void Shutdown()
@@ -71,7 +74,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             Status = TrackingManagerStatus.Uninitialized;
         }
 
-        public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
+        public IEnumerator InitializeCoroutine(int currentStage = 0, float timeOut = float.MaxValue)
         {
             if (!AllowTracking)
             {
@@ -131,6 +134,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             provider.TrackingManager = this;
             _providers.Add(provider);
+        }
+
+        public void StartPlaySessions()
+        {
+            SessionPlayId = Guid.NewGuid().ToString();
+        }
+
+        public void EndPlaySession(int currentStage)
+        {
+            SessionPlayId = string.Empty;
+            CurrentStage = currentStage;
         }
 
         public void TrackScreen(string screenId)

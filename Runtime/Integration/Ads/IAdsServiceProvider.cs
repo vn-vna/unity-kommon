@@ -11,6 +11,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         bool IsBannerAvailable { get; }
         bool IsOpenAppAdAvailable { get; }
         string DeviceAdvertisingId { get; }
+        string AdSessionId { get; }
 
         void Initialize();
         void CleanUp();
@@ -18,6 +19,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         void LoadAds();
         void ShowBanner();
         void HideBanner();
+        void OnAdDisplayedEvent();
+        void OnAdRevenuePaidEvent();
 
         bool ShowInterstitialAds(Action<bool> callback, string placement);
         bool ShowRewardAds(Action<bool> callback, string placement);
