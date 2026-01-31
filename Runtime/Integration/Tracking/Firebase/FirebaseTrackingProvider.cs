@@ -134,6 +134,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 {"ad_session_id",   info.AdSessionId},
                 {"play_id",         info.PlayId},
+                {"current_stage",  info.currentStage},
+                {"placement",      info.Placement},
                 {"ad_platform",     info.NetworkName},
                 {"ad_source",       info.NetworkName},
                 {"ad_unit_name",    info.RevenueUnit},
