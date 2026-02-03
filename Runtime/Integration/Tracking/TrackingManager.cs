@@ -33,6 +33,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             _providers = new List<ITrackingProvider>();
             _pendingActions = new Queue<Action>();
             Status = TrackingManagerStatus.Uninitialized;
+            SessionPlayId = "";
         }
         #endregion
 
@@ -59,7 +60,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #region Public Methods
         public void Initialize(int currentStage, float timeOut)
         {
-            CurrentStage = currentStage;
             StartCoroutine(InitializeCoroutine(currentStage, timeOut));
         }
 
@@ -76,6 +76,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public IEnumerator InitializeCoroutine(int currentStage = 0, float timeOut = float.MaxValue)
         {
+            CurrentStage = currentStage;
             if (!AllowTracking)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
