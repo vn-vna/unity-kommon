@@ -146,6 +146,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             CurrentStage = currentStage;
         }
 
+        public void DeletePlayIdSession()
+        {
+            SessionPlayId = string.Empty;
+        } 
+
         public void TrackScreen(string screenId)
         {
             if (!AllowTracking)
