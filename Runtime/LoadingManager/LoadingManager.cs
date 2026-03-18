@@ -1,8 +1,10 @@
+using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Hapiga.Scheherazade.Common.Singleton;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using UnityEditor.PackageManager;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.LoadingManager
@@ -55,6 +57,8 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
         private Action _loadingCallback;
         private float _progress;
         #endregion
+
+        public bool _loginLoadingStepsTracked = false;
 
         #region Unity Events
         protected override void Awake()
@@ -120,13 +124,20 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
             LoadingStarted?.Invoke(operations);
         }
 
-        public void SetProgress(string operation, float progress)
+        public void SetProgress(string operation, float progress, int statusCode = 200)
         {
             for (int i = 0; i < _operations.Count; i++)
             {
                 if (_operations[i].Operation == operation)
                 {
                     _operations[i].Progress = progress;
+
+                    if (!_loginLoadingStepsTracked && Mathf.Approximately(progress, 1f))
+                    {
+                        int stepNumber = i + 1; 
+                        LoginLoadingTracker.TrackLoginLoadingStep(stepNumber, operation, statusCode);
+                    }
+
                     break;
                 }
             }
