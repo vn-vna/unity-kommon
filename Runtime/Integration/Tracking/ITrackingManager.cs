@@ -16,6 +16,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         void TrackAction(TrackingActionInfo info);
         void TrackAdRevenue(AdTrackingInfo info);
         void TrackPurchaseRevenue(PurchaseTrackingInfo info);
+        void SetUserId(string userId);
 
         void TrackAction(string action, params (string key, object value)[] parameters)
         {

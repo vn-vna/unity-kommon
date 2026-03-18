@@ -65,6 +65,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             StartCoroutine(InitializeCoroutine(timeOut));
         }
 
+        // Propagate user identity to all registered identity providers
+        public void SetUserId(string userId)
+        {
+            foreach (var provider in _providers)
+            {
+                if (provider is IUserIdentityProvider idProvider)
+                {
+                    idProvider.SetUserId(userId);
+                }
+            }
+        }
+
         public void Shutdown()
         {
             foreach (ITrackingProvider provider in _providers)
@@ -102,6 +114,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 if (_providers.Any(p => p.IsInitialized))
                 {
                     Status = TrackingManagerStatus.Ready;
+                    string userId = SystemInfo.deviceUniqueIdentifier;
+                    SetUserId(userId);
                     yield break;
                 }
 

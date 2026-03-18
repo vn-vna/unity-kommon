@@ -7,11 +7,13 @@ using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.Converter;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
     public class FirebaseTrackingProvider :
-        ITrackingProvider
+        ITrackingProvider,
+        IUserIdentityProvider
     {
         public bool IsInitialized { get; private set; }
         public ITrackingManager TrackingManager { get; set; }
@@ -187,6 +189,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     ActionId = conf.eventName,
                     Parameters = parameters
                 });
+            }
+        }
+
+        public void SetUserId(string userId)
+        {
+            try
+            {
+                Firebase.Analytics.FirebaseAnalytics.SetUserId(userId);
+                QuickLog.Info<FirebaseTrackingProvider>(
+                "Firebase UserId set: {0}", userId
+            );
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Warning<FirebaseTrackingProvider>(
+                    "Failed to set user ID for Firebase Analytics: {0}",
+                    ex.Message
+                );
             }
         }
 
