@@ -271,6 +271,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
 
             string campaignName = attribution.Campaign ?? "unknown_campaign";
+            string network = attribution.Network ?? "unknown_network";
             string creativeName = attribution.Creative ?? "unknown_creative";
 
             using SHA256 sha256 = SHA256.Create();
@@ -284,6 +285,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             StringBuilder cthBuilder = new StringBuilder();
             foreach (var c in cth)
                 cthBuilder.Append(c.ToString("x2"));
+
+            Integration.TrackingManager?.SetUserProperty("campaign", campaignName);
+            Integration.TrackingManager?.SetUserProperty("network", network);
 
             Integration.UserSegmentation.RegisterSegmentation(
                 new SegmentationInformation
