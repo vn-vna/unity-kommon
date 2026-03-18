@@ -15,8 +15,7 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
-    public class AdjustTrackingProvider :
-        ITrackingProvider
+    public class AdjustTrackingProvider : ITrackingProvider
     {
         public ITrackingManager TrackingManager { get; set; }
         public bool IsInitialized { get; private set; }
@@ -28,6 +27,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private AdjustConfig _config;
         private int _initializationAttempts = 0;
         public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
+
+        private const string AdjustAdIdKey = "adjust_adid";
 
         public AdjustTrackingProvider(AdjustConfiguration configuration)
         {
@@ -45,6 +46,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             _config.SessionSuccessDelegate = HandleAdjustSessionSuccess;
             _config.SessionFailureDelegate = HandleAdjustSessionFailure;
             _config.AttributionChangedDelegate = HandleAttributionChanged;
+
             IsTrackingEnabled = true;
 
 #if UNITY_EDITOR
@@ -52,6 +54,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 #else
             InitializeInternal();
 #endif
+
+            RestoreCachedAdId();
         }
 
         public void CleanUp()
@@ -70,10 +74,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            QuickLog.Info<AdjustTrackingProvider>(
-                "Start Initializing Adjust SDK"
-            );
-            ++_initializationAttempts;
+            QuickLog.Info<AdjustTrackingProvider>("Start Initializing Adjust SDK");
 
             try
             {
@@ -110,16 +111,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     ex.Message
                 );
             }
-
         }
 
         public void RequireAttributions()
         {
             try
             {
-                QuickLog.Info<AdjustTrackingProvider>(
-                    "Acquiring Attribution Info"
-                );
+                QuickLog.Info<AdjustTrackingProvider>("Acquiring Attribution Info");
                 Adjust.GetAttribution(AcquireAttributionCallback);
             }
             catch (Exception ex)
@@ -154,12 +152,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 e.AdRevenueNetwork = info.NetworkName;
                 e.AdRevenueUnit = info.RevenueUnit;
                 e.AdRevenuePlacement = info.Placement;
-                Adjust.TrackAdRevenue(e);
 
-                QuickLog.Info<AdjustTrackingProvider>(
-                    "Logged ad revenue to Adjust: {0} USD from {1} (Placement: {2})",
-                    info.Revenue, info.NetworkName, info.Placement
-                );
+                Adjust.TrackAdRevenue(e);
             }
             catch (Exception ex)
             {
@@ -192,12 +186,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 e.ProductId = info.ProductId;
                 e.TransactionId = info.TransactionId;
                 e.PurchaseToken = info.ReceiptRaw;
-                Adjust.TrackEvent(e);
 
-                QuickLog.Info<AdjustTrackingProvider>(
-                    "Logged purchase revenue to Adjust: {0} {1} for product {2} (Transaction ID: {3})",
-                    info.Price, info.Currency, info.ProductId, info.TransactionId
-                );
+                Adjust.TrackEvent(e);
             }
             catch (Exception ex)
             {
@@ -211,6 +201,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private void HandleAdjustSessionFailure(AdjustSessionFailure failure)
         {
             IsInitialized = false;
+
             QuickLog.Warning<AdjustTrackingProvider>(
                 "Adjust session initialization failed: {0} (Adid: {1})",
                 failure.Message, failure.Adid
@@ -222,70 +213,62 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private void HandleAdjustSessionSuccess(AdjustSessionSuccess success)
         {
             IsInitialized = true;
+
             Dispatcher.DispatchOnMainThread(RequireAdvertisingId);
             Dispatcher.DispatchOnMainThread(RequireAttributions);
-            QuickLog.Info<AdjustTrackingProvider>(
-                "Adjust session initialized successfully (Adid: {0})",
-                success.Adid
-            );
+        }
+
+#if !UNITY_EDITOR
+        private void AcquireAdvertisingIdCallback(string adid)
+        {
+            if (string.IsNullOrEmpty(adid)) return;
+
+            Dispatcher.DispatchOnMainThread(() =>
+            {
+                string cached = PlayerPrefs.GetString(AdjustAdIdKey, "");
+
+                if (cached == adid)
+                    return;
+
+                PlayerPrefs.SetString(AdjustAdIdKey, adid);
+                PlayerPrefs.Save();
+
+                TrackingManager?.SetUserProperty("adjust_device_id", adid);
+            });
+        }
+#endif
+
+        private void RestoreCachedAdId()
+        {
+            if (PlayerPrefs.HasKey(AdjustAdIdKey))
+            {
+                string adid = PlayerPrefs.GetString(AdjustAdIdKey);
+
+                if (!string.IsNullOrEmpty(adid))
+                {
+                    TrackingManager?.SetUserProperty("adjust_device_id", adid);
+                }
+            }
         }
 
         private void AcquireAttributionCallback(AdjustAttribution attribution)
         {
-            QuickLog.Info<AdjustTrackingProvider>($"Acquired Attribution Info");
-            if (attribution == null)
-            {
-                QuickLog.Warning<AdjustTrackingProvider>(
-                    "Attribution info received is null"
-                );
-                return;
-            }
+            if (attribution == null) return;
 
             Dispatcher.DispatchOnMainThread(() => RegisterAttributionData(attribution));
         }
 
         private void HandleAttributionChanged(AdjustAttribution attribution)
         {
-            QuickLog.Info<AdjustTrackingProvider>($"Attribution Info Changed");
-            if (attribution == null)
-            {
-                QuickLog.Warning<AdjustTrackingProvider>(
-                    "Attribution info received is null"
-                );
-                return;
-            }
+            if (attribution == null) return;
 
             Dispatcher.DispatchOnMainThread(() => RegisterAttributionData(attribution));
         }
 
-#if !UNITY_EDITOR
-        private void AcquireAdvertisingIdCallback(string adid)
-        {
-            QuickLog.Info<AdjustTrackingProvider>(
-                "Acquired Advertising ID: {0}",
-                adid
-            );
-
-            if (!string.IsNullOrEmpty(adid))
-            {
-                Dispatcher.DispatchOnMainThread(() =>
-                {
-                    PlayerPrefs.SetString("advertising_id", adid);
-                    PlayerPrefs.Save();
-                });
-            }
-        }
-#endif
-
         private static void RegisterAttributionData(AdjustAttribution attribution)
         {
             if (Integration.UserSegmentation == null)
-            {
-                QuickLog.Error<AdjustTrackingProvider>(
-                    $"User segmentation manager is not found"
-                );
                 return;
-            }
 
             string campaignName = attribution.Campaign ?? "unknown_campaign";
             string creativeName = attribution.Creative ?? "unknown_creative";
@@ -295,25 +278,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             byte[] cph = sha256.ComputeHash(Encoding.UTF8.GetBytes(campaignName));
             StringBuilder cphBuilder = new StringBuilder();
             foreach (var c in cph)
-            {
                 cphBuilder.Append(c.ToString("x2"));
-            }
-            string campaignHash = cphBuilder.ToString();
 
             byte[] cth = sha256.ComputeHash(Encoding.UTF8.GetBytes(creativeName));
             StringBuilder cthBuilder = new StringBuilder();
             foreach (var c in cth)
-            {
                 cthBuilder.Append(c.ToString("x2"));
-            }
-
-            string creativeHash = cthBuilder.ToString();
 
             Integration.UserSegmentation.RegisterSegmentation(
                 new SegmentationInformation
                 {
-                    CampaignHash = campaignHash,
-                    CreativeHash = creativeHash,
+                    CampaignHash = cphBuilder.ToString(),
+                    CreativeHash = cthBuilder.ToString(),
                     CampaignName = campaignName,
                     CreativeName = creativeName
                 }
