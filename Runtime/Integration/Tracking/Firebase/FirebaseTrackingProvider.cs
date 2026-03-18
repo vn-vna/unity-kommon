@@ -210,6 +210,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             }
         }
 
+        public void SetUserProperty(string key, string value)
+        {
+            try
+            {
+                Firebase.Analytics.FirebaseAnalytics.SetUserProperty(key, value);
+
+                QuickLog.Info<FirebaseTrackingProvider>(
+                    "Firebase UserProperty set: {0} = {1}", key, value
+                );
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Warning<FirebaseTrackingProvider>(
+                    "Failed to set user property {0}: {1}", key, ex.Message
+                );
+            }
+        }
+
         private void TryConvertRevenueToUsd(ref PurchaseTrackingInfo info)
         {
             if (Integration.CurrencyConverter == null) return;

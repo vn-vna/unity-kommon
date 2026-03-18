@@ -77,6 +77,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             }
         }
 
+        public void SetUserProperty(string key, string value)
+        {
+            foreach (var provider in _providers)
+            {
+                if (provider is IUserIdentityProvider idProvider)
+                {
+                    idProvider.SetUserProperty(key, value);
+                }
+            }
+        }
+
         public void Shutdown()
         {
             foreach (ITrackingProvider provider in _providers)
