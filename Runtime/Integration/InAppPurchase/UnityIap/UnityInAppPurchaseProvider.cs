@@ -36,6 +36,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public bool IsInitialized { get; private set; }
         public byte[] GooglePlayTangleData { get; set; }
         public byte[] AppleTangleData { get; set; }
+        public ITrackingContextProvider TrackingContextProvider { get; set; }
         public bool HasRestorableProducts => _pendingRestorations.Count > 0;
 
         private List<ProductDefinition> _productDefinitions;
@@ -46,9 +47,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private int _tryCount;
         private Queue<string> _pendingRestorations = new Queue<string>();
         private HashSet<string> _handledPurchase = new HashSet<string>();
-
-        public Func<int> GetStageNumber;
-        public Func<int?> GetCurrentStage;
 
         public void Initialize()
         {
@@ -341,8 +339,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
             IAPTrackingTracker.TrackIAPurchase(new IAPPurchaseEventInfo
             {
-                StageNumber = GetStageNumber?.Invoke() ?? 0,
-                CurrentStage = GetCurrentStage?.Invoke(),
+                StageNumber = TrackingContextProvider?.GetStageNumber() ?? 0,
+                CurrentStage = TrackingContextProvider?.GetCurrentStage() ?? 0,
 
                 OrderId = transactionId,
                 ProductId = productId,
