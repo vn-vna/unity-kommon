@@ -47,6 +47,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private Queue<string> _pendingRestorations = new Queue<string>();
         private HashSet<string> _handledPurchase = new HashSet<string>();
 
+        public Func<int> GetStageNumber;
+        public Func<int?> GetCurrentStage;
+
         public void Initialize()
         {
             _storeController = UnityIAPServices.StoreController();
@@ -298,6 +301,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     .FirstOrDefault(p => p.ProductId == product.Product.definition.id);
                 if (prod != null)
                 {
+                    TrackIAP(
+                        prod.ProductId,
+                        order.Info.TransactionID,
+                        "failed",
+                        order.FailureReason.ToString()
+                    );
                     Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(prod));
                 }
             }
@@ -319,6 +328,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     Dispatcher.DispatchOnMainThread(() => PurchaseDeferred?.Invoke(prod));
                 }
             }
+        }
+
+        private void TrackIAP(
+            string productId,
+            string transactionId,
+            string status,
+            string failureReason = null
+        )
+        {
+            var price = GetProductPrice(productId);
+
+            IAPTrackingTracker.TrackIAPurchase(new IAPPurchaseEventInfo
+            {
+                StageNumber = GetStageNumber?.Invoke() ?? 0,
+                CurrentStage = GetCurrentStage?.Invoke(),
+
+                OrderId = transactionId,
+                ProductId = productId,
+
+                Price = (double)(price?.Amount ?? 0),
+                Value = (double)(price?.Amount ?? 0),
+                Currency = price?.IsoCurrencyCode ?? "USD",
+
+                Status = status,
+                FailureReason = failureReason
+            });
         }
 
         private void HandlePurchaseConfirmed(Order order)
@@ -345,6 +380,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     order.Info.TransactionID
                 );
 
+                foreach (var receipt in receipts)
+                {
+                    TrackIAP(
+                        receipt.ProductID,
+                        order.Info.TransactionID,
+                        "failed",
+                        "invalid_receipt"
+                    );
+                }
+
                 foreach (var product in receipts)
                 {
                     Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(product.Product));
@@ -370,6 +415,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     );
                     continue;
                 }
+
+                TrackIAP(
+                    receipt.ProductID,
+                    order.Info.TransactionID,
+                    "success"
+                );
 
                 SendPurchasingTrackingEvent(product, order);
                 Dispatcher.DispatchOnMainThread(() => PurchaseSucceeded?.Invoke(product));
