@@ -10,7 +10,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private static int _currentStage = 0;
         private static int _currentLoop = 0;
 
-        public static string GetCurrentPlayId() => _currentPlayId ?? string.Empty;
+        public static string CurrentPlayId => _currentPlayId;
 
         public static void BeginPlay(int stageNumber, int currencyBalance)
         {
@@ -58,10 +58,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 { "currency_balance", info.CurrencyBalance },
                 { "loop_number", info.LoopNumber }
             };
-            if (info.CurrentStage.HasValue)
-            {
-                parameters["current_stage"] = info.CurrentStage.Value;
-            }
             // Log via the central tracking system
             Integration.TrackingManager?.TrackAction(new TrackingActionInfo
             {
