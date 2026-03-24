@@ -138,7 +138,7 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
 
                         _trackedSteps.Add(operation);
                         int stepNumber = i + 1; 
-                        LoginLoadingTracker.TrackLoginLoadingStep(stepNumber, operation, statusCode);
+                        LoginLoadingTracker.EnqueueStep(stepNumber, operation, statusCode);
                     }
 
                     break;
@@ -194,6 +194,8 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
         {
             _loadingTimer += Time.deltaTime;
             if (_loadingTimer < _minimumLoadingTime) return;
+
+            LoginLoadingTracker.Flush();
 
             gameObject.SetActive(false);
             _loading = false;
