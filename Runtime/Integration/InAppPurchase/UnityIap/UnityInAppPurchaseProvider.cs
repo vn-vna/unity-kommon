@@ -299,9 +299,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     .FirstOrDefault(p => p.ProductId == product.Product.definition.id);
                 if (prod != null)
                 {
+                    string orderId = IAPUtils.ExtractOrderId(
+                        order.Info.Receipt,
+                        order.Info.TransactionID
+                    );
+
                     TrackIAP(
                         prod.ProductId,
-                        order.Info.TransactionID,
+                        orderId,
                         "failed",
                         order.FailureReason.ToString()
                     );
@@ -330,38 +335,77 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void TrackIAP(
             string productId,
-            string transactionId,
+            string orderId,
             string status,
             string failureReason = null
         )
         {
             var price = GetProductPrice(productId);
 
+            double finalPrice = 0;
+            string finalCurrency = "USD";
+
+            if (price.HasValue)
+            {
+                (finalPrice, finalCurrency) = ConvertToUsd(
+                    (double)price.Value.Amount,
+                    price.Value.IsoCurrencyCode
+                );
+            }
+
             IAPTrackingTracker.TrackIAPurchase(new IAPPurchaseEventInfo
             {
                 StageNumber = TrackingContextProvider?.GetStageNumber() ?? 0,
                 CurrentStage = TrackingContextProvider?.GetCurrentStage() ?? 0,
 
-                OrderId = transactionId,
+                OrderId = orderId,
                 ProductId = productId,
 
-                Price = (double)(price?.Amount ?? 0),
-                Value = (double)(price?.Amount ?? 0),
-                Currency = price?.IsoCurrencyCode ?? "USD",
+                Price = finalPrice,
+                Value = finalPrice,
+                Currency = finalCurrency,
 
                 Status = status,
                 FailureReason = failureReason
             });
         }
 
+        private (double price, string currency) ConvertToUsd(double price, string currency)
+        {
+            if (string.IsNullOrEmpty(currency))
+                return (price, "USD");
+
+            if (string.Equals(currency, "USD", StringComparison.OrdinalIgnoreCase))
+                return (price, "USD");
+
+            if (Integration.CurrencyConverter != null)
+            {
+                decimal? usdAmount = Integration.CurrencyConverter.Convert(
+                    currency,
+                    "USD",
+                    (decimal)price
+                );
+
+                if (usdAmount.HasValue)
+                    return ((double)usdAmount.Value, "USD");
+            }
+
+            QuickLog.Warning<UnityInAppPurchaseProvider>(
+                "Currency convert failed: {0} -> USD",
+                currency
+            );
+
+            return (0, "USD");
+        }
+
         private void HandlePurchaseConfirmed(Order order)
         {
-            if (_handledPurchase.Contains(order.Info.TransactionID))
+            string orderId = IAPUtils.ExtractOrderId(
+                order.Info.Receipt,
+                order.Info.TransactionID
+            );
+            if (_handledPurchase.Contains(orderId))
             {
-                QuickLog.Warning<UnityInAppPurchaseProvider>(
-                    "Purchase already handled for transaction ID: {0}",
-                    order.Info.TransactionID
-                );
                 return;
             }
 
@@ -382,7 +426,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 {
                     TrackIAP(
                         receipt.ProductID,
-                        order.Info.TransactionID,
+                        orderId,
                         "failed",
                         "invalid_receipt"
                     );
@@ -416,7 +460,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
                 TrackIAP(
                     receipt.ProductID,
-                    order.Info.TransactionID,
+                    orderId,
                     "success"
                 );
 
@@ -433,7 +477,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 );
             }
 
-            _handledPurchase.Add(order.Info.TransactionID);
+            _handledPurchase.Add(orderId);
         }
 
         private void ProcessOrder(Order order, out bool isValid, out List<UnityPurchaseResult> receipts)

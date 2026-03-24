@@ -55,6 +55,7 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
         private bool _loading;
         private Action _loadingCallback;
         private float _progress;
+        private HashSet<string> _trackedSteps = new HashSet<string>();
         #endregion
 
         public bool _loginLoadingStepsTracked = false;
@@ -133,6 +134,9 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
 
                     if (!_loginLoadingStepsTracked && Mathf.Approximately(progress, 1f))
                     {
+                        if (_trackedSteps.Contains(operation)) return;
+
+                        _trackedSteps.Add(operation);
                         int stepNumber = i + 1; 
                         LoginLoadingTracker.TrackLoginLoadingStep(stepNumber, operation, statusCode);
                     }

@@ -18,10 +18,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 { "status", info.Status },
                 { "failure_reason", info.FailureReason ?? "" }
             };
-            if (info.CurrentStage.HasValue)
-            {
-                parameters["current_stage"] = info.CurrentStage.Value;
-            }
 
             Integration.TrackingManager?.TrackAction(new TrackingActionInfo
             {
