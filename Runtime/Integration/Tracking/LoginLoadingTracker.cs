@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
@@ -19,24 +21,28 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             });
         }
 
-        public static void Flush()
+        public static IEnumerator FlushWithDelay(float delay = 0.1f)
         {
             while (_pendingSteps.Count > 0)
             {
                 var step = _pendingSteps.Dequeue();
 
+                Debug.Log($"SEND step={step.StepNumber} at {Time.time}");
+
                 var parameters = new Dictionary<string, object>
-            {
-                { "step_number", step.StepNumber },
-                { "step_name", step.StepName },
-                { "status_code", step.StatusCode }
-            };
+        {
+            { "step_number", step.StepNumber },
+            { "step_name", step.StepName },
+            { "status_code", step.StatusCode }
+        };
 
                 Integration.TrackingManager?.TrackAction(new TrackingActionInfo
                 {
                     ActionId = "login_loading_step",
                     Parameters = parameters
                 });
+
+                yield return new WaitForSeconds(delay);
             }
         }
 

@@ -190,18 +190,30 @@ namespace Com.Hapiga.Scheherazade.Common.LoadingManager
             }
         }
 
+        private bool _isFlushing = false;
+
         private void HandleProgressCompleted()
         {
+            if (_isFlushing) return;
+
             _loadingTimer += Time.deltaTime;
             if (_loadingTimer < _minimumLoadingTime) return;
 
-            LoginLoadingTracker.Flush();
+            _isFlushing = true;
+            StartCoroutine(FinishWithTracking());
+        }
+        private IEnumerator FinishWithTracking()
+        {
+            yield return LoginLoadingTracker.FlushWithDelay(0.1f);
 
             gameObject.SetActive(false);
             _loading = false;
             _loadingCallback?.Invoke();
             _loadingCallback = null;
             _operations.Clear();
+
+            _isFlushing = false;
+
             LoadingFinished?.Invoke();
         }
         #endregion
