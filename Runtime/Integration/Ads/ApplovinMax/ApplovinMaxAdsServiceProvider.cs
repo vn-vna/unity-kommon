@@ -61,6 +61,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private float _timer;
         private bool _bannerAutoRefreshing;
 
+        private string _lastInterstitialPlacement;
+        private string _lastRewardPlacement;
+        private string _lastBannerPlacement;
+        private string _lastAppOpenPlacement;
+
         #endregion
 
         #region Ctor
@@ -184,6 +189,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void ShowBanner()
         {
+            _lastBannerPlacement = "ad_banner";
             try
             {
                 MaxSdk.ShowBanner(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
@@ -208,6 +214,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public bool ShowInterstitialAds(Action<bool> callback, string placement)
         {
+            _lastInterstitialPlacement = placement;
             if (!IsInitialized || !IsInterstitialAvailable)
             {
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Interstitial Ads are not available.");
@@ -237,6 +244,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public bool ShowRewardAds(Action<bool> callback, string placement)
         {
+            _lastRewardPlacement = placement;
             if (!IsInitialized)
             {
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Applovin Max SDK is not initialized.");
@@ -534,7 +542,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
 
             int stage = TrackingContextProvider?.GetStageNumber() ?? 0;
-            string placement = ResolvePlacement(type);
+            string placement = GetPlacement(type);
 
             var parameters = new Dictionary<string, object>
             {
@@ -556,14 +564,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 Severity = ActionSeverity.Info
             });
         }
-        private string ResolvePlacement(AdsType type)
+
+        private string GetPlacement(AdsType type)
         {
             return type switch
             {
-                AdsType.Rewarded => "reward_revive",
-                AdsType.Interstitial => "inter_level_end",
-                AdsType.Banner => "banner_ingame",
-                AdsType.OpenApp => "app_open",
+                AdsType.Interstitial => _lastInterstitialPlacement,
+                AdsType.Rewarded => _lastRewardPlacement,
+                AdsType.Banner => _lastBannerPlacement,
+                AdsType.OpenApp => _lastAppOpenPlacement,
                 _ => "unknown"
             };
         }
