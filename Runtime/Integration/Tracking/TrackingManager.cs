@@ -125,8 +125,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 if (_providers.Any(p => p.IsInitialized))
                 {
                     Status = TrackingManagerStatus.Ready;
-                    string userId = SystemInfo.deviceUniqueIdentifier;
-                    SetUserId(userId);
                     yield break;
                 }
 
