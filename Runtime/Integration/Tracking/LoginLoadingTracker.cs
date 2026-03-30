@@ -27,8 +27,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 var step = _pendingSteps.Dequeue();
 
-                Debug.Log($"SEND step={step.StepNumber} at {Time.time}");
-
                 var parameters = new Dictionary<string, object>
         {
             { "step_number", step.StepNumber },
