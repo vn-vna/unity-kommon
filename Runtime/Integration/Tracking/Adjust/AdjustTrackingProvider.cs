@@ -79,6 +79,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             try
             {
                 Adjust.InitSdk(_config);
+                IsInitialized = true;
             }
             catch (Exception ex)
             {
@@ -200,22 +201,28 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         private void HandleAdjustSessionFailure(AdjustSessionFailure failure)
         {
-            IsInitialized = false;
-
-            QuickLog.Warning<AdjustTrackingProvider>(
-                "Adjust session initialization failed: {0} (Adid: {1})",
-                failure.Message, failure.Adid
-            );
-
-            Dispatcher.DispatchOnMainThread(InitializeInternal);
+            Dispatcher.DispatchOnMainThread(() =>
+            {
+                IsInitialized = false;
+                QuickLog.Warning<AdjustTrackingProvider>(
+                    "Adjust session initialization failed: {0} (Adid: {1})",
+                    failure.Message, failure.Adid
+                );
+                InitializeInternal();
+            });
         }
 
         private void HandleAdjustSessionSuccess(AdjustSessionSuccess success)
         {
-            IsInitialized = true;
-
-            Dispatcher.DispatchOnMainThread(RequireAdvertisingId);
-            Dispatcher.DispatchOnMainThread(RequireAttributions);
+            Dispatcher.DispatchOnMainThread(() =>
+            {
+                QuickLog.Critical<AdjustTrackingProvider>(
+                    "Adjust tracking initialization successfully: {0} (Adid {1})",
+                    success.Message, success.Adid
+                );
+                RequireAdvertisingId();
+                RequireAttributions();
+            });
         }
 
 #if !UNITY_EDITOR
