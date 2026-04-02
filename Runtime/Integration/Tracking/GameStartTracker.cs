@@ -14,19 +14,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public static void BeginPlay(int stageNumber, int currencyBalance)
         {
-            if (_currentPlayId == null)
-            {
-                _currentPlayId = Guid.NewGuid().ToString("N");
-                _currentLoop = 0;
-            }
-            else if (stageNumber != _currentStage)
-            {
-                _currentLoop = 0;
-            }
-            else
-            {
+            _currentPlayId = Guid.NewGuid().ToString("N");
+
+            if (stageNumber == _currentStage)
                 _currentLoop++;
-            }
+            else
+                _currentLoop = 0;
 
             _currentStage = stageNumber;
 
