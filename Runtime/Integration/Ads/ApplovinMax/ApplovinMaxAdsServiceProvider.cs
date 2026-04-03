@@ -565,6 +565,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             });
         }
 
+        private void SendRevenueTracking(MaxSdkBase.AdInfo info, AdsType type)
+        {
+            Integration.TrackingManager
+                ?.TrackAdRevenue(new AdTrackingInfo
+                {
+                    Provider = this,
+                    NetworkName = "Applovin",
+                    AdType = type,
+                    RevenueUnit = "USD",
+                    Placement = info.Placement,
+                    Revenue = info.Revenue,
+                    AdFormat = info.AdFormat,
+                    CreativeIdentifier = info.CreativeIdentifier,
+                    Country = MaxSdk.GetSdkConfiguration().CountryCode
+                });
+        }
+
         private string GetPlacement(AdsType type)
         {
             return type switch
@@ -627,6 +644,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsReward", "RevenuePaid");
             SendAdImpressionTracking(info, AdsType.Rewarded);
+            SendRevenueTracking(info, AdsType.Rewarded);
         }
 
         private void HandleRewardedAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
@@ -674,6 +692,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsInter", "RevenuePaid");
             SendAdImpressionTracking(info, AdsType.Interstitial);
+            SendRevenueTracking(info, AdsType.Interstitial);
             _intersitialFulfilled = true;
         }
 
@@ -698,6 +717,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsBanner", "RevenuePaid");
             SendAdImpressionTracking(info, AdsType.Banner);
+            SendRevenueTracking(info, AdsType.Banner);
         }
 
         private void HandleBannerAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
@@ -743,6 +763,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsAppOpen", "RevenuePaid");
             SendAdImpressionTracking(info, AdsType.OpenApp);
+            SendRevenueTracking(info, AdsType.OpenApp);
         }
 
         private void HandleAppOpenAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
