@@ -25,7 +25,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsInterstitialReady(Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId);
+                return IsAnyInterstitialReady();
             }
         }
 
@@ -34,7 +34,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsRewardedAdReady(Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId);
+                return IsAnyRewardedReady();
             }
         }
 
@@ -488,6 +488,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     "[Waterfall] Interstitial fallback → retry DEFAULT"
                 );
 
+                _interstitialTierIndex = -1;
+
                 LoadWithDelay(() => TryLoadInterstitialTier(lastIndex), 1.5f);
                 return;
             }
@@ -507,6 +509,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             );
 
             MaxSdk.LoadInterstitial(unitId);
+
+            LoadWithDelay(() =>
+            {
+                if (_interstitialTierIndex == index)
+                {
+                    QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                        $"[Waterfall] TIMEOUT Interstitial tier {index} → next"
+                    );
+
+                    _interstitialTierIndex = -1;
+                    TryLoadInterstitialTier(index + 1);
+                }
+            }, 5.0f);
         }
 
         private void LoadRewardedAds()
@@ -538,6 +553,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     "[Waterfall] Rewarded fallback → retry DEFAULT"
                 );
 
+                _rewardedTierIndex = -1;
+
                 LoadWithDelay(() => TryLoadRewardedTier(lastIndex), 1.5f);
                 return;
             }
@@ -566,8 +583,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     $"[Waterfall] Rewarded exception tier {index} | {ex.Message}"
                 );
 
+                _rewardedTierIndex = -1;
+
                 TryLoadRewardedTier(index + 1);
             }
+
+            LoadWithDelay(() =>
+            {
+                if (_rewardedTierIndex == index)
+                {
+                    QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                        $"[Waterfall] TIMEOUT Rewarded tier {index} → next"
+                    );
+
+                    _rewardedTierIndex = -1;
+                    TryLoadRewardedTier(index + 1);
+                }
+            }, 5.0f);
         }
 
         private void LoadBannerAds()
@@ -738,7 +770,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             if (failedIndex == _rewardedTierIndex)
             {
-                TryLoadRewardedTier(_rewardedTierIndex + 1);
+                _rewardedTierIndex = -1;
+                TryLoadRewardedTier(failedIndex + 1);
             }
         }
 
@@ -796,7 +829,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             if (failedIndex == _interstitialTierIndex)
             {
-                TryLoadInterstitialTier(_interstitialTierIndex + 1);
+                _interstitialTierIndex = -1;
+                TryLoadInterstitialTier(failedIndex + 1);
             }
         }
 
@@ -884,7 +918,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private async void LoadWithDelay(Action action, float delay)
         {
             await System.Threading.Tasks.Task.Delay((int)(delay * 1000));
-            action?.Invoke();
+
+            Dispatcher.DispatchOnMainThread(() =>
+            {
+                action?.Invoke();
+            });
         }
         #endregion
     }
