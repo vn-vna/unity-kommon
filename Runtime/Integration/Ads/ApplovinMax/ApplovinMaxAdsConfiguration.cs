@@ -14,6 +14,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public bool IsBannerAutoSized => bannerAutoSized;
         public Color BannerBackgroundColor => bannerBackgroundColor;
 
+        public string[] InterstitialUnitIds
+            => GetWaterfallUnitIds(interstitialWaterfallUnitIds, AdsType.Interstitial);
+
+        public string[] RewardedUnitIds
+            => GetWaterfallUnitIds(rewardedWaterfallUnitIds, AdsType.Rewarded);
+
         public MappedList<AdsType, ApplovinMaxAdsUnitId> UnitIdsMapping
         {
             get
@@ -46,10 +52,33 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         [SerializeField]
         private Color bannerBackgroundColor = Color.black;
 
+        [SerializeField]
+        private ApplovinMaxAdsWaterfallUnitId[] interstitialWaterfallUnitIds;
+
+        [SerializeField]
+        private ApplovinMaxAdsWaterfallUnitId[] rewardedWaterfallUnitIds;
+
         private MappedList<AdsType, ApplovinMaxAdsUnitId> ConstructMappedList()
             => new MappedList<AdsType, ApplovinMaxAdsUnitId>(
                 unitIds, (uid) => uid.Type
             );
+
+        private string[] GetWaterfallUnitIds(ApplovinMaxAdsWaterfallUnitId[] waterfall, AdsType fallbackType)
+        {
+            var list = waterfall?
+                .Select(x => x?.UnitId)
+                .Where(x => !string.IsNullOrEmpty(x))
+                .Distinct()
+                .ToList() ?? new System.Collections.Generic.List<string>();
+
+            if (UnitIdsMapping.TryGetValue(fallbackType, out var fallback))
+            {
+                if (!list.Contains(fallback.UnitId))
+                    list.Add(fallback.UnitId);
+            }
+
+            return list.ToArray();
+        }
 
 #if UNITY_EDITOR
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -66,5 +95,25 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
         }
 #endif
+    }
+
+    [Serializable]
+    public class ApplovinMaxAdsWaterfallUnitId
+    {
+        public string UnitId
+            => Application.platform switch
+            {
+#if UNITY_EDITOR
+                _ => androidUnitId,
+#else
+            RuntimePlatform.IPhonePlayer => iosUnitId,
+            RuntimePlatform.Android => androidUnitId,
+            _ => null
+#endif
+            };
+
+        [SerializeField] private string tierName; 
+        [SerializeField] private string androidUnitId;
+        [SerializeField] private string iosUnitId;
     }
 }

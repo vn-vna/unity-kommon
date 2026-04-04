@@ -1,4 +1,4 @@
-#if APPLOVIN_MAX
+﻿#if APPLOVIN_MAX
 
 using System;
 using System.Collections.Generic;
@@ -65,6 +65,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private string _lastRewardPlacement;
         private string _lastBannerPlacement;
         private string _lastAppOpenPlacement;
+
+        private int _interstitialTierIndex = -1;
+        private int _rewardedTierIndex = -1;
 
         #endregion
 
@@ -215,109 +218,124 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public bool ShowInterstitialAds(Action<bool> callback, string placement)
         {
             _lastInterstitialPlacement = placement;
-            if (!IsInitialized || !IsInterstitialAvailable)
+
+            string unitId = GetBestInterstitial();
+
+            if (unitId == null)
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Interstitial Ads are not available.");
                 callback?.Invoke(false);
                 return false;
             }
 
-            try
-            {
-                _intersitialFulfilled = false;
-                MaxSdk.ShowInterstitial(
-                    Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId,
-                    placement
-                );
-                SendAdsCallShowTrackingEvent(AdsType.Interstitial, placement);
-            }
-            catch (Exception ex)
-            {
-                QuickLog.Error<ApplovinMaxAdsServiceProvider>($"Failed to show interstitial ad: {ex.Message}");
-                callback?.Invoke(false);
-                return false;
-            }
+            _intersitialFulfilled = false;
 
+            MaxSdk.ShowInterstitial(unitId, placement);
             _interstitialCallback = callback;
+
             return true;
+        }
+        private string GetBestInterstitial()
+        {
+            foreach (var id in Configuration.InterstitialUnitIds)
+            {
+                if (MaxSdk.IsInterstitialReady(id))
+                    return id;
+            }
+            return null;
         }
 
         public bool ShowRewardAds(Action<bool> callback, string placement)
         {
             _lastRewardPlacement = placement;
+
             if (!IsInitialized)
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Applovin Max SDK is not initialized.");
                 callback?.Invoke(false);
                 return false;
             }
 
-            if (IsRewardedAvailable)
+            string rewardedUnitId = GetBestRewarded();
+
+            if (rewardedUnitId != null)
             {
                 _rewardFulfilled = false;
-                bool called = false;
+
                 try
                 {
-                    MaxSdk.ShowRewardedAd(
-                        Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId,
-                        placement
-                    );
-
+                    MaxSdk.ShowRewardedAd(rewardedUnitId, placement);
                     _rewardedCallback = callback;
-                    called = true;
+
+                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     QuickLog.Error<ApplovinMaxAdsServiceProvider>(
-                        "Failed to show rewarded ad: {0}",
-                        ex.Message
+                        $"ShowRewarded failed: {ex.Message}"
                     );
-                }
-
-                if (called)
-                {
-                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
-                    return true;
                 }
             }
 
-            if (IsInterstitialAvailable)
+            string interstitialUnitId = GetBestInterstitial();
+
+            if (interstitialUnitId != null)
             {
-                bool called = false;
                 try
                 {
-                    MaxSdk.ShowInterstitial(
-                        Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId,
-                        placement
-                    );
+                    MaxSdk.ShowInterstitial(interstitialUnitId, placement);
                     _interstitialCallback = callback;
-                    called = true;
+
+                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     QuickLog.Error<ApplovinMaxAdsServiceProvider>(
-                        "Failed to show interstitial ad: {0}",
-                        ex.Message
+                        $"Fallback interstitial failed: {ex.Message}"
                     );
-                }
-
-                if (called)
-                {
-                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
-                    return true;
                 }
             }
 
             QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
-                "Both Rewarded Ads and Interstitial Ads are not available."
+                "No rewarded or interstitial available"
             );
-            InvokeAdsCallbackOnce(ref callback, false);
+
+            callback?.Invoke(false);
             return false;
+        }
+
+        private string GetBestRewarded()
+        {
+            foreach (var id in Configuration.RewardedUnitIds)
+            {
+                if (MaxSdk.IsRewardedAdReady(id))
+                    return id;
+            }
+            return null;
         }
 
         #endregion
 
         #region Private Methods
+
+        private bool IsAnyInterstitialReady()
+        {
+            foreach (var id in Configuration.InterstitialUnitIds)
+            {
+                if (MaxSdk.IsInterstitialReady(id))
+                    return true;
+            }
+            return false;
+        }
+        private bool IsAnyRewardedReady()
+        {
+            foreach (var id in Configuration.RewardedUnitIds)
+            {
+                if (MaxSdk.IsRewardedAdReady(id))
+                    return true;
+            }
+            return false;
+        }
 
         private static void SendAdsCallShowTrackingEvent(AdsType format, string placement)
         {
@@ -443,52 +461,112 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadInterstitialAds()
         {
-            if (IsInterstitialAvailable)
-            {
-                return;
-            }
-
             if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Interstitial))
+                return;
+
+            if (IsAnyInterstitialReady())
+                return;
+
+            if (_interstitialTierIndex >= 0)
+                return;
+
+            TryLoadInterstitialTier(0);
+        }
+
+        private void TryLoadInterstitialTier(int index)
+        {
+            var unitIds = Configuration.InterstitialUnitIds;
+
+            if (unitIds == null || unitIds.Length == 0)
+                return;
+
+            if (index >= unitIds.Length)
             {
+                int lastIndex = unitIds.Length - 1;
+
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "[Waterfall] Interstitial fallback → retry DEFAULT"
+                );
+
+                LoadWithDelay(() => TryLoadInterstitialTier(lastIndex), 1.5f);
                 return;
             }
 
-            try
+            string unitId = unitIds[index];
+
+            if (MaxSdk.IsInterstitialReady(unitId))
             {
-                MaxSdk.LoadInterstitial(Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId);
-                SendTrackingAction("AdsInter", "CallLoad");
-                QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Interstitial Ad");
+                _interstitialTierIndex = -1;
+                return;
             }
-            catch (Exception ex)
-            {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
-                    "Failed to load interstitial ad: {0}",
-                    ex.Message
-                );
-            }
+
+            _interstitialTierIndex = index;
+
+            QuickLog.Info<ApplovinMaxAdsServiceProvider>(
+                $"[Waterfall] Loading Interstitial tier {index} | {unitId}"
+            );
+
+            MaxSdk.LoadInterstitial(unitId);
         }
 
         private void LoadRewardedAds()
         {
-            if (IsRewardedAvailable) return;
-
             if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Rewarded))
+                return;
+
+            if (IsAnyRewardedReady())
+                return;
+
+            if (_rewardedTierIndex >= 0)
+                return;
+
+            TryLoadRewardedTier(0);
+        }
+
+        private void TryLoadRewardedTier(int index)
+        {
+            var unitIds = Configuration.RewardedUnitIds;
+
+            if (unitIds == null || unitIds.Length == 0)
+                return;
+
+            if (index >= unitIds.Length)
             {
+                int lastIndex = unitIds.Length - 1;
+
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "[Waterfall] Rewarded fallback → retry DEFAULT"
+                );
+
+                LoadWithDelay(() => TryLoadRewardedTier(lastIndex), 1.5f);
                 return;
             }
 
+            string unitId = unitIds[index];
+
+            if (MaxSdk.IsRewardedAdReady(unitId))
+            {
+                _rewardedTierIndex = -1;
+                return;
+            }
+
+            _rewardedTierIndex = index;
+
+            QuickLog.Info<ApplovinMaxAdsServiceProvider>(
+                $"[Waterfall] Loading Rewarded tier {index} | {unitId}"
+            );
+
             try
             {
-                MaxSdk.LoadRewardedAd(Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId);
-                SendTrackingAction("AdsReward", "CallLoad");
-                QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Rewarded Ad");
+                MaxSdk.LoadRewardedAd(unitId);
             }
             catch (Exception ex)
             {
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>(
-                    "Failed to load rewarded ad: {0}",
-                    ex.Message
+                    $"[Waterfall] Rewarded exception tier {index} | {ex.Message}"
                 );
+
+                TryLoadRewardedTier(index + 1);
             }
         }
 
@@ -647,14 +725,27 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             SendRevenueTracking(info, AdsType.Rewarded);
         }
 
-        private void HandleRewardedAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
+        private void HandleRewardedAdFailedToLoad(string adUnitId, MaxSdkBase.ErrorInfo info)
         {
             SendTrackingAction("AdsReward", "FailedToLoad");
+
+            var unitIds = Configuration.RewardedUnitIds;
+            int failedIndex = Array.IndexOf(unitIds, adUnitId);
+
+            QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                $"[Waterfall] Rewarded FAILED | tier={failedIndex} | unitId={adUnitId}"
+            );
+
+            if (failedIndex == _rewardedTierIndex)
+            {
+                TryLoadRewardedTier(_rewardedTierIndex + 1);
+            }
         }
 
         private void HandleRewardedAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsReward", "Loaded");
+            _rewardedTierIndex = -1;
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Rewarded Ad is loaded and ready to be shown."
             );
@@ -696,14 +787,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             _intersitialFulfilled = true;
         }
 
-        private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
+        private void HandleInterstitialAdFailedToLoad(string adUnitId, MaxSdkBase.ErrorInfo info)
         {
             SendTrackingAction("AdsInter", "FailedToLoad");
+
+            var unitIds = Configuration.InterstitialUnitIds;
+            int failedIndex = Array.IndexOf(unitIds, adUnitId);
+
+            if (failedIndex == _interstitialTierIndex)
+            {
+                TryLoadInterstitialTier(_interstitialTierIndex + 1);
+            }
         }
 
         private void HandleInterstitialAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Loaded");
+            _interstitialTierIndex = -1;
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Interstitial Ad is loaded and ready to be shown."
             );
@@ -781,6 +881,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #endregion
 
+        private async void LoadWithDelay(Action action, float delay)
+        {
+            await System.Threading.Tasks.Task.Delay((int)(delay * 1000));
+            action?.Invoke();
+        }
         #endregion
     }
 }
