@@ -44,6 +44,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private int _fetchProductsTryCount;
         private bool? _storeConnected;
         private int _tryCount;
+        private bool _isPurchasePending;
+        private List<UnityPurchaseResult> _pendingPurchaseResults = new List<UnityPurchaseResult>();
         private Queue<string> _pendingRestorations = new Queue<string>();
         private HashSet<string> _handledPurchase = new HashSet<string>();
 
@@ -92,7 +94,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
                 lock (this)
                 {
-                    _storeConnected = true;
+                    _storeConnected ??= true;
                 }
 
                 QuickLog.Info<UnityInAppPurchaseProvider>(
@@ -177,7 +179,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 RefreshProductCatalog();
             }
 
-            _storeController.FetchProducts(_productDefinitions);
+            try
+            {
+                _storeController.FetchProducts(
+                    _productDefinitions,
+                    new ExponentialBackOffRetryPolicy()
+                );
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<UnityInAppPurchaseProvider>(
+                    "Failed to initiate product fetch: {0}",
+                    ex.Message
+                );
+            }
+
         }
 
         private void RefreshProductCatalog()
@@ -268,7 +284,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandlePurchasePending(PendingOrder order)
         {
-            _storeController.ConfirmPurchase(order);
+            // _storeController.ConfirmPurchase(order);
+            VerifyActionAsync(order).Dispose();
         }
 
         private void HandlePurchaseFailed(FailedOrder order)
@@ -286,7 +303,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 {
                     Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(prod));
                 }
-                SendPurchasingFailTrackingEvent(prod, order);
             }
         }
 
@@ -319,25 +335,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 return;
             }
 
-            ProcessOrder(
-                order,
-                out bool isValid,
-                out List<UnityPurchaseResult> receipts
-            );
+            ProcessVerifiedOrder(order, out List<UnityPurchaseResult> receipts);
 
-            if (!isValid)
-            {
-                QuickLog.Warning<UnityInAppPurchaseProvider>(
-                    "Verification failed for transaction >> Transaction ID: {0}",
-                    order.Info.TransactionID
-                );
+            // if (!isValid)
+            // {
+            //     QuickLog.Warning<UnityInAppPurchaseProvider>(
+            //         "Verification failed for transaction >> Transaction ID: {0}",
+            //         order.Info.TransactionID
+            //     );
 
-                foreach (var product in receipts)
-                {
-                    Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(product.Product));
-                }
-                return;
-            }
+            //     foreach (var product in receipts)
+            //     {
+            //         Dispatcher.DispatchOnMainThread(() => PurchaseFailed?.Invoke(product.Product));
+            //     }
+            //     return;
+            // }
 
             QuickLog.Info<UnityInAppPurchaseProvider>(
                 "Verification succeeded for transaction >> Transaction ID: {0}",
@@ -397,6 +409,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             receipts ??= new List<UnityPurchaseResult>();
         }
 
+        private void ProcessVerifiedOrder(Order order, out List<UnityPurchaseResult> receipts)
+        {
+            receipts = new List<UnityPurchaseResult>();
+            foreach (var product in order.CartOrdered.Items())
+            {
+                var prod = Manager.ProductDatabase.Products
+                    .FirstOrDefault(p => p.ProductId == product.Product.definition.id);
+                if (prod != null)
+                {
+                    Dispatcher.DispatchOnMainThread(() => PurchaseSucceeded?.Invoke(prod));
+                }
+            }
+        }
+
         private void SendPurchasingTrackingEvent(IInAppPurchaseProduct product, Order order)
         {
             if (Integration.TrackingManager == null) return;
@@ -405,30 +431,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
             Integration.TrackingManager.TrackPurchaseRevenue(new PurchaseTrackingInfo
             {
-                Status = "Success",
                 Currency = price?.IsoCurrencyCode ?? "USD",
                 Price = (double)(price?.Amount ?? 0),
                 ProductId = product.ProductId,
                 ReceiptRaw = order.Info.Receipt,
-                OrderId = order.Info.TransactionID
-            });
-        }
-
-        private void SendPurchasingFailTrackingEvent(IInAppPurchaseProduct product, FailedOrder order)
-        {
-            if (Integration.TrackingManager == null) return;
-
-            var price = GetProductPrice(product.ProductId);
-
-            Integration.TrackingManager.TrackPurchaseRevenue(new PurchaseTrackingInfo
-            {
-                Currency = "USD",
-                Price = (double)(price?.Amount ?? 0),
-                ProductId = product.ProductId,
-                ReceiptRaw = order.Info.Receipt,
-                OrderId = order.Info.TransactionID,
-                Status = "Failed",
-                FailureReason = order.FailureReason.ToString()
+                TransactionId = order.Info.TransactionID
             });
         }
 
@@ -516,6 +523,61 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             PlayerPrefs.Save();
         }
 
+        private async Task VerifyActionAsync(PendingOrder order)
+        {
+            Debug.Log("VerifyActionAsync - Start");
+            Product purchasedProduct = order.CartOrdered.Items().First().Product;
+            if (purchasedProduct == null) return;
+            if (string.IsNullOrEmpty(purchasedProduct.definition?.id)) return;
+
+            var iapProduct = Manager.ProductDatabase.Products
+                .FirstOrDefault(p => p.ProductId == purchasedProduct.definition.id);
+
+            if (iapProduct == null || string.IsNullOrEmpty(iapProduct.ProductId)) return;
+            Debug.Log("VerifyActionAsync - 1");
+            _isPurchasePending = true;
+#if !UNITY_EDITOR
+        var reqData = new VerifyIAPRequestData()
+        {
+            Receipt = Newtonsoft.Json.JsonConvert.DeserializeObject<ReceiptClient>(order.Info.Receipt),
+            ItemID = iapProduct.InAppPurchasePack.Category.GetHashCode(),
+            ProductID = purchasedProduct.definition.id,
+            AccountID = GameConfig.DeviceId,
+            ProductType = iapProduct.ProductType.GetHashCode(),
+#if UNITY_IOS
+            JwsRepresentation = (order.Info != null && order.Info.Apple != null) ? order.Info.Apple.jwsRepresentation : ""
+#endif
+        };
+
+        var verifySuccess = await DataManager.VerifyIAP(reqData);
+        
+        if (!verifySuccess)
+        {
+            return;
+        }
+        else
+        {
+            // Confirm the purchase (required)
+            _storeController.ConfirmPurchase(order);
+        }
+#else
+            // Confirm the purchase (required)
+            _storeController.ConfirmPurchase(order);
+#endif
+            _isPurchasePending = false;
+            for (int i = 0; i < order.CartOrdered.Items().Count(); i++)
+            {
+                var product = order.CartOrdered.Items().ElementAt(i).Product;
+                _pendingPurchaseResults.Add(new UnityPurchaseResult
+                {
+                    TransactionID = order.Info.TransactionID,
+                    ProductID = product.definition.id,
+                    PurchaseDate = DateTime.UtcNow,
+                    Product = Manager.ProductDatabase.Products
+                        .FirstOrDefault(p => p.ProductId == product.definition.id)
+                });
+            }
+        }
     }
 }
 

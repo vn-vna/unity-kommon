@@ -13,6 +13,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public string Status { get; set; }
         public string FailureReason { get; set; }
         public string ReceiptRaw { get; set; }
+        public string TransactionId { get; set; }
 
         public Receipt Receipt
         {
