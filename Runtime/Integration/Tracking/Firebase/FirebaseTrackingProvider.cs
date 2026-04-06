@@ -135,16 +135,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
-                {"ad_platform",     info.NetworkName},
+                {"ad_platform",     "AppLovin"},
                 {"ad_source",       info.NetworkName},
                 {"ad_unit_name",    info.RevenueUnit},
+                {"placement", info.Placement ?? "unknown"},
                 {"ad_format",       info.AdFormat},
                 {"ad_creative",     info.CreativeIdentifier},
                 {"country",         info.Country},
                 {"value",           info.Revenue},
                 {"currency",        CurrencyCode.USD.ToUpper()},
             };
-
+            if (info.CustomParams != null)
+            {
+                foreach (var kvp in info.CustomParams)
+                {
+                    parameters[kvp.Key] = kvp.Value;
+                }
+            }
             foreach (FirebaseRevenueTrackingEvent conf in _configuration.RevenueTrackingConfig)
             {
                 if (!CheckAvailableTrackingFlag(info.AdType, conf.trackingOptions))

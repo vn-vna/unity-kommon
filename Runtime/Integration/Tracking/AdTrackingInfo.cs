@@ -1,4 +1,5 @@
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
+using System.Collections.Generic;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
@@ -13,5 +14,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public string AdFormat { get; set; }
         public string CreativeIdentifier { get; set; }
         public string Country { get; set; }
+        public Dictionary<string, object> CustomParams { get; set; }
     }
 }

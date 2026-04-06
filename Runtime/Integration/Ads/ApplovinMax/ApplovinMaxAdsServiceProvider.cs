@@ -646,50 +646,59 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 });
         }
 
-        private void SendAdImpressionTracking(MaxSdkBase.AdInfo adInfo, AdsType type)
-        {
-            if (Integration.TrackingManager == null)
-                return;
+        //private void SendAdImpressionTracking(MaxSdkBase.AdInfo adInfo, AdsType type)
+        //{
+        //    if (Integration.TrackingManager == null)
+        //        return;
 
-            int stage = TrackingContextProvider?.GetStageNumber() ?? 0;
-            string placement = GetPlacement(type);
+        //    int stage = TrackingContextProvider?.GetStageNumber() ?? 0;
+        //    string placement = GetPlacement(type);
 
-            var parameters = new Dictionary<string, object>
-            {
-                { "stage_number", stage },
-                { "ad_platform", "AppLovin" },
-                { "ad_source", adInfo.NetworkName },
-                { "ad_format", adInfo.AdFormat },
-                { "ad_unit_name", adInfo.AdUnitIdentifier },
-                { "placement", placement },
-                { "value", adInfo.Revenue },
-                { "currency", "USD" },
-                { "precision", adInfo.RevenuePrecision }
-            };
+        //    var parameters = new Dictionary<string, object>
+        //    {
+        //        { "stage_number", stage },
+        //        { "ad_platform", "AppLovin" },
+        //        { "ad_source", adInfo.NetworkName },
+        //        { "ad_format", adInfo.AdFormat },
+        //        { "ad_unit_name", adInfo.AdUnitIdentifier },
+        //        { "placement", placement },
+        //        { "value", adInfo.Revenue },
+        //        { "currency", "USD" },
+        //        { "precision", adInfo.RevenuePrecision }
+        //    };
 
-            Integration.TrackingManager.TrackAction(new TrackingActionInfo
-            {
-                ActionId = "ad_impression", 
-                Parameters = parameters,
-                Severity = ActionSeverity.Info
-            });
-        }
+        //    Integration.TrackingManager.TrackAction(new TrackingActionInfo
+        //    {
+        //        ActionId = "ad_impression", 
+        //        Parameters = parameters,
+        //        Severity = ActionSeverity.Info
+        //    });
+        //}
 
         private void SendRevenueTracking(MaxSdkBase.AdInfo info, AdsType type)
         {
-            Integration.TrackingManager
-                ?.TrackAdRevenue(new AdTrackingInfo
+            int stage = TrackingContextProvider?.GetStageNumber() ?? 0;
+            string placement = GetPlacement(type);
+
+            Integration.TrackingManager?.TrackAdRevenue(new AdTrackingInfo
+            {
+                Provider = this,
+
+                NetworkName = info.NetworkName,        
+                AdType = type,
+                RevenueUnit = info.AdUnitIdentifier,    
+                Placement = placement,
+                Revenue = info.Revenue,
+                AdFormat = info.AdFormat,
+                CreativeIdentifier = info.CreativeIdentifier,
+                Country = MaxSdk.GetSdkConfiguration().CountryCode,
+
+                CustomParams = new Dictionary<string, object>
                 {
-                    Provider = this,
-                    NetworkName = "Applovin",
-                    AdType = type,
-                    RevenueUnit = "USD",
-                    Placement = info.Placement,
-                    Revenue = info.Revenue,
-                    AdFormat = info.AdFormat,
-                    CreativeIdentifier = info.CreativeIdentifier,
-                    Country = MaxSdk.GetSdkConfiguration().CountryCode
-                });
+                    { "stage_number", stage },
+                    { "precision", info.RevenuePrecision }
+                }
+            });
         }
 
         private string GetPlacement(AdsType type)
@@ -753,7 +762,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleRewardedAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsReward", "RevenuePaid");
-            SendAdImpressionTracking(info, AdsType.Rewarded);
+            //SendAdImpressionTracking(info, AdsType.Rewarded);
             SendRevenueTracking(info, AdsType.Rewarded);
         }
 
@@ -815,7 +824,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "RevenuePaid");
-            SendAdImpressionTracking(info, AdsType.Interstitial);
+            //SendAdImpressionTracking(info, AdsType.Interstitial);
             SendRevenueTracking(info, AdsType.Interstitial);
             _intersitialFulfilled = true;
         }
@@ -850,7 +859,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleBannerAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsBanner", "RevenuePaid");
-            SendAdImpressionTracking(info, AdsType.Banner);
+            //SendAdImpressionTracking(info, AdsType.Banner);
             SendRevenueTracking(info, AdsType.Banner);
         }
 
@@ -896,7 +905,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleAppOpenAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsAppOpen", "RevenuePaid");
-            SendAdImpressionTracking(info, AdsType.OpenApp);
+            //SendAdImpressionTracking(info, AdsType.OpenApp);
             SendRevenueTracking(info, AdsType.OpenApp);
         }
 
