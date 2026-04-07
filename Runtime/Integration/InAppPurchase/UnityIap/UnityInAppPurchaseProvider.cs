@@ -36,6 +36,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public bool IsInitialized { get; private set; }
         public byte[] GooglePlayTangleData { get; set; }
         public byte[] AppleTangleData { get; set; }
+        public Func<PendingOrder, IInAppPurchaseProduct, Task<bool>> VerifyPurchaseAsync { get; set; }
         public bool HasRestorableProducts => _pendingRestorations.Count > 0;
 
         private List<ProductDefinition> _productDefinitions;
@@ -285,7 +286,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private void HandlePurchasePending(PendingOrder order)
         {
             // _storeController.ConfirmPurchase(order);
-            VerifyActionAsync(order).Dispose();
+            _ = VerifyActionAsync(order);
         }
 
         private void HandlePurchaseFailed(FailedOrder order)
@@ -536,49 +537,50 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             if (iapProduct == null || string.IsNullOrEmpty(iapProduct.ProductId)) return;
             Debug.Log("VerifyActionAsync - 1");
             _isPurchasePending = true;
-#if !UNITY_EDITOR
-        var reqData = new VerifyIAPRequestData()
-        {
-            Receipt = Newtonsoft.Json.JsonConvert.DeserializeObject<ReceiptClient>(order.Info.Receipt),
-            ItemID = iapProduct.InAppPurchasePack.Category.GetHashCode(),
-            ProductID = purchasedProduct.definition.id,
-            AccountID = GameConfig.DeviceId,
-            ProductType = iapProduct.ProductType.GetHashCode(),
-#if UNITY_IOS
-            JwsRepresentation = (order.Info != null && order.Info.Apple != null) ? order.Info.Apple.jwsRepresentation : ""
-#endif
-        };
-
-        var verifySuccess = await DataManager.VerifyIAP(reqData);
-        
-        if (!verifySuccess)
-        {
-            return;
-        }
-        else
-        {
-            // Confirm the purchase (required)
-            _storeController.ConfirmPurchase(order);
-        }
-#else
-            // Confirm the purchase (required)
-            _storeController.ConfirmPurchase(order);
-#endif
-            _isPurchasePending = false;
-            for (int i = 0; i < order.CartOrdered.Items().Count(); i++)
+            try
             {
-                var product = order.CartOrdered.Items().ElementAt(i).Product;
-                _pendingPurchaseResults.Add(new UnityPurchaseResult
+                if (!Application.isEditor)
                 {
-                    TransactionID = order.Info.TransactionID,
-                    ProductID = product.definition.id,
-                    PurchaseDate = DateTime.UtcNow,
-                    Product = Manager.ProductDatabase.Products
-                        .FirstOrDefault(p => p.ProductId == product.definition.id)
-                });
+                    if (VerifyPurchaseAsync == null)
+                    {
+                        QuickLog.Error<UnityInAppPurchaseProvider>(
+                            "No purchase verification callback configured for product {0}.",
+                            purchasedProduct.definition.id
+                        );
+                        return;
+                    }
+
+                    bool verifySuccess = await VerifyPurchaseAsync(order, iapProduct);
+                    if (!verifySuccess)
+                    {
+                        QuickLog.Warning<UnityInAppPurchaseProvider>(
+                            "Purchase verification failed for transaction ID: {0}",
+                            order.Info.TransactionID
+                        );
+                        return;
+                    }
+                }
+
+                _storeController.ConfirmPurchase(order);
+
+                for (int i = 0; i < order.CartOrdered.Items().Count(); i++)
+                {
+                    var product = order.CartOrdered.Items().ElementAt(i).Product;
+                    _pendingPurchaseResults.Add(new UnityPurchaseResult
+                    {
+                        TransactionID = order.Info.TransactionID,
+                        ProductID = product.definition.id,
+                        PurchaseDate = DateTime.UtcNow,
+                        Product = Manager.ProductDatabase.Products
+                            .FirstOrDefault(p => p.ProductId == product.definition.id)
+                    });
+                }
+            }
+            finally
+            {
+                _isPurchasePending = false;
             }
         }
     }
 }
-
 #endif

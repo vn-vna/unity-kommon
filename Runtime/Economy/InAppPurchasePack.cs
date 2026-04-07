@@ -18,6 +18,8 @@ namespace Com.Hapiga.Scheherazade.Economy
         public string PackId => packId;
         public string PackName => packName;
         public string SaleDisplay => saleDisplay;
+        public IAPProductType ProductType => productType;
+        public IAPCategory Category => category;
 
         [SerializeField]
         private string packId;
@@ -26,15 +28,21 @@ namespace Com.Hapiga.Scheherazade.Economy
         private string packName;
 
         [SerializeField]
-        private List<Transaction> transactions;
+        private string saleDisplay;
 
         [SerializeField]
-        private bool allowRecover;
+        private IAPProductType productType;
+
+        [SerializeField]
+        private IAPCategory category;
 
         [SerializeField]
         private List<Transaction> recoveryTransactions;
 
         [SerializeField]
-        private string saleDisplay;
+        private List<Transaction> transactions;
+
+        [SerializeField]
+        private bool allowRecover;
     }
 }
