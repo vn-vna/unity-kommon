@@ -537,7 +537,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             if (iapProduct == null || string.IsNullOrEmpty(iapProduct.ProductId)) return;
             Debug.Log("VerifyActionAsync - Start");
             _isPurchasePending = true;
-#if !UNITY_EDITOR
+// #if !UNITY_EDITOR
         var reqData = new VerifyIAPRequestData()
         {
             Receipt = Newtonsoft.Json.JsonConvert.DeserializeObject<ReceiptClient>(order.Info.Receipt),
