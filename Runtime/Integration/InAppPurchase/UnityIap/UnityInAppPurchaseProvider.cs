@@ -535,7 +535,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 .FirstOrDefault(p => p.ProductId == purchasedProduct.definition.id);
 
             if (iapProduct == null || string.IsNullOrEmpty(iapProduct.ProductId)) return;
-            Debug.Log("VerifyActionAsync - 1");
+            Debug.Log("VerifyActionAsync - Start");
             _isPurchasePending = true;
 #if !UNITY_EDITOR
         var reqData = new VerifyIAPRequestData()
@@ -550,14 +550,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 #endif
         };
         
-        QuickLog.Info<UnityInAppPurchaseProvider>(
+        Dispatcher.DispatchOnMainThread(() => QuickLog.Info<UnityInAppPurchaseProvider>(
             "Initiating IAP verification for product {0}, Transaction ID: {1}, Purchase Date: {2}, Product Type: {3}, JWS: {4}, Item Category: {5}",
             iapProduct.ProductId,
             reqData.Receipt.transactionID,
             reqData.ProductType,
             reqData.JwsRepresentation,
             iapProduct.Category.GetHashCode()
-        );
+        ));
 
         var verifySuccess = await DataManager.VerifyIAP(reqData);
         
