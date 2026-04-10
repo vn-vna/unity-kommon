@@ -537,49 +537,52 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             if (iapProduct == null || string.IsNullOrEmpty(iapProduct.ProductId)) return;
             Debug.Log("VerifyActionAsync - 1");
             _isPurchasePending = true;
-            try
-            {
-                if (!Application.isEditor)
-                {
-                    if (VerifyPurchaseAsync == null)
-                    {
-                        QuickLog.Error<UnityInAppPurchaseProvider>(
-                            "No purchase verification callback configured for product {0}.",
-                            purchasedProduct.definition.id
-                        );
-                        return;
-                    }
+#if !UNITY_EDITOR
+        var reqData = new VerifyIAPRequestData()
+        {
+            Receipt = Newtonsoft.Json.JsonConvert.DeserializeObject<ReceiptClient>(order.Info.Receipt),
+            ItemID = iapProduct.Category.GetHashCode(),
+            ProductID = purchasedProduct.definition.id,
+            AccountID = GameConfig.DeviceId,
+            ProductType = iapProduct.ProductType.GetHashCode(),
+#if UNITY_IOS
+            JwsRepresentation = (order.Info != null && order.Info.Apple != null) ? order.Info.Apple.jwsRepresentation : ""
+#endif
+        };
+        
+        QuickLog.Info<UnityInAppPurchaseProvider>(
+            "Initiating IAP verification for product {0}, Transaction ID: {1}, Purchase Date: {2}, Product Type: {3}, JWS: {4}, Item Category: {5}",
+            iapProduct.ProductId,
+            reqData.Receipt.transactionID,
+            reqData.ProductType,
+            reqData.JwsRepresentation,
+            iapProduct.Category.GetHashCode()
+        );
 
-                    bool verifySuccess = await VerifyPurchaseAsync(order, iapProduct);
-                    if (!verifySuccess)
-                    {
-                        QuickLog.Warning<UnityInAppPurchaseProvider>(
-                            "Purchase verification failed for transaction ID: {0}",
-                            order.Info.TransactionID
-                        );
-                        return;
-                    }
-                }
+        var verifySuccess = await DataManager.VerifyIAP(reqData);
+        
+        if (!verifySuccess)
+        {
+            return;
+        }
+        else
+        {
 
-                _storeController.ConfirmPurchase(order);
+            // Reward the player BEFORE confirming purchase
+            var productId = order.CartOrdered.Items().First().Product.definition.id;
 
-                for (int i = 0; i < order.CartOrdered.Items().Count(); i++)
-                {
-                    var product = order.CartOrdered.Items().ElementAt(i).Product;
-                    _pendingPurchaseResults.Add(new UnityPurchaseResult
-                    {
-                        TransactionID = order.Info.TransactionID,
-                        ProductID = product.definition.id,
-                        PurchaseDate = DateTime.UtcNow,
-                        Product = Manager.ProductDatabase.Products
-                            .FirstOrDefault(p => p.ProductId == product.definition.id)
-                    });
-                }
-            }
-            finally
-            {
-                _isPurchasePending = false;
-            }
+            // Confirm the purchase (required)
+            _storeController.ConfirmPurchase(order);
+
+        }
+#else
+            // Reward the player BEFORE confirming purchase
+            var productId = order.CartOrdered.Items().First().Product.definition.id;
+            // Confirm the purchase (required)
+            _storeController.ConfirmPurchase(order);
+#endif
+            _isPurchasePending = false;
+            Debug.Log("VerifyActionAsync - Complete");
         }
     }
 }
