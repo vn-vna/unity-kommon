@@ -10,12 +10,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
     public enum IAPProductType
     {
-        RemoveAds = 1,
-        Gold = 2,
-        HelperPack = 3,
-        StarterPack = 4,
-        BundlePack = 5,
-        PiggyBank = 6,
+        OneTimePurchase = 1,
+        Subscription = 2,
     }
 
     public enum IAPCategory
