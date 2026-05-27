@@ -7,10 +7,34 @@ using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.Converter;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
+    [Flags]
+    public enum FirebaseRevenueTrackingOptions
+    {
+        None = 0,
+        BannerAdsRevenue = 1 << 0,
+        InterstitialAdsRevenue = 1 << 1,
+        RewardedAdsRevenue = 1 << 2,
+        AppOpenAdsRevenue = 1 << 3,
+        IapRevenue = 1 << 4,
+    }
+
+    [Serializable]
+    public struct FirebaseRevenueTrackingEvent
+    {
+        public string eventName;
+        public FirebaseRevenueTrackingOptions trackingOptions;
+    }
+
+    [CreateAssetMenu(
+        fileName = "FirebaseTrackingProvider",
+        menuName = "Scheherazade/Tracking Providers/Firebase"
+    )]
     public class FirebaseTrackingProvider :
+        ScriptableObject,
         ITrackingProvider
     {
         public bool IsInitialized { get; private set; }
@@ -18,15 +42,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool IsTrackingEnabled { get; private set; }
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
         public int Priority => 0;
-        public ActionSeverity MinimumActionSeverity => _configuration.MinimumActionSeverity;
+        public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
+        public FirebaseRevenueTrackingEvent[] RevenueTrackingConfig => adsRevenueTrackingConfig;
+        public float IapMultiplier => iapMultiplier;
 
-        private FirebaseTrackingConfiguration _configuration;
+        [SerializeField]
+        private FirebaseRevenueTrackingEvent[] adsRevenueTrackingConfig;
 
-        public FirebaseTrackingProvider(FirebaseTrackingConfiguration configuration)
-        {
-            _configuration = configuration
-                ?? throw new ArgumentNullException(nameof(configuration));
-        }
+        [SerializeField]
+        private float iapMultiplier = 0.7f;
+
+        [SerializeField]
+        private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
+
 
         public void Initialize()
         {
@@ -143,7 +171,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 {"currency",        CurrencyCode.USD.ToUpper()},
             };
 
-            foreach (FirebaseRevenueTrackingEvent conf in _configuration.RevenueTrackingConfig)
+            foreach (FirebaseRevenueTrackingEvent conf in RevenueTrackingConfig)
             {
                 if (!CheckAvailableTrackingFlag(info.AdType, conf.trackingOptions))
                 {
@@ -166,7 +194,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 TryConvertRevenueToUsd(ref info);
             }
 
-            info.Price *= _configuration.IapMultiplier;
+            info.Price *= IapMultiplier;
 
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
@@ -175,7 +203,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 {"currency",        info.Currency},
             };
 
-            foreach (FirebaseRevenueTrackingEvent conf in _configuration.RevenueTrackingConfig)
+            foreach (FirebaseRevenueTrackingEvent conf in RevenueTrackingConfig)
             {
                 if (!conf.trackingOptions.HasFlag(FirebaseRevenueTrackingOptions.IapRevenue))
                 {
@@ -217,7 +245,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     => options.HasFlag(FirebaseRevenueTrackingOptions.InterstitialAdsRevenue),
                 AdsType.Rewarded
                     => options.HasFlag(FirebaseRevenueTrackingOptions.RewardedAdsRevenue),
-                AdsType.AppOpen
+                AdsType.OpenApp
                     => options.HasFlag(FirebaseRevenueTrackingOptions.AppOpenAdsRevenue),
                 AdsType.Banner
                     => options.HasFlag(FirebaseRevenueTrackingOptions.BannerAdsRevenue),

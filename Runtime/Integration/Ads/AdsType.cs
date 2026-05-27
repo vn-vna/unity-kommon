@@ -5,7 +5,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         Interstitial = 0,
         Banner = 1,
         OpenApp = 2,
-        Rewarded = 3,
-        AppOpen = 4
+        Rewarded = 3
     }
 }

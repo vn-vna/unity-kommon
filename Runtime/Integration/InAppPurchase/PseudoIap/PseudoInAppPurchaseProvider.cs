@@ -6,7 +6,12 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 {
+    [CreateAssetMenu(
+        fileName = "PseudoInAppPurchaseProvider",
+        menuName = "Scheherazade/In-App Purchase Providers/Pseudo Provider"
+    )]
     public class PseudoInAppPurchaseProvider :
+        ScriptableObject,
         IInAppPurchaseProvider
     {
         public Action<IInAppPurchaseProduct> PurchaseInitiated { get; set; }

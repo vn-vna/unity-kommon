@@ -16,19 +16,18 @@ namespace Com.Hapiga.Scheherazade.Common.Prebuild
         public void OnPreprocessBuild(BuildReport report)
         {
 #if TRACKING_ADJUST
-            AdjustConfiguration adjustConfig = AssetDatabase.FindAssets("")
+            AdjustTrackingProvider adjustConfig = AssetDatabase.FindAssets("")
                 .Select(AssetDatabase.GUIDToAssetPath)
-                .Select(AssetDatabase.LoadAssetAtPath<AdjustConfiguration>)
-                .Where(c => c != null)
-                .FirstOrDefault();
+                .Select(AssetDatabase.LoadAssetAtPath<AdjustTrackingProvider>)
+                .FirstOrDefault(c => c != null);
 
             VerifyAdjustConfiguration(adjustConfig);
 #endif
 
 #if APPLOVIN_MAX
-            ApplovinMaxAdsConfiguration maxConfig = AssetDatabase.FindAssets("")
+            ApplovinMaxAdsServiceProvider maxConfig = AssetDatabase.FindAssets("")
                 .Select(AssetDatabase.GUIDToAssetPath)
-                .Select(AssetDatabase.LoadAssetAtPath<ApplovinMaxAdsConfiguration>)
+                .Select(AssetDatabase.LoadAssetAtPath<ApplovinMaxAdsServiceProvider>)
                 .Where(c => c != null)
                 .FirstOrDefault();
 
@@ -46,9 +45,9 @@ namespace Com.Hapiga.Scheherazade.Common.Prebuild
 #endif
 
 #if FIREBASE_ANALYTICS
-            FirebaseTrackingConfiguration firebaseConfig = AssetDatabase.FindAssets("")
+            FirebaseTrackingProvider firebaseConfig = AssetDatabase.FindAssets("")
                 .Select(AssetDatabase.GUIDToAssetPath)
-                .Select(AssetDatabase.LoadAssetAtPath<FirebaseTrackingConfiguration>)
+                .Select(AssetDatabase.LoadAssetAtPath<FirebaseTrackingProvider>)
                 .Where(c => c != null)
                 .FirstOrDefault();
 
@@ -57,7 +56,7 @@ namespace Com.Hapiga.Scheherazade.Common.Prebuild
         }
 
 #if TRACKING_ADJUST
-        private void VerifyAdjustConfiguration(AdjustConfiguration adjustConfig)
+        private void VerifyAdjustConfiguration(AdjustTrackingProvider adjustConfig)
         {
             if (adjustConfig == null)
             {
@@ -100,7 +99,7 @@ namespace Com.Hapiga.Scheherazade.Common.Prebuild
 #endif
 
 #if APPLOVIN_MAX
-        private void VerifyAppLovinMaxConfiguration(ApplovinMaxAdsConfiguration maxConfig)
+        private void VerifyAppLovinMaxConfiguration(ApplovinMaxAdsServiceProvider maxConfig)
         {
             if (maxConfig == null)
             {
@@ -203,7 +202,7 @@ namespace Com.Hapiga.Scheherazade.Common.Prebuild
 #endif
 
 #if FIREBASE_ANALYTICS
-        private void VerifyFirebaseTrackingConfiguration(FirebaseTrackingConfiguration firebaseConfig)
+        private void VerifyFirebaseTrackingConfiguration(FirebaseTrackingProvider firebaseConfig)
         {
             if (firebaseConfig == null)
             {

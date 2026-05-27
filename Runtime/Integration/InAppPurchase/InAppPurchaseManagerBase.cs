@@ -27,6 +27,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public bool HasRestorableProducts => _provider != null && _provider.HasRestorableProducts;
         #endregion
 
+        #region Serialized Fields
+        [SerializeField]
+        private ScriptableObject provider;
+        #endregion
+
         #region Private Fields
         private IInAppPurchaseProvider _provider;
         #endregion
@@ -37,6 +42,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             base.Awake();
             Status = InAppPurchaseManagerStatus.Uninitialized;
             Integration.RegisterManager(this);
+
+            if (provider == null)
+            {
+                return;
+            }
+
+            if (provider is not IInAppPurchaseProvider inAppPurchaseProvider)
+            {
+                Debug.LogError("Assigned provider does not implement IInAppPurchaseProvider.");
+                return;
+            }
+
+            RegisterProvider(inAppPurchaseProvider);
         }
         #endregion
 
@@ -122,7 +140,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         #region Private Methods
         protected virtual void HandleInitializationComplete()
         { }
-        
+
         private void HandlePurchaseInitiated(IInAppPurchaseProduct product) => PurchaseInitiated?.Invoke(product);
         private void HandlePurchaseSucceeded(IInAppPurchaseProduct product) => PurchaseSucceeded?.Invoke(product);
         private void HandlePurchaseFailed(IInAppPurchaseProduct product) => PurchaseFailed?.Invoke(product);

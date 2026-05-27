@@ -21,8 +21,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public IInAppPurchaseProduct Product { get; set; }
     }
 
-
+    [CreateAssetMenu(
+        fileName = "UnityInAppPurchaseProvider",
+        menuName = "Scheherazade/In-App Purchase Providers/Unity IAP"
+    )]
     public class UnityInAppPurchaseProvider :
+        ScriptableObject,
         IInAppPurchaseProvider
     {
         public Action<IInAppPurchaseProduct> PurchaseInitiated { get; set; }

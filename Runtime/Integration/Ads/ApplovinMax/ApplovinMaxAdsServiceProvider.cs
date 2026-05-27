@@ -2,14 +2,21 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Hapiga.Scheherazade.Common.MappedList;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 {
-    public partial class ApplovinMaxAdsServiceProvider :
+    [CreateAssetMenu(
+        fileName = "ApplovinMaxAdsServiceProvider",
+        menuName = "Scheherazade/Ads Service Providers/Applovin Max"
+    )]
+    public class ApplovinMaxAdsServiceProvider :
+        ScriptableObject,
         IAdsServiceProvider
     {
         #region Interfaces & Properties
@@ -24,7 +31,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsInterstitialReady(Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId);
+                return MaxSdk.IsInterstitialReady(UnitIdsMapping[AdsType.Interstitial].UnitId);
             }
         }
 
@@ -33,7 +40,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsRewardedAdReady(Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId);
+                return MaxSdk.IsRewardedAdReady(UnitIdsMapping[AdsType.Rewarded].UnitId);
             }
         }
 
@@ -42,12 +49,70 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsAppOpenAdReady(Configuration.UnitIdsMapping[AdsType.OpenApp].UnitId);
+                return MaxSdk.IsAppOpenAdReady(UnitIdsMapping[AdsType.OpenApp].UnitId);
             }
         }
 
         public bool IsBannerAvailable { get; private set; }
-        public ApplovinMaxAdsConfiguration Configuration { get; private set; }
+        public bool IsTestAds => isTestAds;
+        public ApplovinMaxAdsEnabledAds EnabledAds => enabledAds;
+        public BannerAdsPosition BannerAdPosition => bannerAdsDisplayPosition;
+        public bool IsBannerAutoSized => bannerAutoSized;
+        public Color BannerBackgroundColor => bannerBackgroundColor;
+
+        public MappedList<AdsType, ApplovinMaxAdsUnitId> UnitIdsMapping
+        {
+            get
+            {
+                if (_unitIdsMapping == null)
+                {
+                    _unitIdsMapping = new Lazy<MappedList<AdsType, ApplovinMaxAdsUnitId>>(ConstructMappedList);
+                }
+                return _unitIdsMapping.Value;
+            }
+        }
+
+        private Lazy<MappedList<AdsType, ApplovinMaxAdsUnitId>> _unitIdsMapping;
+
+        [SerializeField]
+        private bool isTestAds;
+
+        [SerializeField]
+        private ApplovinMaxAdsEnabledAds enabledAds;
+
+        [SerializeField]
+        private ApplovinMaxAdsUnitId[] unitIds;
+
+        [SerializeField]
+        private BannerAdsPosition bannerAdsDisplayPosition;
+
+        [SerializeField]
+        private bool bannerAutoSized = true;
+
+        [SerializeField]
+        private Color bannerBackgroundColor = Color.black;
+
+        private MappedList<AdsType, ApplovinMaxAdsUnitId> ConstructMappedList()
+            => new MappedList<AdsType, ApplovinMaxAdsUnitId>(
+                unitIds, (uid) => uid.Type
+            );
+
+#if UNITY_EDITOR
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void EditorRefreshOnLoad()
+        {
+            var configurations = UnityEditor.AssetDatabase.FindAssets($"t:{nameof(ApplovinMaxAdsServiceProvider)}")
+                .Select(UnityEditor.AssetDatabase.GUIDToAssetPath)
+                .Select(UnityEditor.AssetDatabase.LoadAssetAtPath<ApplovinMaxAdsServiceProvider>)
+                .Where(asset => asset != null);
+
+            foreach (var config in configurations)
+            {
+                config._unitIdsMapping = null;
+            }
+        }
+#endif
+
 
         #endregion
 
@@ -62,24 +127,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #endregion
 
-        #region Ctor
-
-        public ApplovinMaxAdsServiceProvider(ApplovinMaxAdsConfiguration configuration)
-        {
-            if (configuration == null)
-            {
-                throw new ArgumentNullException(nameof(configuration));
-            }
-
-            Configuration = configuration;
-        }
-
-        #endregion
-
         #region Public Methods
 
         public void Initialize()
         {
+            CleanUp();
+
             MaxSdkCallbacks.OnSdkInitializedEvent += HandleMaxSdkInitializedEvents;
 
             MaxSdkCallbacks.AppOpen.OnAdLoadedEvent += HandleAppOpenAdLoaded;
@@ -116,10 +169,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void CleanUp()
         {
-            if (!IsInitialized)
-            {
-                return;
-            }
+            _intersitialFulfilled = false;
+            _rewardFulfilled = false;
+            _interstitialCallback = null;
+            _rewardedCallback = null;
+            _timer = 0;
+            _bannerAutoRefreshing = false;
 
             MaxSdkCallbacks.OnSdkInitializedEvent -= HandleMaxSdkInitializedEvents;
 
@@ -151,6 +206,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             MaxSdkCallbacks.Banner.OnAdLoadedEvent -= HandleBannerAdLoaded;
             MaxSdkCallbacks.Banner.OnAdLoadFailedEvent -= HandleBannerAdFailedToLoad;
             MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent -= HandleBannerAdRevenuePaid;
+
+            if (!IsInitialized)
+            {
+                return;
+            }
 
             IsInitialized = false;
         }
@@ -185,7 +245,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             try
             {
-                MaxSdk.ShowBanner(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.ShowBanner(UnitIdsMapping[AdsType.Banner].UnitId);
             }
             catch (Exception ex)
             {
@@ -197,7 +257,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             try
             {
-                MaxSdk.HideBanner(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.HideBanner(UnitIdsMapping[AdsType.Banner].UnitId);
             }
             catch (Exception ex)
             {
@@ -218,7 +278,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             {
                 _intersitialFulfilled = false;
                 MaxSdk.ShowInterstitial(
-                    Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId,
+                    UnitIdsMapping[AdsType.Interstitial].UnitId,
                     placement
                 );
                 SendAdsCallShowTrackingEvent(AdsType.Interstitial, placement);
@@ -250,7 +310,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 try
                 {
                     MaxSdk.ShowRewardedAd(
-                        Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId,
+                        UnitIdsMapping[AdsType.Rewarded].UnitId,
                         placement
                     );
 
@@ -278,7 +338,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 try
                 {
                     MaxSdk.ShowInterstitial(
-                        Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId,
+                        UnitIdsMapping[AdsType.Interstitial].UnitId,
                         placement
                     );
                     _interstitialCallback = callback;
@@ -357,7 +417,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleMaxSdkInitializedEvents(MaxSdkBase.SdkConfiguration configuration)
         {
-            if (Configuration.IsTestAds)
+            if (IsTestAds)
             {
                 MaxSdk.ShowMediationDebugger();
             }
@@ -377,20 +437,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             try
             {
                 MaxSdk.CreateBanner(
-                    Configuration.UnitIdsMapping[AdsType.Banner].UnitId,
-                    AcquireBannerAdsPosition(Configuration.BannerAdPosition)
+                    UnitIdsMapping[AdsType.Banner].UnitId,
+                    AcquireBannerAdsPosition(BannerAdPosition)
                 );
 
-                string autoSized = Configuration.IsBannerAutoSized ? "true" : "false";
+                string autoSized = IsBannerAutoSized ? "true" : "false";
                 MaxSdk.SetBannerExtraParameter(
-                    Configuration.UnitIdsMapping[AdsType.Banner].UnitId,
+                    UnitIdsMapping[AdsType.Banner].UnitId,
                     "adaptive_banner",
                     autoSized
                 );
 
                 MaxSdk.SetBannerBackgroundColor(
-                    Configuration.UnitIdsMapping[AdsType.Banner].UnitId,
-                    Configuration.BannerBackgroundColor
+                    UnitIdsMapping[AdsType.Banner].UnitId,
+                    BannerBackgroundColor
                 );
             }
             catch (Exception ex)
@@ -412,14 +472,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
-            if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.OpenApp))
+            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.OpenApp))
             {
+                return;
+            }
+
+            if (!UnitIdsMapping.ContainsKey(AdsType.OpenApp) || string.IsNullOrEmpty(UnitIdsMapping[AdsType.OpenApp].UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Open App ad unit ID is not set. Please check the configuration."
+                );
                 return;
             }
 
             try
             {
-                MaxSdk.LoadAppOpenAd(Configuration.UnitIdsMapping[AdsType.OpenApp].UnitId);
+                MaxSdk.LoadAppOpenAd(UnitIdsMapping[AdsType.OpenApp].UnitId);
                 SendTrackingAction("AdsAppOpen", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Open App Ad");
             }
@@ -439,14 +507,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
-            if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Interstitial))
+            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Interstitial))
             {
+                return;
+            }
+
+            if (!UnitIdsMapping.ContainsKey(AdsType.Interstitial) || string.IsNullOrEmpty(UnitIdsMapping[AdsType.Interstitial].UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Interstitial ad unit ID is not set. Please check the configuration."
+                );
                 return;
             }
 
             try
             {
-                MaxSdk.LoadInterstitial(Configuration.UnitIdsMapping[AdsType.Interstitial].UnitId);
+                MaxSdk.LoadInterstitial(UnitIdsMapping[AdsType.Interstitial].UnitId);
                 SendTrackingAction("AdsInter", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Interstitial Ad");
             }
@@ -463,14 +539,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             if (IsRewardedAvailable) return;
 
-            if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Rewarded))
+            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Rewarded))
             {
+                return;
+            }
+
+            if (!UnitIdsMapping.ContainsKey(AdsType.Rewarded) || string.IsNullOrEmpty(UnitIdsMapping[AdsType.Rewarded].UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Rewarded ad unit ID is not set. Please check the configuration."
+                );
                 return;
             }
 
             try
             {
-                MaxSdk.LoadRewardedAd(Configuration.UnitIdsMapping[AdsType.Rewarded].UnitId);
+                MaxSdk.LoadRewardedAd(UnitIdsMapping[AdsType.Rewarded].UnitId);
                 SendTrackingAction("AdsReward", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Rewarded Ad");
             }
@@ -495,15 +579,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
-            if (!Configuration.EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Banner))
+            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Banner))
             {
+                return;
+            }
+
+            if (!UnitIdsMapping.ContainsKey(AdsType.Banner) || string.IsNullOrEmpty(UnitIdsMapping[AdsType.Banner].UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Banner ad unit ID is not set. Please check the configuration."
+                );
                 return;
             }
 
             try
             {
-                MaxSdk.LoadBanner(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
-                MaxSdk.StartBannerAutoRefresh(Configuration.UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.LoadBanner(UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.StartBannerAutoRefresh(UnitIdsMapping[AdsType.Banner].UnitId);
                 _bannerAutoRefreshing = true;
                 SendTrackingAction("AdsBanner", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Banner Ad");
@@ -535,7 +627,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     Provider = this,
                     NetworkName = "Applovin",
                     AdType = type,
-                    RevenueUnit = Configuration.UnitIdsMapping[type].UnitId,
+                    RevenueUnit = UnitIdsMapping[type].UnitId,
                     Placement = info.Placement,
                     Revenue = info.Revenue,
                     AdFormat = info.AdFormat,

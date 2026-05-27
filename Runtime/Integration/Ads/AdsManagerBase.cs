@@ -36,6 +36,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         #region Serialized Fields
         [SerializeField]
         private AdsConfiguration overrideConfig;
+
+        [SerializeField]
+        private ScriptableObject adServiceProvider;
         #endregion
 
         #region Private Fields
@@ -52,6 +55,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (overrideConfig != null)
             {
                 OverrideConfiguration();
+            }
+
+            if (adServiceProvider != null)
+            {
+                IAdsServiceProvider provider = adServiceProvider as IAdsServiceProvider;
+                if (provider != null)
+                {
+                    RegisterProvider(provider);
+                }
+                else
+                {
+                    QuickLog.Error<AdsManagerBase<T>>(
+                        "Assigned ad service provider does not implement IAdsServiceProvider interface."
+                    );
+                }
             }
         }
 

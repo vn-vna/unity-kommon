@@ -10,7 +10,12 @@ using UnityEngine;
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
 
+    [CreateAssetMenu(
+        fileName = "AppMetricaTrackingProvider",
+        menuName = "Scheherazade/Tracking Providers/AppMetrica"
+    )]
     public class AppMetricaTrackingProvider :
+        ScriptableObject,
         ITrackingProvider
     {
         private string AppMetricaFirstSessionMarkerKey => "APPMETRICA_FIRST_SESSION";
@@ -19,9 +24,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool IsInitialized { get; private set; }
         public bool IsTrackingEnabled { get; private set; }
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
-        public AppMetricaTrackingConfiguration Configuration { get; private set; }
         public int Priority => 1;
-        public ActionSeverity MinimumActionSeverity => Configuration.MinimumActionSeverity;
+        public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
         public bool IsFirstSession
         {
             get
@@ -35,18 +39,40 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return isFirstSession;
             }
         }
-
-        public AppMetricaTrackingProvider(AppMetricaTrackingConfiguration configuration)
+        public string ApiKey
         {
-            Configuration = configuration;
+            get
+            {
+#if UNITY_ANDROID
+                return androidApiKey;
+#elif UNITY_IOS
+                return iosApiKey;
+#else
+                return string.Empty;
+#endif
+            }
         }
+
+        public float IapMultiplier => iapMultiplier;
+
+        [SerializeField]
+        private string androidApiKey;
+
+        [SerializeField]
+        private string iosApiKey;
+
+        [SerializeField]
+        private float iapMultiplier;
+
+        [SerializeField]
+        private ActionSeverity minimumActionSeverity = ActionSeverity.Info;
 
         public void Initialize()
         {
             try
             {
                 AppMetrica.OnActivation += HandleAppMetricaAppActivated;
-                AppMetrica.Activate(new AppMetricaConfig(Configuration.ApiKey)
+                AppMetrica.Activate(new AppMetricaConfig(ApiKey)
                 {
                     FirstActivationAsUpdate = !IsFirstSession,
                     Logs = true,
@@ -136,7 +162,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private Revenue AcquireRevenueInfo(ref PurchaseTrackingInfo info)
         {
             var purrev = new Revenue(
-                (long)(info.Price * Configuration.IapMultiplier * 1000000),
+                (long)(info.Price * IapMultiplier * 1000000),
                 info.Currency
             )
             {

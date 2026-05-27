@@ -22,6 +22,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #region Serialized Fields
         [SerializeField]
         private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
+
+        [SerializeField]
+        private ScriptableObject[] initialProviders;
         #endregion
 
         #region Private Fields
@@ -43,6 +46,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         protected override void Awake()
         {
             base.Awake();
+
+            if (initialProviders == null || initialProviders.Length == 0)
+            {
+                QuickLog.Info<TrackingManagerBase<T>>(
+                    "No initial tracking providers configured."
+                );
+            }
+            else
+            {
+                RegisterAllInitialProviders();
+            }
+
+
             Integration.RegisterManager(this);
             _providers.Clear();
         }
@@ -156,7 +172,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
-                if (!provider.IsTrackingEnabled) continue; 
+                if (!provider.IsTrackingEnabled) continue;
                 if ((provider.Features & TrackingProviderFeatures.ScreenView) == 0) continue;
                 provider.TrackScreen(screenId);
             }
@@ -282,11 +298,31 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
-                if (!provider.IsTrackingEnabled) continue; 
+                if (!provider.IsTrackingEnabled) continue;
                 if ((provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) continue;
                 provider.TrackPurchaseRevenue(info);
             }
 #endif
+        }
+        #endregion
+
+        #region Private Methods
+        private void RegisterAllInitialProviders()
+        {
+            foreach (ScriptableObject providerAsset in initialProviders)
+            {
+                if (providerAsset is ITrackingProvider provider)
+                {
+                    RegisterProvider(provider);
+                }
+                else
+                {
+                    QuickLog.Warning<TrackingManagerBase<T>>(
+                        "Initial provider asset {0} does not implement ITrackingProvider. Skipping.",
+                        providerAsset.name
+                    );
+                }
+            }
         }
         #endregion
     }

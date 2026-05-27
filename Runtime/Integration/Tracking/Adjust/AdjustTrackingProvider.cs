@@ -3,48 +3,118 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
-
 using AdjustSdk;
-
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
-
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
+    [Serializable]
+    public enum AdjustEnvironment
+    {
+        Sandbox,
+        Production
+    }
+
+    [Serializable]
+    public enum AdjustLogLevel
+    {
+        Verbose = 1,
+        Debug,
+        Info,
+        Warn,
+        Error,
+        Assert,
+        Suppress
+    }
+
+    [CreateAssetMenu(
+        fileName = "AdjustTrackingProvider", 
+        menuName = "Scheherazade/Tracking Providers/Adjust"
+    )]
     public class AdjustTrackingProvider :
+        ScriptableObject,
         ITrackingProvider
     {
         public ITrackingManager TrackingManager { get; set; }
         public bool IsInitialized { get; private set; }
         public bool IsTrackingEnabled { get; private set; }
-        public AdjustConfiguration Configuration { get; private set; }
+
         public TrackingProviderFeatures Features => TrackingProviderFeatures.Revenue;
+
         public int Priority => 1;
+
+        public string AppToken
+        {
+            get
+            {
+#if UNITY_ANDROID
+                return androidAppToken;
+#elif UNITY_IOS
+                return iosAppToken;
+#else
+                return string.Empty;
+#endif
+            }
+        }
+
+        public AdjustEnvironment Environment => environment;
+
+        public AdjustLogLevel LogLevel => logLevel;
+
+        public string IapEventName
+        {
+            get
+            {
+#if UNITY_ANDROID
+                return androidIapEventName;
+#elif UNITY_IOS
+                return iosIapEventName;
+#else
+                return string.Empty;
+#endif
+            }
+        }
+
+        public float IapMultiplier => iapMultiplier;
+
+        [SerializeField]
+        private string androidAppToken;
+
+        [SerializeField]
+        private string iosAppToken;
+
+        [SerializeField]
+        private AdjustEnvironment environment;
+
+        [SerializeField]
+        private string androidIapEventName;
+
+        [SerializeField]
+        private string iosIapEventName;
+
+        [SerializeField]
+        private float iapMultiplier;
+
+        [SerializeField]
+        private AdjustLogLevel logLevel = AdjustLogLevel.Verbose;
 
         private AdjustConfig _config;
         private int _initializationAttempts = 0;
         public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
 
-        public AdjustTrackingProvider(AdjustConfiguration configuration)
-        {
-            Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        }
-
         public void Initialize()
         {
-            _config = new AdjustConfig(
-                Configuration.AppToken,
-                (AdjustSdk.AdjustEnvironment)Configuration.Environment
-            );
-
-            _config.LogLevel = (AdjustSdk.AdjustLogLevel?)Configuration.LogLevel;
-            _config.SessionSuccessDelegate = HandleAdjustSessionSuccess;
-            _config.SessionFailureDelegate = HandleAdjustSessionFailure;
-            _config.AttributionChangedDelegate = HandleAttributionChanged;
+            _config = new AdjustConfig(AppToken, (AdjustSdk.AdjustEnvironment)Environment)
+            {
+                LogLevel = (AdjustSdk.AdjustLogLevel?)LogLevel,
+                SessionSuccessDelegate = HandleAdjustSessionSuccess,
+                SessionFailureDelegate = HandleAdjustSessionFailure,
+                AttributionChangedDelegate = HandleAttributionChanged
+            };
             IsTrackingEnabled = true;
 
 #if UNITY_EDITOR
@@ -187,8 +257,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             try
             {
-                AdjustEvent e = new AdjustEvent(Configuration.IapEventName);
-                e.SetRevenue(info.Price * Configuration.IapMultiplier, info.Currency);
+                AdjustEvent e = new AdjustEvent(IapEventName);
+                e.SetRevenue(info.Price * IapMultiplier, info.Currency);
                 e.ProductId = info.ProductId;
                 e.TransactionId = info.TransactionId;
                 e.PurchaseToken = info.ReceiptRaw;
