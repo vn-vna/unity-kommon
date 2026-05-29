@@ -53,6 +53,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void Initialize()
         {
+            CleanUp();
+
             _storeController = UnityIAPServices.StoreController();
 
             _storeController.OnProductsFetched += HandleProductsFetched;
@@ -89,6 +91,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private async void CallInitializeStore()
         {
+            if (IsInitialized)
+            {
+                return;
+            }
+
             try
             {
                 _storeConnected = null;
@@ -176,13 +183,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 return;
             }
 
-            if (_productDefinitions == null)
+            if (_productDefinitions == null || _productDefinitions.Count == 0)
             {
                 RefreshProductCatalog();
             }
 
             try
             {
+                if (_productDefinitions.Count == 0)
+                {
+                    QuickLog.Warning<UnityInAppPurchaseProvider>(
+                        "No products defined in the product catalog."
+                    );
+                    return;
+                }
+
                 _storeController.FetchProducts(
                     _productDefinitions, 
                     new ExponentialBackOffRetryPolicy()

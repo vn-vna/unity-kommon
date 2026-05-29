@@ -25,6 +25,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private ScriptableObject[] initialProviders;
+
+        [SerializeField]
+        private InitialAllowTracking initialAllowTracking = InitialAllowTracking.Undefined;
         #endregion
 
         #region Private Fields
@@ -47,6 +50,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             base.Awake();
 
+            switch (initialAllowTracking)
+            {
+                case InitialAllowTracking.Yes:
+                    AllowTracking = true;
+                    break;
+                case InitialAllowTracking.No:
+                    AllowTracking = false;
+                    break;
+            }
+
+            _providers.Clear();
+
             if (initialProviders == null || initialProviders.Length == 0)
             {
                 QuickLog.Info<TrackingManagerBase<T>>(
@@ -60,7 +75,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
 
             Integration.RegisterManager(this);
-            _providers.Clear();
         }
 
         private void Update()
@@ -102,6 +116,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 Status = TrackingManagerStatus.Uninitialized;
                 yield break;
             }
+
+            QuickLog.Info<TrackingManagerBase<T>>(
+                "Initializing tracking manager with {0} providers.",
+                _providers.Count
+            );
 
             Status = TrackingManagerStatus.Initializing;
 
@@ -150,6 +169,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 }
             }
 
+            QuickLog.Info<TrackingManagerBase<T>>(
+                "Registering tracking provider: {0} (Priority: {1})",
+                provider.GetType().Name, provider.Priority
+            );
             provider.TrackingManager = this;
             _providers.Add(provider);
         }
@@ -323,6 +346,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     );
                 }
             }
+        }
+        #endregion
+
+        #region Nested Types
+        private enum InitialAllowTracking
+        {
+            Undefined, Yes, No,
         }
         #endregion
     }

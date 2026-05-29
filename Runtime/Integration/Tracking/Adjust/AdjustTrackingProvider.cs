@@ -111,9 +111,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             _config = new AdjustConfig(AppToken, (AdjustSdk.AdjustEnvironment)Environment)
             {
                 LogLevel = (AdjustSdk.AdjustLogLevel?)LogLevel,
+                IsFirstSessionDelayEnabled = true,
                 SessionSuccessDelegate = HandleAdjustSessionSuccess,
                 SessionFailureDelegate = HandleAdjustSessionFailure,
-                AttributionChangedDelegate = HandleAttributionChanged
+                AttributionChangedDelegate = HandleAttributionChanged,
             };
             IsTrackingEnabled = true;
 
@@ -147,6 +148,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             try
             {
+                Adjust.Enable();
                 Adjust.InitSdk(_config);
             }
             catch (Exception ex)
@@ -351,7 +353,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             if (Integration.UserSegmentation == null)
             {
-                QuickLog.Error<AdjustTrackingProvider>(
+                QuickLog.Warning<AdjustTrackingProvider>(
                     $"User segmentation manager is not found"
                 );
                 return;

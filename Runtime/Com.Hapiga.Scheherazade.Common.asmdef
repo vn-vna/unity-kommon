@@ -12,7 +12,8 @@
         "Unity.Purchasing.SecurityStub",
         "Google.Play.Common",
         "Google.Play.Core",
-        "Google.Play.Review"
+        "Google.Play.Review",
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -124,7 +124,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             _provider.AllProductsRestored = HandleAllProductsRestored;
         }
 
-        public InAppPurchaseProductPrice? GetProductPrice(string productId) => Provider?.GetProductPrice(productId);
+        public InAppPurchaseProductPrice? GetProductPrice(string productId) 
+            => Provider?.GetProductPrice(productId);
 
         public void BuyProduct(string productId)
         {
