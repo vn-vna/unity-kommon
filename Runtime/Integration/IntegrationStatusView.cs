@@ -537,6 +537,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
 
         private DisplayStatus GetSegmentationStatus(IUserSegmentation segmentation)
         {
+            DisplayStatus status = NormalizeStatus(segmentation.Status.ToString());
+            if (status != DisplayStatus.Unknown)
+            {
+                return status;
+            }
+
             object isFirstSegmentDetermined = GetMemberValue(segmentation, "IsFirstSegmentDetermined");
             if (isFirstSegmentDetermined is bool determined)
             {

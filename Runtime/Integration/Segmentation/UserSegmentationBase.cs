@@ -23,6 +23,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         #endregion
 
         #region Interfaces & Properties
+        public UserSegmentationStatus Status { get; private set; } = UserSegmentationStatus.Uninitialized;
         public bool IsFirstSegmentDetermined => _firstSegmentDetermined;
         public SegmentationInformation SegmentInformation => _userSegmentation;
         public SegmentationDeclaration CurrentSegmentDeclaration => _currentSegmentDeclaration;
@@ -58,11 +59,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 
         public IEnumerator InitializeCoroutine()
         {
+            if (Status == UserSegmentationStatus.Initialized)
+            {
+                yield break;
+            }
+
+            Status = UserSegmentationStatus.Initializing;
+
             if (!LocalFileHandler.Exists(SegmentationSaveKey))
             {
                 QuickLog.Info<UserSegmentationBase<T>>(
                     "No saved segmentation data found."
                 );
+                Status = UserSegmentationStatus.Initialized;
                 yield break;
             }
 
@@ -70,6 +79,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             DetermineUserSegmention(_userSegmentation);
             SegmentationDataUpdated();
             _firstSegmentDetermined = true;
+            Status = UserSegmentationStatus.Initialized;
             yield return null;
         }
 
@@ -94,6 +104,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             DetermineUserSegmention(info);
             SegmentationDataUpdated();
             _firstSegmentDetermined = true;
+            Status = UserSegmentationStatus.Initialized;
 
             LocalFileHandler.Save(info, SegmentationSaveKey);
 
