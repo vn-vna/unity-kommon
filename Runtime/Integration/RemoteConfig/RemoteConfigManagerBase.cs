@@ -25,6 +25,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         public T ConfigData => _configData;
         public RemoteConfigStatus Status { get; private set; } = RemoteConfigStatus.Uninitialized;
 
+        [SerializeField]
+        private ScriptableObject[] initialProviders;
+
         private List<IRemoteConfigProvider> _providers;
         private T _configData;
 
@@ -41,11 +44,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             Status = RemoteConfigStatus.Uninitialized;
             _configData = new T();
             _providers ??= new List<IRemoteConfigProvider>();
+            _providers.Clear();
+
+            if (initialProviders == null || initialProviders.Length == 0)
+            {
+                return;
+            }
+
+            RegisterInitialProviders();
         }
 
         public void RegisterProvider(IRemoteConfigProvider provider)
         {
-            if (_providers.Contains(provider))
+            if (_providers.Any(existingProvider => existingProvider.GetType() == provider.GetType()))
             {
                 QuickLog.Warning<RemoteConfigManagerBase<T, Self>>(
                     "Provider with type {0} already registered. Skipping.",
@@ -156,6 +167,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         protected virtual void HandleAcquiredConfigComplete()
         {
             ConfigAcquired?.Invoke(_configData);
+        }
+
+        private void RegisterInitialProviders()
+        {
+            foreach (var providerAsset in initialProviders)
+            {
+                if (providerAsset is not IRemoteConfigProvider provider)
+                {
+                    Debug.LogWarning(
+                        $"Initial remote config provider asset {providerAsset?.name} does not implement IRemoteConfigProvider. Skipping."
+                    );
+                    continue;
+                }
+
+                RegisterProvider(provider);
+            }
         }
 
         private void AcquireRemoteConfigProperty(PropertyInfo property, RemoteConfigAttribute attribute)

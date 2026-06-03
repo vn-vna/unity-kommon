@@ -9,6 +9,7 @@ using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using Firebase.RemoteConfig;
 using Newtonsoft.Json.Linq;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 {
@@ -21,7 +22,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         public string Value;
     }
 
-    public class FirebaseRemoteConfigProvider : IRemoteConfigProvider
+    [CreateAssetMenu(
+        fileName = "FirebaseRemoteConfigProvider",
+        menuName = "Scheherazade/Remote Config Providers/Firebase"
+    )]
+    public class FirebaseRemoteConfigProvider :
+        ScriptableObject,
+        IRemoteConfigProvider
     {
         private const string FirebaseCachedConfigKey = "__firebase_cached_config__";
 
@@ -35,9 +42,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private int? _refreshCount = null;
         private List<(string, FirebaseRemoteValueType)> _cachedKeys;
 
-        public FirebaseRemoteConfigProvider()
+        private void OnEnable()
         {
-            _tryCount = 0;
+            _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
         }
 
         public void Initialize()
@@ -84,6 +91,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private async Task<Dictionary<string, object>> GetDefaults()
         {
             Dictionary<string, object> defaults = new Dictionary<string, object>();
+            if (Manager?.Config == null)
+            {
+                QuickLog.Warning<FirebaseRemoteConfigProvider>(
+                    "Remote Config manager is not ready while building Firebase defaults."
+                );
+                return defaults;
+            }
+
             // Find All Types
             PropertyInfo[] properties = Manager.Config.GetType().GetProperties();
             foreach (PropertyInfo pi in properties)
@@ -146,6 +161,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private void HandlePerformGetDefaultsTaskCompleted(Task<Dictionary<string, object>> task)
         {
+            if (this == null || task == null || task.IsFaulted || task.IsCanceled)
+            {
+                return;
+            }
+
+            _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
             _cachedKeys.Clear();
 
             foreach ((string key, object value) in task.Result)
@@ -177,6 +198,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private void HandleFirebaseSetDefaultTaskCompleted(Task task)
         {
+            if (this == null)
+            {
+                return;
+            }
+
             IsInitialized = task.IsCompleted && !task.IsFaulted;
 
             QuickLog.Info<FirebaseRemoteConfigProvider>(
@@ -218,6 +244,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private async void HandleFirebaseFetchTaskCompleted(Task task)
         {
+            if (this == null)
+            {
+                return;
+            }
+
             switch (FirebaseRemoteConfig.DefaultInstance.Info.LastFetchStatus)
             {
                 case LastFetchStatus.Success:
@@ -252,6 +283,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private async Task CacheRemoteConfig()
         {
+            _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
             string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
             JObject jObject = new JObject();
             foreach ((string key, FirebaseRemoteValueType type) in _cachedKeys)
@@ -277,6 +309,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private void HandleConfigCachedTaskCompleted(Task task)
         {
+            if (this == null)
+            {
+                return;
+            }
+
             if (task.IsCompleted && !task.IsFaulted)
             {
                 QuickLog.Info<FirebaseRemoteConfigProvider>(
