@@ -5,15 +5,17 @@ using System.Linq;
 using System.Reflection;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 {
     public abstract class RemoteConfigManagerBase<T, Self> :
-        SingletonBehavior<Self>,
-        IRemoteConfigManager
+        SingletonScriptableObject<Self>,
+        IRemoteConfigManager,
+        IIntegrationModule
         where T : IRemoteConfigData, new()
-        where Self : RemoteConfigManagerBase<T, Self>
+        where Self : ScriptableObject
     {
         public event Action<IRemoteConfigData> ConfigAcquired;
 
@@ -26,12 +28,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private List<IRemoteConfigProvider> _providers;
         private T _configData;
 
-        protected override void Awake()
+        protected override void OnEnable()
         {
-            base.Awake();
+            base.OnEnable();
             _configData = new T();
             _providers ??= new List<IRemoteConfigProvider>();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = RemoteConfigStatus.Uninitialized;
+            _configData = new T();
+            _providers ??= new List<IRemoteConfigProvider>();
         }
 
         public void RegisterProvider(IRemoteConfigProvider provider)
@@ -51,7 +60,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         public void Initialize(float timeOut = float.MaxValue)
         {
-            StartCoroutine(InitializeCoroutine(timeOut));
+            Dispatcher.DispatchCoroutine(InitializeCoroutine(timeOut));
         }
 
         public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)

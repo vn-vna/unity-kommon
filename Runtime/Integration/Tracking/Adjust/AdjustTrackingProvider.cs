@@ -112,11 +112,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 LogLevel = (AdjustSdk.AdjustLogLevel?)LogLevel,
                 IsFirstSessionDelayEnabled = true,
-                SessionSuccessDelegate = HandleAdjustSessionSuccess,
-                SessionFailureDelegate = HandleAdjustSessionFailure,
                 AttributionChangedDelegate = HandleAttributionChanged,
+                SessionSuccessDelegate = HandleAdjustSessionSuccess,
+                SessionFailureDelegate = HandleAdjustSessionFailure
             };
             IsTrackingEnabled = true;
+
 
 #if UNITY_EDITOR
             IsInitialized = true;
@@ -148,8 +149,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             try
             {
-                Adjust.Enable();
                 Adjust.InitSdk(_config);
+                IsInitialized = true;
             }
             catch (Exception ex)
             {
@@ -319,6 +320,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private void HandleAttributionChanged(AdjustAttribution attribution)
         {
             QuickLog.Info<AdjustTrackingProvider>($"Attribution Info Changed");
+            IsInitialized = true;
+
             if (attribution == null)
             {
                 QuickLog.Warning<AdjustTrackingProvider>(

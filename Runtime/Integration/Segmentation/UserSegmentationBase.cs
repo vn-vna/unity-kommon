@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.LocalSave;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
@@ -14,9 +15,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
     }
 
     public abstract class UserSegmentationBase<T> :
-        SingletonBehavior<T>,
-        IUserSegmentation
-        where T : UserSegmentationBase<T>
+        SingletonScriptableObject<T>,
+        IUserSegmentation,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         #region Constants
         private const string SegmentationSaveKey = "__segment_data__";
@@ -42,19 +44,29 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         #endregion
 
         #region Unity Methods
-        protected override void Awake()
+        protected override void OnEnable()
         {
-            base.Awake();
+            base.OnEnable();
 
-            _segmentationTrackers = new List<IUserSegmentationTracker>();
+            _segmentationTrackers ??= new List<IUserSegmentationTracker>();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = UserSegmentationStatus.Uninitialized;
+            _segmentationTrackers ??= new List<IUserSegmentationTracker>();
+            _segmentationTrackers.Clear();
+            _firstSegmentDetermined = false;
+            _userSegmentation = null;
+            _currentSegmentDeclaration = null;
         }
         #endregion
 
         #region Public Methods
         public void Initialize()
         {
-            StartCoroutine(InitializeCoroutine());
+            Dispatcher.DispatchCoroutine(InitializeCoroutine());
         }
 
         public IEnumerator InitializeCoroutine()
@@ -91,7 +103,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 
         public void NotifySegmentationTrackers()
         {
-            StartCoroutine(NotifySegmentationTrackersCoroutine());
+            Dispatcher.DispatchCoroutine(NotifySegmentationTrackersCoroutine());
         }
 
         public void RegisterSegmentation(SegmentationInformation info)

@@ -1,15 +1,17 @@
 using System;
 using System.Collections;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 {
 
     public abstract class InAppPurchaseManagerBase<T> :
-        SingletonBehavior<T>,
-        IInAppPurchaseManager
-        where T : InAppPurchaseManagerBase<T>
+        SingletonScriptableObject<T>,
+        IInAppPurchaseManager,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         #region Events & Delegates
         public event Action<IInAppPurchaseProduct> PurchaseInitiated;
@@ -36,12 +38,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private IInAppPurchaseProvider _provider;
         #endregion
 
-        #region Unity Methods
-        protected override void Awake()
+        #region Lifecycle & Unity Methods
+        protected override void OnEnable()
         {
-            base.Awake();
-            Status = InAppPurchaseManagerStatus.Uninitialized;
+            base.OnEnable();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = InAppPurchaseManagerStatus.Uninitialized;
 
             if (provider == null)
             {
@@ -61,7 +67,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         #region Public Methods
         public void Initialize(float timeOut = float.MaxValue)
         {
-            StartCoroutine(InitializeCoroutine(timeOut));
+            Dispatcher.DispatchCoroutine(InitializeCoroutine(timeOut));
         }
 
         public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)

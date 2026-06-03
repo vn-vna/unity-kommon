@@ -2,15 +2,17 @@ using System.Collections;
 using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
 {
 
     public abstract class CurrencyConverterBase<T> :
-        SingletonBehavior<T>,
-        ICurrencyConverter
-        where T : CurrencyConverterBase<T>
+        SingletonScriptableObject<T>,
+        ICurrencyConverter,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         public CurrencyConverterStatus Status { get; private set; }
 
@@ -21,11 +23,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
             _modules = new List<ICurrencyConverterModule>();
         }
 
-        protected override void Awake()
+        protected override void OnEnable()
         {
-            base.Awake();
+            base.OnEnable();
+            _modules ??= new List<ICurrencyConverterModule>();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
             Status = CurrencyConverterStatus.NotInitialized;
+            _modules ??= new List<ICurrencyConverterModule>();
+            _modules.Clear();
         }
 
         public void RegisterModule(ICurrencyConverterModule module)
@@ -36,7 +45,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
 
         public void Initialize()
         {
-            StartCoroutine(InitializeCoroutine());
+            Dispatcher.DispatchCoroutine(InitializeCoroutine());
         }
 
         public IEnumerator InitializeCoroutine()

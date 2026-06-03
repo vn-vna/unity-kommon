@@ -1,31 +1,36 @@
 using System;
 using System.Collections;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
 {
     public abstract class InAppReviewManagerBase<T> :
-        SingletonBehavior<T>,
-        IInAppReviewManager
-        where T : SingletonBehavior<T>
+        SingletonScriptableObject<T>,
+        IInAppReviewManager,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         public IInAppReviewModule Module { get; private set; }
         public InAppReviewManagerStatus Status { get; private set; }
 
         private float _initTimer;
 
-        protected override void Awake()
+        protected override void OnEnable()
         {
-            base.Awake();
-
-            Status = InAppReviewManagerStatus.Uninitialized;
+            base.OnEnable();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = InAppReviewManagerStatus.Uninitialized;
         }
 
         public void Initialize()
         {
-            StartCoroutine(InitializeCoroutine());
+            Dispatcher.DispatchCoroutine(InitializeCoroutine());
         }
 
         public void RegisterModule(IInAppReviewModule module)
@@ -81,7 +86,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
                 return;
             }
 
-            StartCoroutine(Module.PerformInAppReviewRequest());
+            Dispatcher.DispatchCoroutine(Module.PerformInAppReviewRequest());
         }
 
     }

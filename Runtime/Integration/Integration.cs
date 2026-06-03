@@ -6,10 +6,11 @@ using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
 using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
 using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Hapiga.Scheherazade.Common.Logging;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration
 {
-    public static class Integration
+    public class Integration
     {
         public static IAdsManager AdsManager { get; private set; }
         public static IInAppPurchaseManager InAppPurchaseManager { get; private set; }
@@ -45,8 +46,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                     CurrencyConverter = currencyConverter;
                     break;
                 default:
-                    throw new ArgumentException($"Unknown manager type: {typeof(T)}"); 
+                    throw new ArgumentException($"Unknown manager type: {typeof(T)}");
             }
+
+            QuickLog.Info<Integration>("Registered manager of type {0}.", typeof(T).Name);
         }
     }
 }

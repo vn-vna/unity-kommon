@@ -53,6 +53,46 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void Initialize()
         {
+#if !PLATFORM_SKIP_IAP_VALIDATION && !UNITY_EDITOR && UNITY_ANDROID
+            IEnumerable<byte[]> googlePlayTangleDataPresents = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(assembly => assembly.GetTypes())
+                .Where(type => type.Name == "GooglePlayTangle")
+                .Select(type => type.GetMethod("Data", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+                .Where(prop => prop != null)
+                .Select(prop => prop.Invoke(null, null) as byte[]);
+
+            if (googlePlayTangleDataPresents.Count() == 0)
+            {
+                QuickLog.Warning<UnityInAppPurchaseProvider>(
+                    "GooglePlayTangle data not found. Receipt validation will be skipped on Android."
+                );
+            }
+            else
+            {
+                if (googlePlayTangleDataPresents.Count() > 1)
+                {
+                    QuickLog.Warning<UnityInAppPurchaseProvider>(
+                        "Multiple GooglePlayTangle data found. Using the first one."
+                    );
+                }
+
+                GooglePlayTangleData = googlePlayTangleDataPresents.First();
+            }
+
+            if (GooglePlayTangleData != null && GooglePlayTangleData.Length > 0)
+            {
+                QuickLog.Info<UnityInAppPurchaseProvider>(
+                    "GooglePlayTangle data loaded successfully."
+                );
+            }
+            else
+            {
+                QuickLog.Warning<UnityInAppPurchaseProvider>(
+                    "GooglePlayTangle data is null. Receipt validation will be skipped on Android."
+                );
+            }
+#endif
+
             CleanUp();
 
             _storeController = UnityIAPServices.StoreController();
@@ -199,7 +239,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 }
 
                 _storeController.FetchProducts(
-                    _productDefinitions, 
+                    _productDefinitions,
                     new ExponentialBackOffRetryPolicy()
                 );
             }

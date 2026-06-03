@@ -4,14 +4,17 @@ using System.Collections.Generic;
 using System.Linq;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
     public abstract class TrackingManagerBase<T> :
-        SingletonBehavior<T>,
-        ITrackingManager
-        where T : TrackingManagerBase<T>
+        SingletonScriptableObject<T>,
+        ITrackingManager,
+        ITickableModule,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         #region Interfaces & Properties
         public bool AllowTracking { get; set; }
@@ -45,10 +48,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         }
         #endregion
 
-        #region Unity Callbacks
-        protected override void Awake()
+        #region Lifecycle & Unity Callbacks
+        protected override void OnEnable()
         {
-            base.Awake();
+            base.OnEnable();
+            _providers ??= new List<ITrackingProvider>();
+            _pendingActions ??= new Queue<Action>();
+            Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = TrackingManagerStatus.Uninitialized;
 
             switch (initialAllowTracking)
             {
@@ -60,6 +71,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     break;
             }
 
+            _providers ??= new List<ITrackingProvider>();
             _providers.Clear();
 
             if (initialProviders == null || initialProviders.Length == 0)
@@ -72,12 +84,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 RegisterAllInitialProviders();
             }
-
-
-            Integration.RegisterManager(this);
         }
 
-        private void Update()
+        public void Tick(float deltaTime)
         {
             if (Status != TrackingManagerStatus.Ready) return;
 
@@ -92,7 +101,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #region Public Methods
         public void Initialize(float timeOut)
         {
-            StartCoroutine(InitializeCoroutine(timeOut));
+            Dispatcher.DispatchCoroutine(InitializeCoroutine(timeOut));
         }
 
         public void Shutdown()

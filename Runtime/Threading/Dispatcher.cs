@@ -129,6 +129,14 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
             action?.Invoke();
         }
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void CreateDispatcher()
+        {
+            GameObject dispatcher = new GameObject("Dispatcher");
+            dispatcher.AddComponent<KeepAliveComponent>();
+            dispatcher.AddComponent<Dispatcher>();
+        }
+
     }
 
     public static class DispatcherExtensions

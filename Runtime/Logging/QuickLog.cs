@@ -12,10 +12,22 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
     {
         public LoggingConfiguration Configuration;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void CreateQuickLoggerInstance()
+        {
+            GameObject quickLogger = new GameObject("QuickLogger");
+            quickLogger.AddComponent<KeepAliveComponent>();
+            quickLogger.AddComponent<QuickLog>();
+        }
+
         protected override void Awake()
         {
             base.Awake();
 
+            if (!Configuration)
+            {
+                Configuration = Resources.Load<LoggingConfiguration>("LoggingConfiguration");
+            }
         }
 
         private Color GetDebugColor(LogLevel level)

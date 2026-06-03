@@ -176,10 +176,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 Data = info.Receipt.PayloadAndroid.Json,
             };
 #elif UNITY_IOS
-                purrev.ReceiptValue = new Revenue.Receipt
-                {
-                    Data = info.ReceiptRaw,
-                };
+            purrev.ReceiptValue = new Revenue.Receipt
+            {
+                Data = info.ReceiptRaw,
+            };
 #endif
             return purrev;
         }

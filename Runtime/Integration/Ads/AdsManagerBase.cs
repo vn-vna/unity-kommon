@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -14,9 +15,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
     }
 
     public abstract class AdsManagerBase<T> :
-        SingletonBehavior<T>,
-        IAdsManager
-        where T : SingletonBehavior<T>
+        SingletonScriptableObject<T>,
+        IAdsManager,
+        ITickableModule,
+        IIntegrationModule
+        where T : ScriptableObject
     {
         #region Interfaces & Properties
         public string DeviceAdvertisingId => _provider != null ? _provider.DeviceAdvertisingId : string.Empty;
@@ -46,11 +49,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private float _interstitialTimer;
         #endregion
 
-        #region Unity Methods
-        protected override void Awake()
+        #region Lifecycle & Unity Methods
+        protected override void OnEnable()
         {
-            base.Awake();
+            base.OnEnable();
             Integration.RegisterManager(this);
+        }
+
+        public virtual void Reset()
+        {
+            Status = AdsManagerStatus.Uninitialized;
 
             if (overrideConfig != null)
             {
@@ -73,7 +81,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
         }
 
-        private void Update()
+        public void Tick(float deltaTime)
         {
             if (_provider == null)
             {
@@ -81,14 +89,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
 
             _provider.LoadAds();
-            _interstitialTimer += Time.deltaTime;
+            _interstitialTimer += deltaTime;
         }
         #endregion
 
         #region Public Methods
         public void Initialize(float timeOut = float.MaxValue)
         {
-            StartCoroutine(InitializeCoroutine(timeOut));
+            Dispatcher.DispatchCoroutine(InitializeCoroutine(timeOut));
         }
 
         public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
