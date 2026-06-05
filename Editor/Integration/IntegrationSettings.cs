@@ -12,10 +12,62 @@ using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
 using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
+using Com.Hapiga.Scheherazade.Common.Integration.IAR;
+using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 
 namespace Com.Hapiga.Scheherazade.Integration
 {
-    public class AdsIntegrationSettingsProvider : SettingsProvider
+    public abstract class BaseIntegrationSettingsProvider<TInterface> : SettingsProvider
+        where TInterface : class
+    {
+        private readonly string _sectionName;
+        private readonly string _managerLabel;
+        private readonly string _concreteTypeName;
+        private readonly IReadOnlyList<ProviderDescriptor> _providerDescriptors;
+
+        internal BaseIntegrationSettingsProvider(
+            string path,
+            SettingsScope scopes,
+            string sectionName,
+            string managerLabel,
+            string concreteTypeName,
+            IReadOnlyList<ProviderDescriptor> providerDescriptors = null,
+            IEnumerable<string> keywords = null
+        ) : base(path, scopes, keywords)
+        {
+            _sectionName = sectionName;
+            _managerLabel = managerLabel;
+            _concreteTypeName = concreteTypeName;
+            _providerDescriptors = providerDescriptors;
+        }
+
+        public override void OnGUI(string searchContext)
+        {
+            base.OnGUI(searchContext);
+
+            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
+
+            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
+            if (centre == null) return;
+
+            ScriptableObject manager = IntegrationSettingsDrawingUtils.FindModuleAsset<TInterface>(centre);
+
+            IntegrationSettingsDrawingUtils.DrawManagerSettings<TInterface>(
+                _sectionName,
+                _managerLabel,
+                _concreteTypeName,
+                ref manager,
+                centre,
+                _providerDescriptors
+            );
+
+            DrawExtraContent(manager);
+        }
+
+        protected virtual void DrawExtraContent(ScriptableObject manager) { }
+    }
+
+    public class AdsIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IAdsManager>
     {
         private static readonly ProviderDescriptor[] ProviderDescriptors =
         {
@@ -29,44 +81,21 @@ namespace Com.Hapiga.Scheherazade.Integration
             )
         };
 
-        public AdsIntegrationSettingsProvider(
+        private AdsIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords)
+        ) : base(path, scopes, "Ads Manager Configuration", "Ads Manager Asset",
+            "CoreLoop.BusFlow.AdsManager", ProviderDescriptors, keywords)
         { }
-
-        public override void OnGUI(string searchContext)
-        {
-            base.OnGUI(searchContext);
-
-            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
-
-            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
-            if (centre == null) return;
-
-            ScriptableObject adsManager = IntegrationSettingsDrawingUtils.FindModuleAsset<IAdsManager>(centre);
-
-            IntegrationSettingsDrawingUtils.DrawManagerSettings<IAdsManager>(
-                "Ads Manager Configuration",
-                "Ads Manager Asset",
-                "CoreLoop.BusFlow.AdsManager",
-                ref adsManager,
-                centre,
-                ProviderDescriptors
-            );
-        }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
-            return new AdsIntegrationSettingsProvider(
-                "Project/Integration/Ads",
-                SettingsScope.Project
-            );
+            return new AdsIntegrationSettingsProvider("Project/Integration/Ads", SettingsScope.Project);
         }
     }
 
-    public class TrackingIntegrationSettingsProvider : SettingsProvider
+    public class TrackingIntegrationSettingsProvider : BaseIntegrationSettingsProvider<ITrackingManager>
     {
         private static readonly ProviderDescriptor[] ProviderDescriptors =
         {
@@ -96,44 +125,21 @@ namespace Com.Hapiga.Scheherazade.Integration
             )
         };
 
-        public TrackingIntegrationSettingsProvider(
+        private TrackingIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords)
+        ) : base(path, scopes, "Tracking Manager Configuration", "Tracking Manager Asset",
+            "CoreLoop.BusFlow.TrackingManager", ProviderDescriptors, keywords)
         { }
-
-        public override void OnGUI(string searchContext)
-        {
-            base.OnGUI(searchContext);
-
-            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
-
-            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
-            if (centre == null) return;
-
-            ScriptableObject trackingManager = IntegrationSettingsDrawingUtils.FindModuleAsset<ITrackingManager>(centre);
-
-            IntegrationSettingsDrawingUtils.DrawManagerSettings<ITrackingManager>(
-                "Tracking Manager Configuration",
-                "Tracking Manager Asset",
-                "CoreLoop.BusFlow.TrackingManager",
-                ref trackingManager,
-                centre,
-                ProviderDescriptors
-            );
-        }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
-            return new TrackingIntegrationSettingsProvider(
-                "Project/Integration/Tracking",
-                SettingsScope.Project
-            );
+            return new TrackingIntegrationSettingsProvider("Project/Integration/Tracking", SettingsScope.Project);
         }
     }
 
-    public class InAppPurchaseIntegrationSettingsProvider : SettingsProvider
+    public class InAppPurchaseIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IInAppPurchaseManager>
     {
         private static readonly ProviderDescriptor[] ProviderDescriptors =
         {
@@ -153,44 +159,23 @@ namespace Com.Hapiga.Scheherazade.Integration
             )
         };
 
-        public InAppPurchaseIntegrationSettingsProvider(
+        private InAppPurchaseIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords)
+        ) : base(path, scopes, "In-App Purchase Manager Configuration",
+            "In-App Purchase Manager Asset", "CoreLoop.BusFlow.InAppPurchaseManager",
+            ProviderDescriptors, keywords)
         { }
-
-        public override void OnGUI(string searchContext)
-        {
-            base.OnGUI(searchContext);
-
-            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
-
-            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
-            if (centre == null) return;
-
-            ScriptableObject iapManager = IntegrationSettingsDrawingUtils.FindModuleAsset<IInAppPurchaseManager>(centre);
-
-            IntegrationSettingsDrawingUtils.DrawManagerSettings<IInAppPurchaseManager>(
-                "In-App Purchase Manager Configuration",
-                "In-App Purchase Manager Asset",
-                "CoreLoop.BusFlow.InAppPurchaseManager",
-                ref iapManager,
-                centre,
-                ProviderDescriptors
-            );
-        }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
             return new InAppPurchaseIntegrationSettingsProvider(
-                "Project/Integration/In-App Purchase",
-                SettingsScope.Project
-            );
+                "Project/Integration/In-App Purchase", SettingsScope.Project);
         }
     }
 
-    public class RemoteConfigIntegrationSettingsProvider : SettingsProvider
+    public class RemoteConfigIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IRemoteConfigManager>
     {
         private static readonly ProviderDescriptor[] ProviderDescriptors =
         {
@@ -204,40 +189,136 @@ namespace Com.Hapiga.Scheherazade.Integration
             )
         };
 
-        public RemoteConfigIntegrationSettingsProvider(
+        private RemoteConfigIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords)
+        ) : base(path, scopes, "Remote Config Manager Configuration",
+            "Remote Config Manager Asset", "CoreLoop.BusFlow.RemoteConfigManager",
+            ProviderDescriptors, keywords)
         { }
 
-        public override void OnGUI(string searchContext)
+        protected override void DrawExtraContent(ScriptableObject manager)
         {
-            base.OnGUI(searchContext);
+            if (manager is not IRemoteConfigManager rcManager) return;
 
-            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
+            GUILayout.Space(10);
+            EditorGUILayout.LabelField("Registered Config Properties", EditorStyles.boldLabel);
 
-            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
-            if (centre == null) return;
+            Type configType = rcManager.RemoteConfigType;
+            object configData = rcManager.Config;
 
-            ScriptableObject remoteConfigManager = IntegrationSettingsDrawingUtils.FindModuleAsset<IRemoteConfigManager>(centre);
+            if (configType == null) return;
 
-            IntegrationSettingsDrawingUtils.DrawManagerSettings<IRemoteConfigManager>(
-                "Remote Config Manager Configuration",
-                "Remote Config Manager Asset",
-                "CoreLoop.BusFlow.RemoteConfigManager",
-                ref remoteConfigManager,
-                centre,
-                ProviderDescriptors
-            );
+            PropertyInfo[] properties = configType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
+            bool hasAny = false;
+
+            foreach (var prop in properties)
+            {
+                var attr = prop.GetCustomAttribute<RemoteConfigAttribute>();
+                if (attr == null) continue;
+                hasAny = true;
+
+                object currentValue = configData != null ? prop.GetValue(configData) : null;
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.LabelField(attr.Key, EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    EditorGUILayout.LabelField("Property", $"{prop.Name} ({prop.PropertyType.Name})");
+                    EditorGUILayout.LabelField("Cached Value", currentValue?.ToString() ?? "null");
+                    if (attr.ParserModule != null)
+                        EditorGUILayout.LabelField("Parser", attr.ParserModule.Name);
+                    if (attr.DefaultValue != null)
+                        EditorGUILayout.LabelField("Default", attr.DefaultValue.ToString());
+                }
+                EditorGUILayout.EndVertical();
+            }
+
+            if (!hasAny)
+            {
+                EditorGUILayout.HelpBox(
+                    "No RemoteConfigAttribute-decorated properties found in the config data type.",
+                    MessageType.Info);
+            }
         }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
             return new RemoteConfigIntegrationSettingsProvider(
-                "Project/Integration/Remote Config",
-                SettingsScope.Project
-            );
+                "Project/Integration/Remote Config", SettingsScope.Project);
+        }
+    }
+
+    public class InAppReviewIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IInAppReviewManager>
+    {
+        private InAppReviewIntegrationSettingsProvider(
+            string path, SettingsScope scopes,
+            IEnumerable<string> keywords = null
+        ) : base(path, scopes, "In-App Review Manager Configuration",
+            "In-App Review Manager Asset", "CoreLoop.BusFlow.InAppReviewManager",
+            null, keywords)
+        { }
+
+        protected override void DrawExtraContent(ScriptableObject manager)
+        {
+            if (manager == null) return;
+
+            GUILayout.Space(10);
+            EditorGUILayout.LabelField("Review Module", EditorStyles.boldLabel);
+
+            Type moduleType = IntegrationSettingsDrawingUtils.ResolveType(
+                "Com.Hapiga.Scheherazade.Common.Integration.IAR.GooglePlayInAppReviewModule");
+            string[] missingDefines = IntegrationSettingsDrawingUtils.GetMissingDefines(
+                new[] { "GOOGLEPLAY_REVIEW" });
+
+            if (moduleType != null && missingDefines.Length == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Google Play In-App Review module is available and configured.",
+                    MessageType.Info);
+            }
+            else
+            {
+                string message = "Google Play In-App Review module is not available.";
+                if (missingDefines.Length > 0)
+                    message += $"\n\nMissing scripting define: {string.Join(", ", missingDefines)}";
+                else
+                    message += "\n\nThe GooglePlayInAppReviewModule type is not compiled. Ensure the Google Play Review plugin is installed.";
+
+                EditorGUILayout.HelpBox(message, MessageType.Warning);
+
+                if (missingDefines.Length > 0 && GUILayout.Button("Enable GOOGLEPLAY_REVIEW Define"))
+                {
+                    IntegrationSettingsDrawingUtils.EnsureScriptingDefines(
+                        new[] { "GOOGLEPLAY_REVIEW" });
+                }
+            }
+        }
+
+        [SettingsProvider]
+        public static SettingsProvider CreateSettingsProvider()
+        {
+            return new InAppReviewIntegrationSettingsProvider(
+                "Project/Integration/In-App Review", SettingsScope.Project);
+        }
+    }
+
+    public class UserSegmentationIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IUserSegmentation>
+    {
+        private UserSegmentationIntegrationSettingsProvider(
+            string path, SettingsScope scopes,
+            IEnumerable<string> keywords = null
+        ) : base(path, scopes, "User Segmentation Manager Configuration",
+            "User Segmentation Manager Asset", "CoreLoop.BusFlow.UserSegmentationManager",
+            null, keywords)
+        { }
+
+        [SettingsProvider]
+        public static SettingsProvider CreateSettingsProvider()
+        {
+            return new UserSegmentationIntegrationSettingsProvider(
+                "Project/Integration/User Segmentation", SettingsScope.Project);
         }
     }
 
@@ -295,25 +376,27 @@ namespace Com.Hapiga.Scheherazade.Integration
     {
         private const string PendingProviderCreationStateKey = "Com.Hapiga.Scheherazade.Integration.PendingProviderCreationState";
 
+        private const string IntegrationCentreResourcePath = "IntegrationCentre";
+        private const string IntegrationCentreAssetPath = "Assets/Resources/IntegrationCentre.asset";
+        private const string IntegrationProviderAssetsFolder = "Assets/Resources/Integration";
+        private static readonly Dictionary<string, Type> ResolvedTypesByName = new Dictionary<string, Type>(StringComparer.Ordinal);
+        private static readonly HashSet<string> MissingTypeNames = new HashSet<string>(StringComparer.Ordinal);
+        private static Type[] _allTypesCache;
+
         public static IntegrationCentre GetOrCreateIntegrationCentre()
         {
             var centre = IntegrationCentre.Instance;
             if (centre == null)
             {
-                string[] guids = AssetDatabase.FindAssets("t:IntegrationCentre");
-                if (guids.Length > 0)
-                {
-                    string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-                    centre = AssetDatabase.LoadAssetAtPath<IntegrationCentre>(path);
-                }
-                else
+                centre = AssetDatabase.LoadAssetAtPath<IntegrationCentre>(IntegrationCentreAssetPath);
+                if (centre == null)
                 {
                     centre = ScriptableObject.CreateInstance<IntegrationCentre>();
                     if (!Directory.Exists("Assets/Resources"))
                     {
                         Directory.CreateDirectory("Assets/Resources");
                     }
-                    AssetDatabase.CreateAsset(centre, "Assets/Resources/IntegrationCentre.asset");
+                    AssetDatabase.CreateAsset(centre, IntegrationCentreAssetPath);
                     AssetDatabase.SaveAssets();
                 }
             }
@@ -500,7 +583,6 @@ namespace Com.Hapiga.Scheherazade.Integration
         )
         {
             GUILayout.Space(6);
-            EditorGUILayout.LabelField(descriptor.DisplayName, EditorStyles.boldLabel);
 
             var serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
@@ -515,6 +597,19 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             var providerType = ResolveType(descriptor.ProviderTypeName);
             var currentProvider = GetAssignedProvider(fieldProp, descriptor, providerType);
+            var designatedProvider = LoadProviderAssetFromResources(descriptor, providerType);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(descriptor.DisplayName, EditorStyles.boldLabel);
+                DrawProviderActionButtons(
+                    manager,
+                    descriptor,
+                    providerType,
+                    ref currentProvider,
+                    ref designatedProvider
+                );
+            }
 
             if (providerType != null)
             {
@@ -554,13 +649,14 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            DrawMissingProviderBox(manager, descriptor, providerType);
+            DrawMissingProviderBox(manager, descriptor, providerType, designatedProvider);
         }
 
         private static void DrawMissingProviderBox(
             ScriptableObject manager,
             ProviderDescriptor descriptor,
-            Type providerType
+            Type providerType,
+            ScriptableObject designatedProvider
         )
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -586,6 +682,13 @@ namespace Com.Hapiga.Scheherazade.Integration
                     $"{descriptor.DisplayName} provider is not assigned.\n\n" +
                     $"{dependencySummary}";
 
+                if (designatedProvider != null)
+                {
+                    message +=
+                        $"\n\nDesignated provider asset found at '{AssetDatabase.GetAssetPath(designatedProvider)}'. " +
+                        "Use the attach button to connect it to this module.";
+                }
+
                 if (dependenciesSatisfied && missingDefines.Length > 0)
                 {
                     message += $"\n\nMissing scripting defines: {string.Join(", ", missingDefines)}";
@@ -599,6 +702,11 @@ namespace Com.Hapiga.Scheherazade.Integration
                 EditorGUILayout.HelpBox(message, messageType);
 
                 if (!dependenciesSatisfied)
+                {
+                    return;
+                }
+
+                if (designatedProvider != null)
                 {
                     return;
                 }
@@ -765,6 +873,110 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
         }
 
+        private static void DrawProviderActionButtons(
+            ScriptableObject manager,
+            ProviderDescriptor descriptor,
+            Type providerType,
+            ref ScriptableObject currentProvider,
+            ref ScriptableObject designatedProvider
+        )
+        {
+            var enabledDefines = GetEnabledDefines(descriptor.RequiredDefines);
+            var providerToDelete = currentProvider != null ? currentProvider : designatedProvider;
+
+            if (DrawIconButton(
+                "Toolbar Plus",
+                "+",
+                "Attach the designated provider asset to this module.",
+                currentProvider == null && designatedProvider != null
+            ))
+            {
+                if (AssignProvider(manager, descriptor, providerType, designatedProvider))
+                {
+                    currentProvider = designatedProvider;
+                }
+            }
+
+            if (DrawIconButton(
+                "Toolbar Minus",
+                "-",
+                "Detach the current provider from this module.",
+                currentProvider != null
+            ))
+            {
+                if (AssignProvider(manager, descriptor, providerType, null))
+                {
+                    currentProvider = null;
+                }
+            }
+
+            if (DrawIconButton(
+                "TreeEditor.Trash",
+                "X",
+                "Delete the provider asset used by this view.",
+                providerToDelete != null
+            ))
+            {
+                if (DeleteProviderAsset(manager, descriptor, providerType, providerToDelete))
+                {
+                    if (currentProvider == providerToDelete)
+                    {
+                        currentProvider = null;
+                    }
+
+                    if (designatedProvider == providerToDelete)
+                    {
+                        designatedProvider = null;
+                    }
+                }
+            }
+
+            if (DrawIconButton(
+                "AssemblyLock",
+                "#",
+                "Turn off the scripting define symbols required by this provider.",
+                enabledDefines.Length > 0
+            ))
+            {
+                if (currentProvider != null)
+                {
+                    AssignProvider(manager, descriptor, providerType, null);
+                    currentProvider = null;
+                }
+
+                RemovePendingProviderCreation(descriptor.ProviderTypeName);
+                RemoveScriptingDefines(descriptor.RequiredDefines);
+            }
+        }
+
+        private static bool DrawIconButton(
+            string iconName,
+            string fallbackText,
+            string tooltip,
+            bool enabled
+        )
+        {
+            using (new EditorGUI.DisabledScope(!enabled))
+            {
+                var content = EditorGUIUtility.IconContent(iconName);
+                if (content == null || content.image == null)
+                {
+                    content = new GUIContent(fallbackText, tooltip);
+                }
+                else
+                {
+                    content.tooltip = tooltip;
+                }
+
+                return GUILayout.Button(
+                    content,
+                    EditorStyles.miniButton,
+                    GUILayout.Width(24),
+                    GUILayout.Height(18)
+                );
+            }
+        }
+
         private static void DrawInlineInspector(ScriptableObject asset, string header)
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
@@ -802,35 +1014,101 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            string folder = Path.GetDirectoryName(managerPath)?.Replace('\\', '/');
-            string assetName = $"{SanitizeAssetName(manager.name)}_{SanitizeAssetName(providerType.Name)}.asset";
-            string assetPath = AssetDatabase.GenerateUniqueAssetPath($"{folder}/{assetName}");
-
-            var providerAsset = ScriptableObject.CreateInstance(providerType);
-            providerAsset.name = providerType.Name;
-            AssetDatabase.CreateAsset(providerAsset, assetPath);
-
-            var serializedManager = new SerializedObject(manager);
-            var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
-            if (fieldProp == null)
+            var existingProvider = LoadProviderAssetFromResources(descriptor, providerType);
+            if (existingProvider != null)
             {
-                UnityEngine.Object.DestroyImmediate(providerAsset);
-                AssetDatabase.DeleteAsset(assetPath);
+                AssignProvider(manager, descriptor, providerType, existingProvider);
+                EditorGUIUtility.PingObject(existingProvider);
+                Selection.activeObject = existingProvider;
+                return;
+            }
+
+            EnsureDirectoryExists(IntegrationProviderAssetsFolder);
+
+            string assetPath = GetProviderAssetPath(providerType);
+            var conflictingAsset = AssetDatabase.LoadAssetAtPath<ScriptableObject>(assetPath);
+            if (conflictingAsset != null)
+            {
                 EditorUtility.DisplayDialog(
-                    "Provider Assignment Failed",
-                    $"Could not find manager field '{descriptor.ManagerFieldName}' on {manager.GetType().Name}.",
+                    "Provider Asset Conflict",
+                    $"Could not create {descriptor.DisplayName} provider because '{assetPath}' already exists with a different asset type.",
                     "OK"
                 );
                 return;
             }
 
-            SetProviderAssignment(fieldProp, descriptor, providerType, providerAsset);
-            serializedManager.ApplyModifiedProperties();
-            EditorUtility.SetDirty(manager);
-            AssetDatabase.SaveAssets();
+            var providerAsset = ScriptableObject.CreateInstance(providerType);
+            providerAsset.name = providerType.Name;
+            AssetDatabase.CreateAsset(providerAsset, assetPath);
+
+            if (!AssignProvider(manager, descriptor, providerType, providerAsset))
+            {
+                UnityEngine.Object.DestroyImmediate(providerAsset);
+                AssetDatabase.DeleteAsset(assetPath);
+                return;
+            }
 
             EditorGUIUtility.PingObject(providerAsset);
             Selection.activeObject = providerAsset;
+        }
+
+        private static bool DeleteProviderAsset(
+            ScriptableObject manager,
+            ProviderDescriptor descriptor,
+            Type providerType,
+            ScriptableObject providerAsset
+        )
+        {
+            if (providerAsset == null)
+            {
+                return false;
+            }
+
+            string assetPath = AssetDatabase.GetAssetPath(providerAsset);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                EditorUtility.DisplayDialog(
+                    "Provider Delete Failed",
+                    "The selected provider asset could not be located on disk.",
+                    "OK"
+                );
+                return false;
+            }
+
+            bool deleteConfirmed = EditorUtility.DisplayDialog(
+                "Delete Provider Asset",
+                $"Delete '{providerAsset.name}' at '{assetPath}'?",
+                "Delete",
+                "Cancel"
+            );
+            if (!deleteConfirmed)
+            {
+                return false;
+            }
+
+            var serializedManager = new SerializedObject(manager);
+            var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
+            if (fieldProp != null && GetAssignedProvider(fieldProp, descriptor, providerType) == providerAsset)
+            {
+                SetProviderAssignment(fieldProp, descriptor, providerType, null);
+                serializedManager.ApplyModifiedProperties();
+                EditorUtility.SetDirty(manager);
+            }
+
+            RemovePendingProviderCreation(descriptor.ProviderTypeName);
+
+            if (!AssetDatabase.DeleteAsset(assetPath))
+            {
+                EditorUtility.DisplayDialog(
+                    "Provider Delete Failed",
+                    $"Unity could not delete '{assetPath}'.",
+                    "OK"
+                );
+                return false;
+            }
+
+            AssetDatabase.SaveAssets();
+            return true;
         }
 
         private static void EnqueuePendingProviderCreation(
@@ -912,6 +1190,16 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return true;
             }
 
+            var providerAsset = LoadProviderAssetFromResources(descriptor, providerType);
+            if (providerAsset != null)
+            {
+                SetProviderAssignment(fieldProp, descriptor, providerType, providerAsset);
+                serializedManager.ApplyModifiedProperties();
+                EditorUtility.SetDirty(manager);
+                AssetDatabase.SaveAssets();
+                return true;
+            }
+
             CreateAndAssignProviderAsset(manager, descriptor, providerType);
             return true;
         }
@@ -942,28 +1230,53 @@ namespace Com.Hapiga.Scheherazade.Integration
             );
         }
 
-        private static string[] GetMissingDefines(IReadOnlyList<string> requiredDefines)
+        private static void RemovePendingProviderCreation(string providerTypeName)
+        {
+            if (string.IsNullOrEmpty(providerTypeName))
+            {
+                return;
+            }
+
+            var state = GetPendingProviderCreationState();
+            int removedCount = state.requests.RemoveAll(request =>
+                request.providerTypeName == providerTypeName
+            );
+
+            if (removedCount > 0)
+            {
+                SavePendingProviderCreationState(state);
+            }
+        }
+
+        internal static string[] GetMissingDefines(IReadOnlyList<string> requiredDefines)
         {
             if (requiredDefines == null || requiredDefines.Count == 0)
             {
                 return Array.Empty<string>();
             }
 
-            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
-                EditorUserBuildSettings.selectedBuildTargetGroup
-            );
-            var currentDefines = new HashSet<string>(
-                PlayerSettings
-                    .GetScriptingDefineSymbols(namedBuildTarget)
-                    .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
-            );
+            var currentDefines = GetCurrentScriptingDefines();
 
             return requiredDefines
                 .Where(requiredDefine => !currentDefines.Contains(requiredDefine))
                 .ToArray();
         }
 
-        private static void EnsureScriptingDefines(IEnumerable<string> requiredDefines)
+        private static string[] GetEnabledDefines(IReadOnlyList<string> requiredDefines)
+        {
+            if (requiredDefines == null || requiredDefines.Count == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            var currentDefines = GetCurrentScriptingDefines();
+
+            return requiredDefines
+                .Where(requiredDefine => currentDefines.Contains(requiredDefine))
+                .ToArray();
+        }
+
+        internal static void EnsureScriptingDefines(IEnumerable<string> requiredDefines)
         {
             if (requiredDefines == null)
             {
@@ -1002,9 +1315,65 @@ namespace Com.Hapiga.Scheherazade.Integration
             );
         }
 
-        private static Type ResolveType(string fullTypeName)
+        private static void RemoveScriptingDefines(IEnumerable<string> requiredDefines)
+        {
+            if (requiredDefines == null)
+            {
+                return;
+            }
+
+            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
+                EditorUserBuildSettings.selectedBuildTargetGroup
+            );
+            var defineList = new List<string>(
+                PlayerSettings
+                    .GetScriptingDefineSymbols(namedBuildTarget)
+                    .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+            );
+
+            bool changed = false;
+            foreach (var define in requiredDefines)
+            {
+                changed |= defineList.RemoveAll(existingDefine => existingDefine == define) > 0;
+            }
+
+            if (!changed)
+            {
+                return;
+            }
+
+            PlayerSettings.SetScriptingDefineSymbols(
+                namedBuildTarget,
+                string.Join(";", defineList)
+            );
+        }
+
+        private static HashSet<string> GetCurrentScriptingDefines()
+        {
+            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
+                EditorUserBuildSettings.selectedBuildTargetGroup
+            );
+
+            return new HashSet<string>(
+                PlayerSettings
+                    .GetScriptingDefineSymbols(namedBuildTarget)
+                    .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+            );
+        }
+
+        internal static Type ResolveType(string fullTypeName)
         {
             if (string.IsNullOrEmpty(fullTypeName))
+            {
+                return null;
+            }
+
+            if (ResolvedTypesByName.TryGetValue(fullTypeName, out var cachedType))
+            {
+                return cachedType;
+            }
+
+            if (MissingTypeNames.Contains(fullTypeName))
             {
                 return null;
             }
@@ -1014,17 +1383,32 @@ namespace Com.Hapiga.Scheherazade.Integration
                 var directType = assembly.GetType(fullTypeName);
                 if (directType != null)
                 {
+                    ResolvedTypesByName[fullTypeName] = directType;
                     return directType;
                 }
             }
 
-            return GetAllTypes()
+            var resolvedType = GetAllTypes()
                 .FirstOrDefault(type =>
                     string.Equals(type.FullName, fullTypeName, StringComparison.Ordinal));
+            if (resolvedType != null)
+            {
+                ResolvedTypesByName[fullTypeName] = resolvedType;
+                return resolvedType;
+            }
+
+            MissingTypeNames.Add(fullTypeName);
+            return null;
         }
 
         private static IEnumerable<Type> GetAllTypes()
         {
+            if (_allTypesCache != null)
+            {
+                return _allTypesCache;
+            }
+
+            var allTypes = new List<Type>();
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type[] types;
@@ -1037,11 +1421,11 @@ namespace Com.Hapiga.Scheherazade.Integration
                     types = exception.Types.Where(type => type != null).ToArray();
                 }
 
-                foreach (var type in types)
-                {
-                    yield return type;
-                }
+                allTypes.AddRange(types);
             }
+
+            _allTypesCache = allTypes.ToArray();
+            return _allTypesCache;
         }
 
         private static string SanitizeAssetName(string assetName)
@@ -1052,6 +1436,102 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
 
             return assetName.Replace(' ', '_');
+        }
+
+        private static bool AssignProvider(
+            ScriptableObject manager,
+            ProviderDescriptor descriptor,
+            Type providerType,
+            ScriptableObject providerAsset
+        )
+        {
+            var serializedManager = new SerializedObject(manager);
+            var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
+            if (fieldProp == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Provider Assignment Failed",
+                    $"Could not find manager field '{descriptor.ManagerFieldName}' on {manager.GetType().Name}.",
+                    "OK"
+                );
+                return false;
+            }
+
+            SetProviderAssignment(fieldProp, descriptor, providerType, providerAsset);
+            serializedManager.ApplyModifiedProperties();
+            EditorUtility.SetDirty(manager);
+            AssetDatabase.SaveAssets();
+            return true;
+        }
+
+        private static ScriptableObject LoadProviderAssetFromResources(
+            ProviderDescriptor descriptor,
+            Type providerType
+        )
+        {
+            string assetPath = providerType != null
+                ? GetProviderAssetPath(providerType)
+                : GetProviderAssetPath(descriptor.ProviderTypeName);
+            if (string.IsNullOrEmpty(assetPath))
+            {
+                return null;
+            }
+
+            var providerAsset = AssetDatabase.LoadAssetAtPath(assetPath, providerType ?? typeof(ScriptableObject)) as ScriptableObject;
+            if (providerAsset == null)
+            {
+                return null;
+            }
+
+            if (providerType != null)
+            {
+                return providerType.IsInstanceOfType(providerAsset)
+                    ? providerAsset
+                    : null;
+            }
+
+            return providerAsset.GetType().FullName == descriptor.ProviderTypeName
+                ? providerAsset
+                : null;
+        }
+
+        private static string GetProviderAssetPath(Type providerType)
+        {
+            return providerType == null
+                ? null
+                : GetProviderAssetPath(providerType.Name);
+        }
+
+        private static string GetProviderAssetPath(string providerTypeName)
+        {
+            string simpleTypeName = GetSimpleTypeName(providerTypeName);
+            if (string.IsNullOrEmpty(simpleTypeName))
+            {
+                return null;
+            }
+
+            return $"{IntegrationProviderAssetsFolder}/{SanitizeAssetName(simpleTypeName)}.asset";
+        }
+
+        private static string GetSimpleTypeName(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+            {
+                return null;
+            }
+
+            int lastDotIndex = fullTypeName.LastIndexOf('.');
+            return lastDotIndex >= 0
+                ? fullTypeName.Substring(lastDotIndex + 1)
+                : fullTypeName;
+        }
+
+        private static void EnsureDirectoryExists(string path)
+        {
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+            }
         }
 
         private struct DependencyStatus

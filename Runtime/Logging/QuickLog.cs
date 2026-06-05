@@ -54,8 +54,8 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
             et = "</color>";
 #endif
             string msg = string.Format(
-                "{0}[{1}] {2}{3}",
-                color, tag, message, et
+                "{0}[{1}]{2} {3}",
+                color, tag, et, message
             );
             switch (level)
             {

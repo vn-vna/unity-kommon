@@ -33,7 +33,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 
         #region Serialized Fields
         [SerializeField]
-        private UserSegmentationConfiguration configuration;
+        private SegmentationDeclaration[] declarations;
         #endregion
 
         #region Private Fields
@@ -148,11 +148,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         private void DetermineUserSegmention(SegmentationInformation info)
         {
             SegmentationDeclaration matched = null;
-            foreach (SegmentationDeclaration declaration in configuration.Declarations)
+            if (declarations != null)
             {
-                if (!declaration.Matches(info)) continue;
-                matched = declaration;
-                break;
+                foreach (SegmentationDeclaration declaration in declarations)
+                {
+                    if (!declaration.Matches(info)) continue;
+                    matched = declaration;
+                    break;
+                }
             }
 
             if (matched == null)
