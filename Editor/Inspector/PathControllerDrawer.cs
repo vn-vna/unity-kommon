@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Com.Hapiga.Scheherazade.Common.PathController
 {
     [CustomEditor(typeof(PathController))]
-    public class PathControllerDrawer : Editor
+    public class PathControllerDrawer : UnityEditor.Editor
     {
         public override void OnInspectorGUI()
         {

@@ -982,7 +982,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
-                var editor = Editor.CreateEditor(asset);
+                var editor = UnityEditor.Editor.CreateEditor(asset);
                 try
                 {
                     editor.OnInspectorGUI();

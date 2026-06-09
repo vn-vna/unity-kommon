@@ -10,7 +10,7 @@ namespace Com.Hapiga.Scheherazade.Common.Inspector
 
     [CustomEditor(typeof(MonoBehaviour), true)]
     [CanEditMultipleObjects]
-    public class ShowInInspectorEditor : Editor
+    public class ShowInInspectorEditor : UnityEditor.Editor
     {
         private static Dictionary<Type, Type> drawerTypeCache;
 

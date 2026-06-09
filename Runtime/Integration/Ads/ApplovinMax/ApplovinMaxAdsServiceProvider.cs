@@ -92,6 +92,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         [SerializeField]
         private Color bannerBackgroundColor = Color.black;
 
+        [SerializeField]
+        private float openAppReloadInterval = 5f;
+
+        [SerializeField]
+        private float interstitialReloadInterval = 5f;
+
+        [SerializeField]
+        private float rewardedReloadInterval = 5f;
+
+        [SerializeField]
+        private float bannerReloadInterval = 5f;
+
+        [SerializeField]
+        private float openAppLoadTimeout = 30f;
+
+        [SerializeField]
+        private float interstitialLoadTimeout = 30f;
+
+        [SerializeField]
+        private float rewardedLoadTimeout = 30f;
+
+        [SerializeField]
+        private float bannerLoadTimeout = 30f;
+
         private MappedList<AdsType, ApplovinMaxAdsUnitId> ConstructMappedList()
             => new MappedList<AdsType, ApplovinMaxAdsUnitId>(
                 unitIds, (uid) => uid.Type
@@ -122,7 +146,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private bool _rewardFulfilled;
         private Action<bool> _interstitialCallback;
         private Action<bool> _rewardedCallback;
-        private float _timer;
+        private float _openAppTimer;
+        private float _interstitialTimer;
+        private float _rewardedTimer;
+        private float _bannerTimer;
+        private bool _isLoadingOpenApp;
+        private bool _isLoadingInterstitial;
+        private bool _isLoadingRewarded;
+        private bool _isLoadingBanner;
+        private float _openAppLoadStartTime;
+        private float _interstitialLoadStartTime;
+        private float _rewardedLoadStartTime;
+        private float _bannerLoadStartTime;
         private bool _bannerAutoRefreshing;
 
         #endregion
@@ -173,7 +208,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             _rewardFulfilled = false;
             _interstitialCallback = null;
             _rewardedCallback = null;
-            _timer = 0;
+            _openAppTimer = 0;
+            _interstitialTimer = 0;
+            _rewardedTimer = 0;
+            _bannerTimer = 0;
+            _isLoadingOpenApp = false;
+            _isLoadingInterstitial = false;
+            _isLoadingRewarded = false;
+            _isLoadingBanner = false;
+            _openAppLoadStartTime = 0;
+            _interstitialLoadStartTime = 0;
+            _rewardedLoadStartTime = 0;
+            _bannerLoadStartTime = 0;
             _bannerAutoRefreshing = false;
 
             MaxSdkCallbacks.OnSdkInitializedEvent -= HandleMaxSdkInitializedEvents;
@@ -222,18 +268,35 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
-            if (_timer < 5.0f)
+            float deltaTime = Time.unscaledDeltaTime;
+
+            _openAppTimer += deltaTime;
+            if (_openAppTimer >= openAppReloadInterval)
             {
-                _timer += Time.unscaledDeltaTime;
-                return;
+                _openAppTimer = 0;
+                LoadOpenAppAds();
             }
 
-            _timer = 0;
+            _interstitialTimer += deltaTime;
+            if (_interstitialTimer >= interstitialReloadInterval)
+            {
+                _interstitialTimer = 0;
+                LoadInterstitialAds();
+            }
 
-            LoadOpenAppAds();
-            LoadInterstitialAds();
-            LoadRewardedAds();
-            LoadBannerAds();
+            _rewardedTimer += deltaTime;
+            if (_rewardedTimer >= rewardedReloadInterval)
+            {
+                _rewardedTimer = 0;
+                LoadRewardedAds();
+            }
+
+            _bannerTimer += deltaTime;
+            if (_bannerTimer >= bannerReloadInterval)
+            {
+                _bannerTimer = 0;
+                LoadBannerAds();
+            }
         }
 
         public bool ShowAppOpenAds(Action<bool> callback, string placement)
@@ -467,6 +530,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadOpenAppAds()
         {
+            if (_isLoadingOpenApp)
+            {
+                if (Time.unscaledTime - _openAppLoadStartTime < openAppLoadTimeout)
+                {
+                    return;
+                }
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Open App ad load timed out. Retrying."
+                );
+                _isLoadingOpenApp = false;
+            }
+
             if (IsOpenAppAdAvailable)
             {
                 return;
@@ -485,6 +560,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
+            _isLoadingOpenApp = true;
+            _openAppLoadStartTime = Time.unscaledTime;
+
             try
             {
                 MaxSdk.LoadAppOpenAd(UnitIdsMapping[AdsType.OpenApp].UnitId);
@@ -493,6 +571,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
             catch (Exception ex)
             {
+                _isLoadingOpenApp = false;
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
                     "Failed to load app open ad: {0}",
                     ex.Message
@@ -502,6 +581,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadInterstitialAds()
         {
+            if (_isLoadingInterstitial)
+            {
+                if (Time.unscaledTime - _interstitialLoadStartTime < interstitialLoadTimeout)
+                {
+                    return;
+                }
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Interstitial ad load timed out. Retrying."
+                );
+                _isLoadingInterstitial = false;
+            }
+
             if (IsInterstitialAvailable)
             {
                 return;
@@ -520,6 +611,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
+            _isLoadingInterstitial = true;
+            _interstitialLoadStartTime = Time.unscaledTime;
+
             try
             {
                 MaxSdk.LoadInterstitial(UnitIdsMapping[AdsType.Interstitial].UnitId);
@@ -528,6 +622,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
             catch (Exception ex)
             {
+                _isLoadingInterstitial = false;
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
                     "Failed to load interstitial ad: {0}",
                     ex.Message
@@ -537,6 +632,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadRewardedAds()
         {
+            if (_isLoadingRewarded)
+            {
+                if (Time.unscaledTime - _rewardedLoadStartTime < rewardedLoadTimeout)
+                {
+                    return;
+                }
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Rewarded ad load timed out. Retrying."
+                );
+                _isLoadingRewarded = false;
+            }
+
             if (IsRewardedAvailable) return;
 
             if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Rewarded))
@@ -552,6 +659,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
+            _isLoadingRewarded = true;
+            _rewardedLoadStartTime = Time.unscaledTime;
+
             try
             {
                 MaxSdk.LoadRewardedAd(UnitIdsMapping[AdsType.Rewarded].UnitId);
@@ -560,6 +670,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
             catch (Exception ex)
             {
+                _isLoadingRewarded = false;
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>(
                     "Failed to load rewarded ad: {0}",
                     ex.Message
@@ -569,6 +680,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void LoadBannerAds()
         {
+            if (_isLoadingBanner)
+            {
+                if (Time.unscaledTime - _bannerLoadStartTime < bannerLoadTimeout)
+                {
+                    return;
+                }
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Banner ad load timed out. Retrying."
+                );
+                _isLoadingBanner = false;
+            }
+
             if (_bannerAutoRefreshing)
             {
                 return;
@@ -602,6 +725,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
             catch (Exception ex)
             {
+                _isLoadingBanner = false;
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>(
                     "Failed to load banner ad: {0}",
                     ex.Message
@@ -675,6 +799,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsReward", "Displayed");
             _rewardFulfilled = false;
+            _rewardedTimer = 0;
+            LoadRewardedAds();
         }
 
         private void HandleRewardedAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -690,11 +816,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleRewardedAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
+            _isLoadingRewarded = false;
+            _rewardedLoadStartTime = 0;
             SendTrackingAction("AdsReward", "FailedToLoad");
         }
 
         private void HandleRewardedAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
+            _isLoadingRewarded = false;
+            _rewardedLoadStartTime = 0;
             SendTrackingAction("AdsReward", "Loaded");
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Rewarded Ad is loaded and ready to be shown."
@@ -721,6 +851,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             SendTrackingAction("AdsInter", "Displayed");
             _intersitialFulfilled = true;
+            _interstitialTimer = 0;
+            LoadInterstitialAds();
         }
 
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -738,11 +870,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
+            _isLoadingInterstitial = false;
+            _interstitialLoadStartTime = 0;
             SendTrackingAction("AdsInter", "FailedToLoad");
         }
 
         private void HandleInterstitialAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
+            _isLoadingInterstitial = false;
+            _interstitialLoadStartTime = 0;
             SendTrackingAction("AdsInter", "Loaded");
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Interstitial Ad is loaded and ready to be shown."
@@ -761,12 +897,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleBannerAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
+            _isLoadingBanner = false;
+            _bannerLoadStartTime = 0;
+            _bannerAutoRefreshing = false;
             SendTrackingAction("AdsBanner", "FailedToLoad");
             IsBannerAvailable = false;
         }
 
         private void HandleBannerAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
+            _isLoadingBanner = false;
+            _bannerLoadStartTime = 0;
             SendTrackingAction("AdsBanner", "Loaded");
             IsBannerAvailable = true;
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
@@ -806,11 +947,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleAppOpenAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
+            _isLoadingOpenApp = false;
+            _openAppLoadStartTime = 0;
             SendTrackingAction("AdsAppOpen", "FailedToLoad");
         }
 
         private void HandleAppOpenAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
+            _isLoadingOpenApp = false;
+            _openAppLoadStartTime = 0;
             SendTrackingAction("AdsAppOpen", "Loaded");
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Open App Ad is loaded and ready to be shown."

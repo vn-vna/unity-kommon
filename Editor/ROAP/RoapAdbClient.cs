@@ -177,6 +177,132 @@ namespace Com.Hapiga.Scheherazade.Common.ROAP.Editor
             return launchers;
         }
 
+        public static int GetAppPid(string deviceSerial, string packageId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceSerial))
+            {
+                throw new InvalidOperationException("Select an Android device first.");
+            }
+
+            if (string.IsNullOrWhiteSpace(packageId))
+            {
+                throw new InvalidOperationException("Enter an Android package id first.");
+            }
+
+            RoapProcessResult result = RunAdbCommand(new[]
+            {
+                "-s", deviceSerial, "shell", "pidof", packageId.Trim(),
+            });
+
+            if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                return -1;
+            }
+
+            string output = result.StandardOutput.Trim();
+            string firstPid = output.Split(' ')[0];
+            return int.TryParse(firstPid, out int pid) ? pid : -1;
+        }
+
+        public static void TerminateApp(string deviceSerial, string packageId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceSerial))
+            {
+                throw new InvalidOperationException("Select an Android device first.");
+            }
+
+            if (string.IsNullOrWhiteSpace(packageId))
+            {
+                throw new InvalidOperationException("Enter an Android package id first.");
+            }
+
+            RoapProcessResult result = RunAdbCommand(new[]
+            {
+                "-s", deviceSerial, "shell", "am", "force-stop", packageId.Trim(),
+            });
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException(GetFailureMessage("terminate app", result));
+            }
+        }
+
+        public static int GetFileDescriptorCount(string deviceSerial, int processId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceSerial))
+            {
+                throw new InvalidOperationException("Select an Android device first.");
+            }
+
+            if (processId <= 0)
+            {
+                return -1;
+            }
+
+            RoapProcessResult result = RunAdbCommand(new[]
+            {
+                "-s", deviceSerial, "shell", "ls", "-l", $"/proc/{processId}/fd",
+            });
+
+            if (result.ExitCode != 0)
+            {
+                return -1;
+            }
+
+            string[] lines = SplitLines(result.StandardOutput);
+            int count = 0;
+            foreach (string line in lines)
+            {
+                string trimmed = line.TrimStart();
+                if (trimmed.Length == 0)
+                {
+                    continue;
+                }
+
+                if (trimmed.StartsWith("total", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (trimmed.StartsWith("ls:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
+        }
+
+        public static int GetFileDescriptorCountRooted(string deviceSerial, int processId)
+        {
+            if (string.IsNullOrWhiteSpace(deviceSerial))
+            {
+                throw new InvalidOperationException("Select an Android device first.");
+            }
+
+            if (processId <= 0)
+            {
+                return 0;
+            }
+
+            RoapProcessResult result = RunAdbCommand(new[]
+            {
+                "-s", deviceSerial, "shell",
+                "su", "-s", "sh", "-c",
+                $"ls /proc/{processId}/fd | wc -l",
+            });
+
+            if (result.ExitCode != 0)
+            {
+                return 0;
+            }
+
+            string output = result.StandardOutput.Trim();
+            return int.TryParse(output, out int count) ? count : 0;
+        }
+
         public static string LaunchApp(
             string deviceSerial,
             string packageId,
