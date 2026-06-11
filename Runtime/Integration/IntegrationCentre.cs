@@ -69,7 +69,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
 
             foreach (IIntegrationModule module in Modules)
             {
-                module.Reset();
+                try
+                {
+                    module.Reset();
+                }
+                catch (Exception mrex)
+                {
+                    QuickLog.Critical<IntegrationCentre>(
+                        "Trying reset module {0} thrown an exception: {1}",
+                        module.GetType().Name,
+                        mrex.ToString()
+                    );
+                }
             }
         }
 
