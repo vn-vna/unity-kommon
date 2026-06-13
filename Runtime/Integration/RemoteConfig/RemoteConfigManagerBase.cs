@@ -67,6 +67,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             }
             _providers.Add(provider);
             provider.Manager = this;
+            _providers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
         }
 
         public void Initialize(float timeOut = float.MaxValue)
@@ -103,7 +104,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                 yield return null;
             }
 
-            HandleInitializationComplete();
+            if (Status == RemoteConfigStatus.Initialized)
+            {
+                HandleInitializationComplete();
+            }
         }
 
         public void AcquireRemoteConfig()
@@ -135,9 +139,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         }
 
         protected virtual void HandleInitializationComplete()
-        { }
+        {
+            RefreshConfigCoroutine().DispatchOnDispatcher();
+        }
 
-        public IEnumerator RefreshConfigCoroutine()
+        public IEnumerator RefreshConfigCoroutine(float timeOut = 30f)
         {
             Status = RemoteConfigStatus.Refreshing;
 
@@ -146,7 +152,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                 provider.Refresh();
             }
 
-            while (true)
+            float timer = 0f;
+
+            while (timer <= timeOut)
             {
                 if (Providers.All(p => p.IsReady))
                 {
@@ -154,6 +162,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                     break;
                 }
 
+                timer += Time.unscaledDeltaTime;
                 yield return null;
             }
 
@@ -162,7 +171,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
 
         protected virtual void HandleRefreshComplete()
-        { }
+        {
+            AcquireRemoteConfig();
+        }
 
         protected virtual void HandleAcquiredConfigComplete()
         {
@@ -205,12 +216,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                     {
                         property.SetValue(_configData, intValue);
                     }
+                    else
+                    {
+                        property.SetValue(_configData, (int)attribute.DefaultValue);
+                    }
                     break;
 
                 case Type t when t == typeof(float):
                     if (TryAcquireValueFromProvider(attribute.Key, out float floatValue))
                     {
                         property.SetValue(_configData, floatValue);
+                    }
+                    else
+                    {
+                        property.SetValue(_configData, (float)attribute.DefaultValue);
                     }
                     break;
 
@@ -219,12 +238,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                     {
                         property.SetValue(_configData, boolValue);
                     }
+                    else
+                    {
+                        property.SetValue(_configData, (bool)attribute.DefaultValue);
+                    }
                     break;
 
                 case Type t when t == typeof(string):
                     if (TryAcquireValueFromProvider(attribute.Key, out string stringValue))
                     {
                         property.SetValue(_configData, stringValue);
+                    }
+                    else
+                    {
+                        property.SetValue(_configData, (string)attribute.DefaultValue);
                     }
                     break;
 
@@ -240,6 +267,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             if (parserModule == null)
             {
                 Debug.LogError($"Failed to create parser module for property {property.Name}.");
+                property.SetValue(_configData, attribute.DefaultValue);
                 return;
             }
 
@@ -247,6 +275,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             if (parserModule.TryParse(value, out object parsedValue))
             {
                 property.SetValue(_configData, parsedValue);
+            }
+            else
+            {
+                property.SetValue(_configData, attribute.DefaultValue);
             }
         }
     }

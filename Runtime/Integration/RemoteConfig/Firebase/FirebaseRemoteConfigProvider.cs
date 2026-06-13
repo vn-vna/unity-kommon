@@ -38,8 +38,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         public IRemoteConfigManager Manager { get; set; }
 
         private Firebase.FirebaseApp _app;
-        private int _tryCount = 0;
-        private int? _refreshCount = null;
+        private int _initRetryCount = 0;
+        private int _fetchRetryCount = 0;
         private List<(string, FirebaseRemoteValueType)> _cachedKeys;
 
         private void OnEnable()
@@ -49,7 +49,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         public void Initialize()
         {
-            if (_tryCount++ > 3)
+            _initRetryCount = 0;
+
+            InitializeInternal();
+        }
+
+        private void InitializeInternal()
+        {
+            if (_initRetryCount++ > 3)
             {
                 QuickLog.Critical<FirebaseRemoteConfigProvider>(
                     "Firebase Remote Config initialization failed after multiple attempts."
@@ -83,7 +90,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
             Dispatcher
                 .DispatchDelayedOnMainThread(
-                    () => Initialize(),
+                    () => InitializeInternal(),
                     1.0f
                 );
         }
@@ -213,21 +220,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             if (!IsInitialized)
             {
                 Dispatcher
-                    .DispatchDelayedOnMainThread(() => Initialize(), 1.0f);
+                    .DispatchDelayedOnMainThread(() => InitializeInternal(), 1.0f);
                 return;
             }
-
-            _refreshCount = null;
         }
 
         public void Refresh()
         {
-            if (!_refreshCount.HasValue)
-            {
-                _refreshCount = 0;
-            }
+            _fetchRetryCount = 0;
 
-            if (_tryCount++ > 3)
+            RefreshInternal();
+        }
+
+        private void RefreshInternal()
+        {
+            if (_fetchRetryCount++ > 3)
             {
                 QuickLog.Critical<FirebaseRemoteConfigProvider>(
                     "Firebase Remote Config fetch failed after multiple attempts."
@@ -257,13 +264,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
                 case LastFetchStatus.Pending:
                     IsReady = false;
-                    break;
+                    Dispatcher
+                        .DispatchDelayedOnMainThread(() => RefreshInternal(), 1.0f);
+                    return;
 
                 case LastFetchStatus.Failure:
                     QuickLog.Warning<FirebaseRemoteConfigProvider>(
                         "Firebase Remote Config fetch failed."
                     );
-                    Dispatcher.DispatchOnMainThread(Refresh);
+                    Dispatcher.DispatchOnMainThread(RefreshInternal);
                     return;
             }
 
