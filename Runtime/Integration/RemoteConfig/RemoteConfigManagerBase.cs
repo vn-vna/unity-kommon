@@ -135,7 +135,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         }
 
         protected virtual void HandleInitializationComplete()
-        { }
+        {
+            RefreshConfigCoroutine().DispatchOnDispatcher();
+        }
 
         public IEnumerator RefreshConfigCoroutine()
         {
@@ -162,7 +164,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
 
         protected virtual void HandleRefreshComplete()
-        { }
+        {
+            AcquireRemoteConfig();
+        }
 
         protected virtual void HandleAcquiredConfigComplete()
         {

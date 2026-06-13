@@ -49,6 +49,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         public void Initialize()
         {
+            _tryCount = 0;
+
+            InitializeInternal();
+        }
+
+        private void InitializeInternal()
+        {
             if (_tryCount++ > 3)
             {
                 QuickLog.Critical<FirebaseRemoteConfigProvider>(
@@ -83,7 +90,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
             Dispatcher
                 .DispatchDelayedOnMainThread(
-                    () => Initialize(),
+                    () => InitializeInternal(),
                     1.0f
                 );
         }
