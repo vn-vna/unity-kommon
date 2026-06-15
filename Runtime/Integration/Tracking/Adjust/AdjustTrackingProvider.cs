@@ -1,11 +1,9 @@
 #if TRACKING_ADJUST
 
 using System;
-using System.Security.Cryptography;
-using System.Text;
+using System.Collections;
 using AdjustSdk;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
-using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
@@ -32,7 +30,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     }
 
     [CreateAssetMenu(
-        fileName = "AdjustTrackingProvider", 
+        fileName = "AdjustTrackingProvider",
         menuName = "Scheherazade/Tracking Providers/Adjust"
     )]
     public class AdjustTrackingProvider :
@@ -80,6 +78,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         }
 
         public float IapMultiplier => iapMultiplier;
+        public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
 
         [SerializeField]
         private string androidAppToken;
@@ -100,29 +99,38 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private float iapMultiplier;
 
         [SerializeField]
+        private float initializationTimeout = 10f;
+
+        [SerializeField]
+        private int retryAttempt = 3;
+
+        [SerializeField]
+        private float retryDelay = 1.0f;
+
+        [SerializeField]
         private AdjustLogLevel logLevel = AdjustLogLevel.Verbose;
 
         private AdjustConfig _config;
         private int _initializationAttempts = 0;
-        public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
+        private WaitForSeconds _waitForRetry;
 
         public void Initialize()
         {
+            _waitForRetry = new WaitForSeconds(retryDelay);
             _config = new AdjustConfig(AppToken, (AdjustSdk.AdjustEnvironment)Environment)
             {
                 LogLevel = (AdjustSdk.AdjustLogLevel?)LogLevel,
-                IsFirstSessionDelayEnabled = true,
                 AttributionChangedDelegate = HandleAttributionChanged,
                 SessionSuccessDelegate = HandleAdjustSessionSuccess,
                 SessionFailureDelegate = HandleAdjustSessionFailure
             };
             IsTrackingEnabled = true;
-
+            _initializationAttempts = 0;
 
 #if UNITY_EDITOR
             IsInitialized = true;
 #else
-            InitializeInternal();
+            Dispatcher.DispatchCoroutine(InitializeInternal());
 #endif
         }
 
@@ -130,27 +138,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             IsInitialized = false;
             IsTrackingEnabled = false;
+            _initializationAttempts = 0;
         }
 
-        private void InitializeInternal()
+        private IEnumerator InitializeInternal()
         {
-            if (_initializationAttempts++ > 3)
+            if (_initializationAttempts++ > retryAttempt)
             {
                 QuickLog.Error<AdjustTrackingProvider>(
                     "Adjust SDK initialization failed after multiple attempts."
                 );
-                return;
+                yield break;
             }
 
             QuickLog.Info<AdjustTrackingProvider>(
                 "Start Initializing Adjust SDK"
             );
+
             ++_initializationAttempts;
+
+            bool succeed = false;
+            float initCountdown = initializationTimeout;
 
             try
             {
                 Adjust.InitSdk(_config);
-                IsInitialized = true;
+                Adjust.GetAttribution((attrib) => succeed = attrib != null);
             }
             catch (Exception ex)
             {
@@ -158,7 +171,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     "Adjust SDK initialization error: {0}",
                     ex.Message
                 );
-                InitializeInternal();
+            }
+
+            while (initCountdown >= 0 && !succeed)
+            {
+                initCountdown -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (!succeed)
+            {
+                yield return _waitForRetry;
+                Dispatcher.DispatchCoroutine(InitializeInternal());
+            }
+            else
+            {
+                IsInitialized = true;
             }
         }
 
@@ -288,8 +316,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 "Adjust session initialization failed: {0} (Adid: {1})",
                 failure.Message, failure.Adid
             );
-
-            Dispatcher.DispatchOnMainThread(InitializeInternal);
         }
 
         private void HandleAdjustSessionSuccess(AdjustSessionSuccess success)
@@ -311,10 +337,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 QuickLog.Warning<AdjustTrackingProvider>(
                     "Attribution info received is null"
                 );
-                return;
             }
-
-            Dispatcher.DispatchOnMainThread(() => RegisterAttributionData(attribution));
         }
 
         private void HandleAttributionChanged(AdjustAttribution attribution)
@@ -327,10 +350,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 QuickLog.Warning<AdjustTrackingProvider>(
                     "Attribution info received is null"
                 );
-                return;
             }
-
-            Dispatcher.DispatchOnMainThread(() => RegisterAttributionData(attribution));
         }
 
 #if !UNITY_EDITOR
@@ -352,49 +372,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         }
 #endif
 
-        private static void RegisterAttributionData(AdjustAttribution attribution)
-        {
-            if (Integration.UserSegmentation == null)
-            {
-                QuickLog.Warning<AdjustTrackingProvider>(
-                    $"User segmentation manager is not found"
-                );
-                return;
-            }
-
-            string campaignName = attribution.Campaign ?? "unknown_campaign";
-            string creativeName = attribution.Creative ?? "unknown_creative";
-
-            using SHA256 sha256 = SHA256.Create();
-
-            byte[] cph = sha256.ComputeHash(Encoding.UTF8.GetBytes(campaignName));
-            StringBuilder cphBuilder = new StringBuilder();
-            foreach (var c in cph)
-            {
-                cphBuilder.Append(c.ToString("x2"));
-            }
-            string campaignHash = cphBuilder.ToString();
-
-            byte[] cth = sha256.ComputeHash(Encoding.UTF8.GetBytes(creativeName));
-            StringBuilder cthBuilder = new StringBuilder();
-            foreach (var c in cth)
-            {
-                cthBuilder.Append(c.ToString("x2"));
-            }
-
-            string creativeHash = cthBuilder.ToString();
-
-            Integration.UserSegmentation.RegisterSegmentation(
-                new SegmentationInformation
-                {
-                    CampaignHash = campaignHash,
-                    CreativeHash = creativeHash,
-                    CampaignName = campaignName,
-                    CreativeName = creativeName
-                }
-            );
-        }
     }
 }
+
 
 #endif

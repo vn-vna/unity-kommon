@@ -17,6 +17,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         where T : ScriptableObject
     {
         #region Interfaces & Properties
+        public string DeviceTrackingIdentifier { get; set; }
         public bool AllowTracking { get; set; }
         public TrackingManagerStatus Status { get; private set; }
         public List<ITrackingProvider> Providers => _providers;
@@ -31,21 +32,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private InitialAllowTracking initialAllowTracking = InitialAllowTracking.Undefined;
+
+        [SerializeField]
+        private string[] filteredTrackingIds;
         #endregion
 
         #region Private Fields
         private List<ITrackingProvider> _providers;
+        private HashSet<string> _filteredTrackingIds;
         private Queue<Action> _pendingActions;
         private float _timer;
-        #endregion
-
-        #region Constructors
-        public TrackingManagerBase()
-        {
-            _providers = new List<ITrackingProvider>();
-            _pendingActions = new Queue<Action>();
-            Status = TrackingManagerStatus.Uninitialized;
-        }
         #endregion
 
         #region Lifecycle & Unity Callbacks
@@ -59,6 +55,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public virtual void Reset()
         {
+            _providers = new List<ITrackingProvider>();
+            _pendingActions = new Queue<Action>();
+            _filteredTrackingIds = new HashSet<string>(filteredTrackingIds);
+
             Status = TrackingManagerStatus.Uninitialized;
 
             switch (initialAllowTracking)
@@ -136,7 +136,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             _providers.Sort((x, y) => x.Priority.CompareTo(y.Priority));
             foreach (ITrackingProvider provider in _providers)
             {
-                provider.Initialize();
+                if (provider == null)
+                {
+                    QuickLog.Critical<TrackingManagerBase<T>>(
+                        "Found a NULL provider, skipping"
+                    );
+                }
+
+                try
+                {
+                    provider.Initialize();
+                }
+                catch (Exception piex)
+                {
+                    QuickLog.Critical<TrackingManagerBase<T>>(
+                        "One provider initialization failure happened: {0}",
+                        piex.ToString()
+                    );
+                }
             }
 
             _timer = 0.0f;
@@ -196,6 +213,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if (_filteredTrackingIds.Contains(DeviceTrackingIdentifier))
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is filtered by device identifier"
+                );
+                return;
+            }
+
             if (Status != TrackingManagerStatus.Ready)
             {
                 _pendingActions.Enqueue(() => TrackScreen(screenId));
@@ -216,6 +241,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Tracking is disabled. Skipping screen tracking."
+                );
+                return;
+            }
+
+            if (_filteredTrackingIds.Contains(DeviceTrackingIdentifier))
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is filtered by device identifier"
                 );
                 return;
             }
@@ -277,6 +310,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if (_filteredTrackingIds.Contains(DeviceTrackingIdentifier))
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is filtered by device identifier"
+                );
+                return;
+            }
+
             if (Status != TrackingManagerStatus.Ready)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
@@ -314,6 +355,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Tracking is disabled. Skipping screen tracking."
+                );
+                return;
+            }
+
+            if (_filteredTrackingIds.Contains(DeviceTrackingIdentifier))
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is filtered by device identifier"
                 );
                 return;
             }

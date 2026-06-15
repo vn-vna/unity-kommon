@@ -23,7 +23,9 @@ namespace Com.Hapiga.Scheherazade.Integration
         private readonly string _sectionName;
         private readonly string _managerLabel;
         private readonly string _concreteTypeName;
-        private readonly IReadOnlyList<ProviderDescriptor> _providerDescriptors;
+        private readonly IReadOnlyList<SettingsTab> _tabs;
+
+        private int _selectedTabIndex;
 
         internal BaseIntegrationSettingsProvider(
             string path,
@@ -31,14 +33,14 @@ namespace Com.Hapiga.Scheherazade.Integration
             string sectionName,
             string managerLabel,
             string concreteTypeName,
-            IReadOnlyList<ProviderDescriptor> providerDescriptors = null,
+            IReadOnlyList<SettingsTab> tabs = null,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, keywords)
         {
             _sectionName = sectionName;
             _managerLabel = managerLabel;
             _concreteTypeName = concreteTypeName;
-            _providerDescriptors = providerDescriptors;
+            _tabs = tabs;
         }
 
         public override void OnGUI(string searchContext)
@@ -58,7 +60,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                 _concreteTypeName,
                 ref manager,
                 centre,
-                _providerDescriptors
+                _tabs,
+                ref _selectedTabIndex
             );
 
             DrawExtraContent(manager);
@@ -69,15 +72,21 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class AdsIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IAdsManager>
     {
-        private static readonly ProviderDescriptor[] ProviderDescriptors =
+        private static readonly SettingsTab[] Tabs =
         {
-            new ProviderDescriptor(
-                "AppLovin MAX",
-                "adServiceProvider",
-                ProviderBindingMode.Single,
-                "Com.Hapiga.Scheherazade.Common.Integration.Ads.ApplovinMaxAdsServiceProvider",
-                new[] { "APPLOVIN_MAX" },
-                new[] { "MaxSdk" }
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "AppLovin MAX",
+                        "adServiceProvider",
+                        ProviderBindingMode.Single,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Ads.ApplovinMaxAdsServiceProvider",
+                        new[] { "APPLOVIN_MAX" },
+                        new[] { "MaxSdk" }
+                    )
+                }
             )
         };
 
@@ -85,7 +94,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Ads Manager Configuration", "Ads Manager Asset",
-            "CoreLoop.BusFlow.AdsManager", ProviderDescriptors, keywords)
+            "CoreLoop.BusFlow.AdsManager", Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -97,31 +106,37 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class TrackingIntegrationSettingsProvider : BaseIntegrationSettingsProvider<ITrackingManager>
     {
-        private static readonly ProviderDescriptor[] ProviderDescriptors =
+        private static readonly SettingsTab[] Tabs =
         {
-            new ProviderDescriptor(
-                "Firebase Analytics",
-                "initialProviders",
-                ProviderBindingMode.Collection,
-                "Com.Hapiga.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
-                new[] { "FIREBASE_ANALYTICS" },
-                new[] { "Firebase.Analytics.FirebaseAnalytics" }
-            ),
-            new ProviderDescriptor(
-                "Adjust",
-                "initialProviders",
-                ProviderBindingMode.Collection,
-                "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
-                new[] { "TRACKING_ADJUST" },
-                new[] { "AdjustSdk.Adjust" }
-            ),
-            new ProviderDescriptor(
-                "AppMetrica",
-                "initialProviders",
-                ProviderBindingMode.Collection,
-                "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
-                new[] { "TRACKING_APPMETRICA" },
-                new[] { "Io.AppMetrica.AppMetrica" }
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Firebase Analytics",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
+                        new[] { "FIREBASE_ANALYTICS" },
+                        new[] { "Firebase.Analytics.FirebaseAnalytics" }
+                    ),
+                    new ProviderDescriptor(
+                        "Adjust",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
+                        new[] { "TRACKING_ADJUST" },
+                        new[] { "AdjustSdk.Adjust" }
+                    ),
+                    new ProviderDescriptor(
+                        "AppMetrica",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
+                        new[] { "TRACKING_APPMETRICA" },
+                        new[] { "Io.AppMetrica.AppMetrica" }
+                    )
+                }
             )
         };
 
@@ -129,7 +144,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Tracking Manager Configuration", "Tracking Manager Asset",
-            "CoreLoop.BusFlow.TrackingManager", ProviderDescriptors, keywords)
+            "CoreLoop.BusFlow.TrackingManager", Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -141,21 +156,27 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class InAppPurchaseIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IInAppPurchaseManager>
     {
-        private static readonly ProviderDescriptor[] ProviderDescriptors =
+        private static readonly SettingsTab[] Tabs =
         {
-            new ProviderDescriptor(
-                "Unity IAP",
-                "provider",
-                ProviderBindingMode.Single,
-                "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.UnityInAppPurchaseProvider",
-                new[] { "UNITY_PURCHASING" },
-                new[] { "UnityEngine.Purchasing.StandardPurchasingModule" }
-            ),
-            new ProviderDescriptor(
-                "Pseudo Provider",
-                "provider",
-                ProviderBindingMode.Single,
-                "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider"
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Unity IAP",
+                        "provider",
+                        ProviderBindingMode.Single,
+                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.UnityInAppPurchaseProvider",
+                        new[] { "UNITY_PURCHASING" },
+                        new[] { "UnityEngine.Purchasing.StandardPurchasingModule" }
+                    ),
+                    new ProviderDescriptor(
+                        "Pseudo Provider",
+                        "provider",
+                        ProviderBindingMode.Single,
+                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider"
+                    )
+                }
             )
         };
 
@@ -164,7 +185,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "In-App Purchase Manager Configuration",
             "In-App Purchase Manager Asset", "CoreLoop.BusFlow.InAppPurchaseManager",
-            ProviderDescriptors, keywords)
+            Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -177,15 +198,21 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class RemoteConfigIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IRemoteConfigManager>
     {
-        private static readonly ProviderDescriptor[] ProviderDescriptors =
+        private static readonly SettingsTab[] Tabs =
         {
-            new ProviderDescriptor(
-                "Firebase Remote Config",
-                "initialProviders",
-                ProviderBindingMode.Collection,
-                "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
-                new[] { "FIREBASE_REMOTE" },
-                new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" }
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Firebase Remote Config",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
+                        new[] { "FIREBASE_REMOTE" },
+                        new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" }
+                    )
+                }
             )
         };
 
@@ -194,7 +221,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Remote Config Manager Configuration",
             "Remote Config Manager Asset", "CoreLoop.BusFlow.RemoteConfigManager",
-            ProviderDescriptors, keywords)
+            Tabs, keywords)
         { }
 
         protected override void DrawExtraContent(ScriptableObject manager)
@@ -202,13 +229,26 @@ namespace Com.Hapiga.Scheherazade.Integration
             if (manager is not IRemoteConfigManager rcManager) return;
 
             GUILayout.Space(10);
-            EditorGUILayout.LabelField("Registered Config Properties", EditorStyles.boldLabel);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Registered Config Properties", EditorStyles.boldLabel);
+
+                if (Application.isPlaying && rcManager.Status == RemoteConfigStatus.Ready)
+                {
+                    if (GUILayout.Button("Clear Cache", GUILayout.Width(90)))
+                    {
+                        ClearRemoteConfigCache(manager);
+                    }
+                }
+            }
 
             Type configType = rcManager.RemoteConfigType;
             object configData = rcManager.Config;
 
             if (configType == null) return;
 
+            bool isPlaying = Application.isPlaying;
             PropertyInfo[] properties = configType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
             bool hasAny = false;
 
@@ -226,6 +266,13 @@ namespace Com.Hapiga.Scheherazade.Integration
                 {
                     EditorGUILayout.LabelField("Property", $"{prop.Name} ({prop.PropertyType.Name})");
                     EditorGUILayout.LabelField("Cached Value", currentValue?.ToString() ?? "null");
+
+                    if (isPlaying)
+                    {
+                        string runtimeValueStr = GetRuntimeConfigValue(rcManager, attr.Key, prop.PropertyType);
+                        EditorGUILayout.LabelField("Runtime Value", runtimeValueStr);
+                    }
+
                     if (attr.ParserModule != null)
                         EditorGUILayout.LabelField("Parser", attr.ParserModule.Name);
                     if (attr.DefaultValue != null)
@@ -242,6 +289,33 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
         }
 
+        private static string GetRuntimeConfigValue(IRemoteConfigManager rcManager, string key, Type propertyType)
+        {
+            foreach (var provider in rcManager.Providers)
+            {
+                var tryGetConfigMethod = typeof(IRemoteConfigProvider).GetMethod("TryGetConfig");
+                var genericMethod = tryGetConfigMethod.MakeGenericMethod(propertyType);
+                object[] parameters = new object[] { key, null };
+                bool success = (bool)genericMethod.Invoke(provider, parameters);
+                if (success)
+                {
+                    return parameters[1]?.ToString() ?? "null";
+                }
+            }
+            return "not available";
+        }
+
+        private static void ClearRemoteConfigCache(ScriptableObject manager)
+        {
+            var configDataField = manager.GetType().BaseType?.GetField("_configData",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            if (configDataField == null) return;
+
+            var remoteConfigType = ((IRemoteConfigManager)manager).RemoteConfigType;
+            var newConfigData = Activator.CreateInstance(remoteConfigType);
+            configDataField.SetValue(manager, newConfigData);
+        }
+
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
         {
@@ -252,12 +326,28 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class InAppReviewIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IInAppReviewManager>
     {
+        private static readonly SettingsTab[] Tabs =
+        {
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Open Store",
+                        "reviewProvider",
+                        ProviderBindingMode.Single,
+                        "Com.Hapiga.Scheherazade.Common.Integration.IAR.OpenStoreInAppReviewModule"
+                    )
+                }
+            )
+        };
+
         private InAppReviewIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "In-App Review Manager Configuration",
             "In-App Review Manager Asset", "CoreLoop.BusFlow.InAppReviewManager",
-            null, keywords)
+            Tabs, keywords)
         { }
 
         protected override void DrawExtraContent(ScriptableObject manager)
@@ -265,33 +355,40 @@ namespace Com.Hapiga.Scheherazade.Integration
             if (manager == null) return;
 
             GUILayout.Space(10);
-            EditorGUILayout.LabelField("Review Module", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Google Play Review Module", EditorStyles.boldLabel);
+            DrawGooglePlayModuleStatus();
+        }
 
+        private static void DrawGooglePlayModuleStatus()
+        {
             Type moduleType = IntegrationSettingsDrawingUtils.ResolveType(
                 "Com.Hapiga.Scheherazade.Common.Integration.IAR.GooglePlayInAppReviewModule");
             string[] missingDefines = IntegrationSettingsDrawingUtils.GetMissingDefines(
                 new[] { "GOOGLEPLAY_REVIEW" });
 
-            if (moduleType != null && missingDefines.Length == 0)
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.HelpBox(
-                    "Google Play In-App Review module is available and configured.",
-                    MessageType.Info);
-            }
-            else
-            {
-                string message = "Google Play In-App Review module is not available.";
-                if (missingDefines.Length > 0)
-                    message += $"\n\nMissing scripting define: {string.Join(", ", missingDefines)}";
-                else
-                    message += "\n\nThe GooglePlayInAppReviewModule type is not compiled. Ensure the Google Play Review plugin is installed.";
-
-                EditorGUILayout.HelpBox(message, MessageType.Warning);
-
-                if (missingDefines.Length > 0 && GUILayout.Button("Enable GOOGLEPLAY_REVIEW Define"))
+                if (moduleType != null && missingDefines.Length == 0)
                 {
-                    IntegrationSettingsDrawingUtils.EnsureScriptingDefines(
-                        new[] { "GOOGLEPLAY_REVIEW" });
+                    EditorGUILayout.HelpBox(
+                        "Google Play In-App Review module is available and configured.",
+                        MessageType.Info);
+                }
+                else
+                {
+                    string message = "Google Play In-App Review module is not available.";
+                    if (missingDefines.Length > 0)
+                        message += $"\n\nMissing scripting define: {string.Join(", ", missingDefines)}";
+                    else
+                        message += "\n\nThe GooglePlayInAppReviewModule type is not compiled. Ensure the Google Play Review plugin is installed.";
+
+                    EditorGUILayout.HelpBox(message, MessageType.Warning);
+
+                    if (missingDefines.Length > 0 && GUILayout.Button("Enable GOOGLEPLAY_REVIEW Define"))
+                    {
+                        IntegrationSettingsDrawingUtils.EnsureScriptingDefines(
+                            new[] { "GOOGLEPLAY_REVIEW" });
+                    }
                 }
             }
         }
@@ -306,12 +403,50 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class UserSegmentationIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IUserSegmentation>
     {
+        private static readonly SettingsTab[] Tabs =
+        {
+            new SettingsTab(
+                "Providers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Cached",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.CachedSegmentationProvider"
+                    ),
+                    new ProviderDescriptor(
+                        "Adjust",
+                        "initialProviders",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.AdjustSegmentationProvider",
+                        new[] { "TRACKING_ADJUST" },
+                        new[] { "AdjustSdk.Adjust" }
+                    )
+                }
+            ),
+            new SettingsTab(
+                "Trackers",
+                new ProviderDescriptor[]
+                {
+                    new ProviderDescriptor(
+                        "Firebase Analytics",
+                        "initialTrackers",
+                        ProviderBindingMode.Collection,
+                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.FirebaseUserSegmentationTracker",
+                        new[] { "FIREBASE_ANALYTICS" },
+                        new[] { "Firebase.Analytics.FirebaseAnalytics" }
+                    )
+                }
+            )
+        };
+
         private UserSegmentationIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "User Segmentation Manager Configuration",
             "User Segmentation Manager Asset", "CoreLoop.BusFlow.UserSegmentationManager",
-            null, keywords)
+            Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -353,6 +488,22 @@ namespace Com.Hapiga.Scheherazade.Integration
             ProviderTypeName = providerTypeName;
             RequiredDefines = requiredDefines ?? Array.Empty<string>();
             DependencyTypeNames = dependencyTypeNames ?? Array.Empty<string>();
+        }
+    }
+
+    [Serializable]
+    internal sealed class SettingsTab
+    {
+        public string Name { get; }
+        public ProviderDescriptor[] Descriptors { get; }
+
+        public SettingsTab(
+            string name,
+            ProviderDescriptor[] descriptors = null
+        )
+        {
+            Name = name;
+            Descriptors = descriptors ?? Array.Empty<ProviderDescriptor>();
         }
     }
 
@@ -426,7 +577,8 @@ namespace Com.Hapiga.Scheherazade.Integration
             string concreteTypeName,
             ref ScriptableObject currentManager,
             IntegrationCentre centre,
-            IReadOnlyList<ProviderDescriptor> providerDescriptors = null
+            IReadOnlyList<SettingsTab> tabs,
+            ref int selectedTabIndex
         ) where TInterface : class
         {
             Type concreteType = ResolveType(concreteTypeName);
@@ -456,24 +608,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 currentManager = newManager;
             }
 
-            if (currentManager != null)
-            {
-                DrawInlineInspector(
-                    currentManager,
-                    $"{currentManager.name.ToUpperInvariant()} CONFIGURATION"
-                );
-
-                if (providerDescriptors != null && providerDescriptors.Count > 0)
-                {
-                    GUILayout.Space(10);
-                    EditorGUILayout.LabelField("Providers", EditorStyles.boldLabel);
-                    foreach (var providerDescriptor in providerDescriptors)
-                    {
-                        DrawProviderSection(currentManager, providerDescriptor);
-                    }
-                }
-            }
-            else
+            if (currentManager == null)
             {
                 EditorGUILayout.HelpBox(
                     $"No {label} asset selected. Please create and assign a {concreteType.Name} asset.",
@@ -499,6 +634,49 @@ namespace Com.Hapiga.Scheherazade.Integration
                     AssetDatabase.SaveAssets();
                     SetModuleAsset(centre, currentManager, newAsset);
                     currentManager = newAsset;
+                }
+
+                return;
+            }
+
+            if (tabs == null || tabs.Count == 0)
+            {
+                DrawInlineInspector(
+                    currentManager,
+                    $"{currentManager.name.ToUpperInvariant()} CONFIGURATION"
+                );
+                return;
+            }
+
+            string[] tabNames = new string[tabs.Count + 1];
+            tabNames[0] = "Manager";
+            for (int i = 0; i < tabs.Count; i++)
+            {
+                tabNames[i + 1] = tabs[i].Name;
+            }
+
+            GUILayout.Space(6);
+            selectedTabIndex = GUILayout.Toolbar(selectedTabIndex, tabNames);
+            GUILayout.Space(4);
+
+            if (selectedTabIndex == 0)
+            {
+                DrawInlineInspector(
+                    currentManager,
+                    $"{currentManager.name.ToUpperInvariant()} CONFIGURATION"
+                );
+            }
+            else
+            {
+                SettingsTab activeTab = tabs[selectedTabIndex - 1];
+                EditorGUILayout.LabelField(activeTab.Name, EditorStyles.boldLabel);
+
+                if (activeTab.Descriptors != null && activeTab.Descriptors.Length > 0)
+                {
+                    foreach (var descriptor in activeTab.Descriptors)
+                    {
+                        DrawProviderSection(currentManager, descriptor);
+                    }
                 }
             }
         }
@@ -577,7 +755,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             AssetDatabase.SaveAssets();
         }
 
-        private static void DrawProviderSection(
+        internal static void DrawProviderSection(
             ScriptableObject manager,
             ProviderDescriptor descriptor
         )

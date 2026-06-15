@@ -15,6 +15,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
         public IInAppReviewModule Module { get; private set; }
         public InAppReviewManagerStatus Status { get; private set; }
 
+        [SerializeField]
+        private ScriptableObject reviewProvider;
+
         private float _initTimer;
 
         protected override void OnEnable()
@@ -26,6 +29,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
         public virtual void Reset()
         {
             Status = InAppReviewManagerStatus.Uninitialized;
+
+            if (reviewProvider != null)
+            {
+                IInAppReviewModule module = reviewProvider as IInAppReviewModule;
+                if (module != null)
+                {
+                    RegisterModule(module);
+                }
+            }
         }
 
         public void Initialize()

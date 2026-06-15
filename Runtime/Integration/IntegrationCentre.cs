@@ -30,7 +30,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             centre.Initialize();
         }
 
-        public void Initialize()
+        private void Initialize()
         {
             Modules = moduleScriptableObjects
                 .OfType<IIntegrationModule>()
@@ -39,24 +39,34 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             ModulesByType = Modules
                 .ToDictionary(module => module.GetType(), module => module);
 
-            // Register each manager dynamically to Integration class
+
+            // Call the static RegisterManager method via reflection for all implemented interfaces
+            var registerMethod = typeof(Integration)
+                .GetMethod(
+                    "RegisterManager",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic
+                );
+
+            if (registerMethod == null)
+            {
+                QuickLog.Critical<IntegrationCentre>(
+                    "A problem occured while injecting dependencies to integration shortcut"
+                );
+                return;
+            }
+
             foreach (var moduleObj in moduleScriptableObjects)
             {
                 if (moduleObj == null) continue;
 
-                // Call the static RegisterManager method via reflection for all implemented interfaces
-                var registerMethod = typeof(Integration).GetMethod("RegisterManager", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
-                if (registerMethod != null)
+                foreach (var iface in moduleObj.GetType().GetInterfaces())
                 {
-                    foreach (var iface in moduleObj.GetType().GetInterfaces())
+                    try
                     {
-                        try
-                        {
-                            var genericMethod = registerMethod.MakeGenericMethod(iface);
-                            genericMethod.Invoke(null, new object[] { moduleObj });
-                        }
-                        catch { /* Skip interfaces that don't match the generic constraint */ }
+                        var genericMethod = registerMethod.MakeGenericMethod(iface);
+                        genericMethod.Invoke(null, new object[] { moduleObj });
                     }
+                    catch { /* Skip interfaces that don't match the generic constraint */ }
                 }
             }
 
@@ -105,7 +115,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
         private IntegrationCentre _centre;
         private ITickableModule[] _tickables;
 
-        public void Setup(IntegrationCentre centre)
+        internal void Setup(IntegrationCentre centre)
         {
             _centre = centre;
             UpdateTickables();

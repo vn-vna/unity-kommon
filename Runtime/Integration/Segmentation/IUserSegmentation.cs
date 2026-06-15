@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
@@ -14,8 +15,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         UserSegmentationStatus Status { get; }
         SegmentationInformation SegmentInformation { get; }
         SegmentationDeclaration CurrentSegmentDeclaration { get; }
+        DateTime? LastSegmentationUpdateTime { get; }
 
-        void RegisterSegmentation(SegmentationInformation userSegmentation);
         void Initialize();
         IEnumerator InitializeCoroutine();
         void NotifySegmentationTrackers();

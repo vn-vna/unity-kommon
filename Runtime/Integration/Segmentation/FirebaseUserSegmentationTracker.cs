@@ -2,12 +2,20 @@
 
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Firebase.Analytics;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 {
+    [CreateAssetMenu(
+        fileName = "FirebaseUserSegmentationTracker",
+        menuName = "Scheherazade/Segmentation Trackers/Firebase"
+    )]
     public class FirebaseUserSegmentationTracker :
+        ScriptableObject,
         IUserSegmentationTracker
     {
+        public IUserSegmentation Manager { get; set; }
+
         public void SegmentationDataUpdated(
             SegmentationInformation info,
             SegmentationDeclaration declaration
@@ -20,17 +28,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
                 );
                 return;
             }
-            else
-            {
-                QuickLog.Info<FirebaseUserSegmentationTracker>(
-                    "Updating Firebase user property for segmentation: [Segment = {0}]",
-                    declaration.SegmentName
-                );
-            }
+
+            QuickLog.Info<FirebaseUserSegmentationTracker>(
+                "Updating Firebase user property for segmentation: [Segment = {0}]",
+                declaration.SegmentName
+            );
 
             FirebaseAnalytics.SetUserProperty(
                 "user_segment",
-                declaration?.SegmentName ?? "Unknown"
+                declaration.SegmentName
             );
         }
     }

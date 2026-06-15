@@ -132,7 +132,8 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void CreateDispatcher()
         {
-            GameObject dispatcher = new GameObject("Dispatcher");
+            GameObject dispatcher = new GameObject("[Scheherazade Action Dispatcher]");
+            dispatcher.hideFlags = HideFlags.HideInHierarchy;
             dispatcher.AddComponent<KeepAliveComponent>();
             dispatcher.AddComponent<Dispatcher>();
         }

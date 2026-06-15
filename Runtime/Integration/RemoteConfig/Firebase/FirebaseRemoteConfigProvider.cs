@@ -88,11 +88,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                 task.Exception
             );
 
-            Dispatcher
-                .DispatchDelayedOnMainThread(
-                    () => InitializeInternal(),
-                    1.0f
-                );
+            Dispatcher.DispatchDelayedOnMainThread(InitializeInternal, 1.0f);
         }
 
         private async Task<Dictionary<string, object>> GetDefaults()
@@ -294,6 +290,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         {
             _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
             string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
+            string directoryPath = Path.GetDirectoryName(path);
+            if (!Directory.Exists(directoryPath))
+                Directory.CreateDirectory(directoryPath);
             JObject jObject = new JObject();
             foreach ((string key, FirebaseRemoteValueType type) in _cachedKeys)
             {
