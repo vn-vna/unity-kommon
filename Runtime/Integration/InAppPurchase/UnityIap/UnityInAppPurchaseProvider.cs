@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Logging;
@@ -42,14 +43,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public byte[] AppleTangleData { get; set; }
         public bool HasRestorableProducts => _pendingRestorations.Count > 0;
 
+        [SerializeField]
+        private int maxProductFetchRetries = 3;
+
+        [SerializeField]
+        private float productFetchRetryInterval = 1.0f;
+
         private List<ProductDefinition> _productDefinitions;
         private StoreController _storeController;
         private int _fetchPurchasesTryCount;
-        private int _fetchProductsTryCount;
         private bool? _storeConnected;
         private int _tryCount;
         private Queue<string> _pendingRestorations = new Queue<string>();
         private HashSet<string> _handledPurchase = new HashSet<string>();
+
+        private HashSet<string> _successfulProductIds = new HashSet<string>();
+        private Dictionary<string, int> _productRetryAttempts = new Dictionary<string, int>();
 
         public void Initialize()
         {
@@ -210,6 +219,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandleConnectionCompleted()
         {
+            QuickLog.Critical<UnityInAppPurchaseProvider>("Store connected");
             PerformFetchProducts();
         }
 
@@ -228,6 +238,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 RefreshProductCatalog();
             }
 
+            QuickLog.Info<UnityInAppPurchaseProvider>("Performing FETCH PRODUCT");
+
             try
             {
                 if (_productDefinitions.Count == 0)
@@ -238,9 +250,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                     return;
                 }
 
-                _storeController.FetchProducts(
-                    _productDefinitions,
-                    new ExponentialBackOffRetryPolicy()
+                _storeController.FetchProductsWithNoRetries(
+                    _productDefinitions
                 );
             }
             catch (Exception ex)
@@ -272,12 +283,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandleProductsFetched(List<Product> list)
         {
+            foreach (Product product in list)
+            {
+                _successfulProductIds.Add(product.definition.id);
+                _productRetryAttempts.Remove(product.definition.id);
+            }
+
             if (IsInitialized) return;
             IsInitialized = true;
             Dispatcher.DispatchOnMainThread(_storeController.FetchPurchases);
-            QuickLog.Info<UnityInAppPurchaseProvider>(
-                "Products fetched successfully."
-            );
+            QuickLog.Info<UnityInAppPurchaseProvider>("Products fetched successfully.");
         }
 
         private void HandlePurchasesFetched(Orders orders)
@@ -328,15 +343,73 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandleProductsFetchFailed(ProductFetchFailed failed)
         {
-            if (_fetchProductsTryCount >= 10)
+            List<ProductDefinition> productsToRetry = new List<ProductDefinition>();
+
+            foreach (ProductDefinition productDef in failed.FailedFetchProducts)
             {
-                QuickLog.Error<UnityInAppPurchaseProvider>(
-                    $"Products fetch failed: {failed.FailureReason}"
+                string productId = productDef.id;
+
+                if (_successfulProductIds.Contains(productId))
+                {
+                    continue;
+                }
+
+                if (!_productRetryAttempts.ContainsKey(productId))
+                {
+                    _productRetryAttempts[productId] = 0;
+                }
+
+                _productRetryAttempts[productId]++;
+
+                if (_productRetryAttempts[productId] <= maxProductFetchRetries)
+                {
+                    productsToRetry.Add(productDef);
+                }
+                else
+                {
+                    QuickLog.Error<UnityInAppPurchaseProvider>(
+                        "Product fetch permanently failed after {0} retries [Product: {1}] [Reason: {2}]",
+                        maxProductFetchRetries, productId, failed.FailureReason
+                    );
+                }
+            }
+
+            if (productsToRetry.Count > 0)
+            {
+                QuickLog.Warning<UnityInAppPurchaseProvider>(
+                    "Retrying fetch for {0} product(s) [Reason: {1}] [Attempt: {2}/{3}]",
+                    productsToRetry.Count, failed.FailureReason,
+                    _productRetryAttempts[productsToRetry[0].id], maxProductFetchRetries
+                );
+
+                Dispatcher.DispatchDelayedOnMainThread(
+                    () => RetryFailedProducts(productsToRetry),
+                    productFetchRetryInterval
+                );
+            }
+        }
+
+        private void RetryFailedProducts(List<ProductDefinition> failedProducts)
+        {
+            if (!_storeConnected.HasValue || !_storeConnected.Value)
+            {
+                QuickLog.Warning<UnityInAppPurchaseProvider>(
+                    "Store disconnected. Aborting product fetch retry."
                 );
                 return;
             }
 
-            PerformFetchProducts();
+            try
+            {
+                _storeController.FetchProductsWithNoRetries(failedProducts);
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<UnityInAppPurchaseProvider>(
+                    "Failed to initiate product fetch retry: {0}",
+                    ex.Message
+                );
+            }
         }
 
         private void HandlePurchasePending(PendingOrder order)
