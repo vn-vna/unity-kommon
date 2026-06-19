@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.MappedList;
@@ -534,15 +535,41 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 MaxSdk.ShowMediationDebugger();
             }
 
-#if UNITY_IOS
             if (MaxSdkUtils.CompareVersions(UnityEngine.iOS.Device.systemVersion, "14.5") != MaxSdkUtils.VersionComparisonResult.Lesser)
             {
-                bool isTrackingEnabled = configuration.AppTrackingStatus == MaxSdk.AppTrackingStatus.Authorized;
-                AudienceNetwork.AdSettings.SetAdvertiserTrackingEnabled(isTrackingEnabled);
+                SetupAudienceNetwork(configuration);
             }
-#endif
 
             IsInitialized = true;
+        }
+
+        private static void SetupAudienceNetwork(MaxSdkBase.SdkConfiguration configuration)
+        {
+#if UNITY_IOS
+            bool isTrackingEnabled = configuration.AppTrackingStatus == MaxSdk.AppTrackingStatus.Authorized;
+            Type adSettingsClazz = AppDomain.CurrentDomain.GetAssemblies()
+                .Select(asm => asm.GetType("AdSettings"))
+                .FirstOrDefault(clz => clz != null && "AudienceNetwork.AdSettings".Equals(clz.FullName));
+
+            if (adSettingsClazz == null)
+            {
+                QuickLog.Critical<ApplovinMaxAdsServiceProvider>(
+                    "Cannot setup Audience Network: class AudienceNetwork.AdSettings not found!"
+                );
+                return;
+            }
+
+            MethodInfo method = adSettingsClazz.GetMethod("SetAdvertiserTrackingEnabled");
+            if (method == null)
+            {
+                QuickLog.Critical<ApplovinMaxAdsServiceProvider>(
+                    "Cannot setup Audience Network: method AudienceNetwork.AdSettings.SetAdvertiserTrackingEnabled not found"
+                );
+                return;
+            }
+
+            method.Invoke(null, new object[] { isTrackingEnabled });
+#endif
         }
 
         private void CreateBanner()
