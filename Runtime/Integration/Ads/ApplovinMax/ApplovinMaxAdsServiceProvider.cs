@@ -535,10 +535,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 MaxSdk.ShowMediationDebugger();
             }
 
+#if UNITY_IOS
             if (MaxSdkUtils.CompareVersions(UnityEngine.iOS.Device.systemVersion, "14.5") != MaxSdkUtils.VersionComparisonResult.Lesser)
             {
                 SetupAudienceNetwork(configuration);
             }
+#endif
 
             IsInitialized = true;
         }
