@@ -67,6 +67,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         [SerializeField]
         private ActionSeverity minimumActionSeverity = ActionSeverity.Info;
 
+        [SerializeField]
+        private int providerMaskNumber = 0;
+
+        public ProviderIdentity ProviderIdentity => (ProviderIdentity)(1 << providerMaskNumber);
+
         public void Initialize()
         {
             try

@@ -31,7 +31,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsInterstitialReady(UnitIdsMapping[AdsType.Interstitial].UnitId);
+                if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId)
+                    || string.IsNullOrEmpty(unitId.UnitId))
+                    return false;
+                return MaxSdk.IsInterstitialReady(unitId.UnitId);
             }
         }
 
@@ -40,7 +43,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsRewardedAdReady(UnitIdsMapping[AdsType.Rewarded].UnitId);
+                if (!UnitIdsMapping.TryGetValue(AdsType.Rewarded, out var unitId)
+                    || string.IsNullOrEmpty(unitId.UnitId))
+                    return false;
+                return MaxSdk.IsRewardedAdReady(unitId.UnitId);
             }
         }
 
@@ -49,7 +55,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             get
             {
                 if (!IsInitialized) return false;
-                return MaxSdk.IsAppOpenAdReady(UnitIdsMapping[AdsType.OpenApp].UnitId);
+                if (!UnitIdsMapping.TryGetValue(AdsType.OpenApp, out var unitId)
+                    || string.IsNullOrEmpty(unitId.UnitId))
+                    return false;
+                return MaxSdk.IsAppOpenAdReady(unitId.UnitId);
             }
         }
 
@@ -142,7 +151,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #region Private Fields
 
-        private bool _intersitialFulfilled;
+        private bool _interstitialFulfilled;
         private bool _rewardFulfilled;
         private Action<bool> _interstitialCallback;
         private Action<bool> _rewardedCallback;
@@ -159,6 +168,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private float _rewardedLoadStartTime;
         private float _bannerLoadStartTime;
         private bool _bannerAutoRefreshing;
+        private bool _isBannerCreated;
 
         #endregion
 
@@ -204,7 +214,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void CleanUp()
         {
-            _intersitialFulfilled = false;
+            _interstitialFulfilled = false;
             _rewardFulfilled = false;
             _interstitialCallback = null;
             _rewardedCallback = null;
@@ -221,6 +231,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             _rewardedLoadStartTime = 0;
             _bannerLoadStartTime = 0;
             _bannerAutoRefreshing = false;
+            IsBannerAvailable = false;
 
             MaxSdkCallbacks.OnSdkInitializedEvent -= HandleMaxSdkInitializedEvents;
 
@@ -306,9 +317,28 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void ShowBanner()
         {
+            if (!IsInitialized)
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: SDK is not initialized.");
+                return;
+            }
+
+            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Banner))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: Banner ads are disabled.");
+                return;
+            }
+
+            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId)
+                || string.IsNullOrEmpty(unitId.UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: Banner ad unit ID is not set.");
+                return;
+            }
+
             try
             {
-                MaxSdk.ShowBanner(UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.ShowBanner(unitId.UnitId);
             }
             catch (Exception ex)
             {
@@ -318,9 +348,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void HideBanner()
         {
+            if (!IsInitialized)
+            {
+                return;
+            }
+
+            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId)
+                || string.IsNullOrEmpty(unitId.UnitId))
+            {
+                return;
+            }
+
             try
             {
-                MaxSdk.HideBanner(UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.HideBanner(unitId.UnitId);
             }
             catch (Exception ex)
             {
@@ -337,11 +378,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return false;
             }
 
+            if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId)
+                || string.IsNullOrEmpty(unitId.UnitId))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Interstitial ad unit ID is not set.");
+                callback?.Invoke(false);
+                return false;
+            }
+
             try
             {
-                _intersitialFulfilled = false;
+                _interstitialFulfilled = false;
                 MaxSdk.ShowInterstitial(
-                    UnitIdsMapping[AdsType.Interstitial].UnitId,
+                    unitId.UnitId,
                     placement
                 );
                 SendAdsCallShowTrackingEvent(AdsType.Interstitial, placement);
@@ -485,11 +534,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 MaxSdk.ShowMediationDebugger();
             }
 
-            if (Integration.TrackingManager != null)
-            {
-                Integration.TrackingManager.AllowTracking = true;
-            }
-
 #if UNITY_IOS
             if (MaxSdkUtils.CompareVersions(UnityEngine.iOS.Device.systemVersion, "14.5") != MaxSdkUtils.VersionComparisonResult.Lesser)
             {
@@ -497,6 +541,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 AudienceNetwork.AdSettings.SetAdvertiserTrackingEnabled(isTrackingEnabled);
             }
 #endif
+
+            IsInitialized = true;
+        }
+
+        private void CreateBanner()
+        {
             try
             {
                 MaxSdk.CreateBanner(
@@ -523,9 +573,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     ex.Message
                 );
             }
-
-
-            IsInitialized = true;
         }
 
         private void LoadOpenAppAds()
@@ -707,7 +754,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
-            if (!UnitIdsMapping.ContainsKey(AdsType.Banner) || string.IsNullOrEmpty(UnitIdsMapping[AdsType.Banner].UnitId))
+            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var bannerUnitId)
+                || string.IsNullOrEmpty(bannerUnitId.UnitId))
             {
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
                     "Banner ad unit ID is not set. Please check the configuration."
@@ -715,10 +763,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 return;
             }
 
+            _isLoadingBanner = true;
+            _bannerLoadStartTime = Time.unscaledTime;
+
+            if (!_isBannerCreated)
+            {
+                CreateBanner();
+                _isBannerCreated = true;
+            }
+
             try
             {
-                MaxSdk.LoadBanner(UnitIdsMapping[AdsType.Banner].UnitId);
-                MaxSdk.StartBannerAutoRefresh(UnitIdsMapping[AdsType.Banner].UnitId);
+                MaxSdk.LoadBanner(bannerUnitId.UnitId);
+                MaxSdk.StartBannerAutoRefresh(bannerUnitId.UnitId);
                 _bannerAutoRefreshing = true;
                 SendTrackingAction("AdsBanner", "CallLoad");
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Banner Ad");
@@ -779,7 +836,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleRewardedAdReceivedReward(string arg1, MaxSdkBase.Reward reward, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "Hidden");
+            SendTrackingAction("AdsReward", "RewardReceived");
             _rewardFulfilled = true;
         }
 
@@ -838,7 +895,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Hidden");
-            InvokeAdsCallbackOnce(ref _interstitialCallback, _intersitialFulfilled);
+            InvokeAdsCallbackOnce(ref _interstitialCallback, _interstitialFulfilled);
         }
 
         private void HandleInterstitialAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
@@ -850,7 +907,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Displayed");
-            _intersitialFulfilled = true;
+            _interstitialFulfilled = true;
             _interstitialTimer = 0;
             LoadInterstitialAds();
         }
@@ -858,14 +915,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "Clicked");
-            _intersitialFulfilled = true;
+            _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingAction("AdsInter", "RevenuePaid");
             SendRevenueTracking(info, AdsType.Interstitial);
-            _intersitialFulfilled = true;
+            _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)

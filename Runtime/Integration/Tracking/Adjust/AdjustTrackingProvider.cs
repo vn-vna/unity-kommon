@@ -79,6 +79,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public float IapMultiplier => iapMultiplier;
         public ActionSeverity MinimumActionSeverity => ActionSeverity.Error;
+        public ProviderIdentity ProviderIdentity => (ProviderIdentity)(1 << providerMaskNumber);
 
         [SerializeField]
         private string androidAppToken;
@@ -97,6 +98,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private float iapMultiplier;
+
+        [SerializeField]
+        private int providerMaskNumber = 0;
 
         [SerializeField]
         private float initializationTimeout = 10f;
@@ -353,7 +357,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             }
         }
 
-#if !UNITY_EDITOR
         private void AcquireAdvertisingIdCallback(string adid)
         {
             QuickLog.Info<AdjustTrackingProvider>(
@@ -365,12 +368,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 Dispatcher.DispatchOnMainThread(() =>
                 {
+                    TrackingManager.DeviceTrackingIdentifier = adid;
                     PlayerPrefs.SetString("advertising_id", adid);
                     PlayerPrefs.Save();
                 });
             }
         }
-#endif
 
     }
 }

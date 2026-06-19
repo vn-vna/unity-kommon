@@ -1,6 +1,7 @@
 #if UNITY_PURCHASING
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -219,7 +220,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandleConnectionCompleted()
         {
-            QuickLog.Critical<UnityInAppPurchaseProvider>("Store connected");
+            QuickLog.Info<UnityInAppPurchaseProvider>("Store connected");
             PerformFetchProducts();
         }
 
@@ -291,11 +292,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
             if (IsInitialized) return;
             IsInitialized = true;
-            Dispatcher.DispatchOnMainThread(_storeController.FetchPurchases);
+            Dispatcher.DispatchOnMainThread(PerformFetchPurchases);
             QuickLog.Info<UnityInAppPurchaseProvider>("Products fetched successfully.");
         }
 
+        private void PerformFetchPurchases()
+        {
+            _storeController.FetchPurchases();
+            QuickLog.Info<UnityInAppPurchaseProvider>("Fetching Purchases");
+        }
+
         private void HandlePurchasesFetched(Orders orders)
+        {
+            PerformProcessFetchedPurchases(orders).DispatchOnDispatcher();
+        }
+
+        private IEnumerator PerformProcessFetchedPurchases(Orders orders)
         {
             foreach (ConfirmedOrder order in orders.ConfirmedOrders)
             {
@@ -303,6 +315,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             }
 
             QuickLog.Info<UnityInAppPurchaseProvider>("Purchases fetched successfully.");
+            yield break;
         }
 
         private void ProcessPurchasedOrderForRestoration(ConfirmedOrder order)
@@ -318,13 +331,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 out List<UnityPurchaseResult> receipts
             );
 
-            if (!valid) return;
+            if (!valid)
+            {
+                QuickLog.Error<UnityInAppPurchaseProvider>("Some purchases cannot be validated");
+                return;
+            }
+
+            int count = 0;
 
             foreach (UnityPurchaseResult receipt in receipts)
             {
                 if (!CheckProductRestorable(receipt.ProductID)) continue;
                 _pendingRestorations.Enqueue(receipt.ProductID);
+                QuickLog.Info<UnityInAppPurchaseProvider>(
+                    "Queued product {0} for restoration",
+                    receipt.ProductID
+                );
+                ++count;
             }
+
+            QuickLog.Info<UnityInAppPurchaseProvider>(
+                "Queued {0} items for restoration",
+                count
+            );
+
         }
 
         private void HandlePurchasesFetchFailed(PurchasesFetchFailureDescription description)

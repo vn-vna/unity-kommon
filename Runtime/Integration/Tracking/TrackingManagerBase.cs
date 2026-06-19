@@ -21,6 +21,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool AllowTracking { get; set; }
         public TrackingManagerStatus Status { get; private set; }
         public List<ITrackingProvider> Providers => _providers;
+        public bool? IsTrackingFiltered
+        {
+            get
+            {
+                if (Status != TrackingManagerStatus.Ready) return null;
+                if (_filteredTrackingIds == null) return false;
+                if (string.IsNullOrWhiteSpace(DeviceTrackingIdentifier)) return false;
+                return _filteredTrackingIds.Contains(DeviceTrackingIdentifier);
+            }
+        }
         #endregion
 
         #region Serialized Fields
@@ -84,6 +94,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 RegisterAllInitialProviders();
             }
+        }
+
+        public void AssignFilteredTrackingDevices(params string[] ids)
+        {
+            foreach (string deviceId in ids) _filteredTrackingIds.Add(deviceId);
         }
 
         public void Tick(float deltaTime)
@@ -283,6 +298,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
                 if (info.Severity < provider.MinimumActionSeverity) continue;
+                if (info.ProviderMask != ProviderIdentity.None
+                    && (info.ProviderMask & provider.ProviderIdentity) == 0) continue;
 
                 provider.TrackAction(info);
             }

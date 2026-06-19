@@ -15,6 +15,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     {
         public string ActionId { get; set; }
         public ActionSeverity Severity { get; set; }
+        public ProviderIdentity ProviderMask { get; set; }
         public Dictionary<string, object> Parameters { get; set; }
 
         public static Dictionary<string, object> CreateParametersDictionary(
