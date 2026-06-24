@@ -17,6 +17,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
         [SerializeField]
         private ScriptableObject[] moduleScriptableObjects;
 
+        [SerializeField]
+        [Tooltip("Name of the ticker GameObject spawned at runtime.")]
+        private string tickerGameObjectName = "[Scheherazade Integration Ticker]";
+
+        [SerializeField]
+        [Tooltip("Hide the ticker GameObject in the hierarchy.")]
+        private bool hideTickerGameObject = true;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
         {
@@ -71,9 +79,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             }
 
             // Spawn Ticker to drive Update loops for SOs
-            var tickerGo = new GameObject("[Scheherazade Integration Ticker]");
+            var tickerGo = new GameObject(tickerGameObjectName);
             DontDestroyOnLoad(tickerGo);
-            tickerGo.hideFlags = HideFlags.HideInHierarchy;
+            tickerGo.hideFlags = hideTickerGameObject ? HideFlags.HideInHierarchy : HideFlags.None;
             var ticker = tickerGo.AddComponent<IntegrationCentreTicker>();
             ticker.Setup(this);
 

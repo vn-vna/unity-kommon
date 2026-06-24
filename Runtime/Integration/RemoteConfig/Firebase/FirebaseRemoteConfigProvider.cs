@@ -32,6 +32,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
     {
         private const string FirebaseCachedConfigKey = "__firebase_cached_config__";
 
+        [SerializeField]
+        [Tooltip("How long (in seconds) Firebase SDK should cache fetched values before re-fetching. Default: 12 hours (43200).")]
+        private float sdkCacheExpirationSeconds = 43200f;
+
+        [SerializeField]
+        [Tooltip("How long (in seconds) the local on-disk cache is considered valid. After this time, cached values are not applied as defaults. Default: 24 hours (86400).")]
+        private float localCacheExpirationSeconds = 86400f;
+
         public int Priority => 0;
         public bool IsInitialized { get; private set; }
         public bool IsReady { get; set; }
@@ -45,6 +53,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private void OnEnable()
         {
             _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
+        }
+
+        private void OnDisable()
+        {
+            FirebaseRemoteConfig.DefaultInstance.OnConfigUpdateListener
+                -= ConfigUpdateListenerEventHandler;
         }
 
         public void Initialize()
@@ -130,11 +144,26 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             return defaults;
         }
 
-        private static async Task TryApplyCachedDefaults(Dictionary<string, object> defaults)
+        private async Task TryApplyCachedDefaults(Dictionary<string, object> defaults)
         {
             string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
             string json = await File.ReadAllTextAsync(path);
             JObject jObject = JObject.Parse(json);
+
+            JToken metadataToken = jObject["_metadata"];
+            if (metadataToken?["cachedAt"] != null)
+            {
+                DateTime cachedAt = metadataToken["cachedAt"].ToObject<DateTime>();
+                if ((DateTime.UtcNow - cachedAt).TotalSeconds > localCacheExpirationSeconds)
+                {
+                    QuickLog.Info<FirebaseRemoteConfigProvider>(
+                        "Local Firebase cache expired ({0}s old, max {1}s). Using hardcoded defaults.",
+                        (DateTime.UtcNow - cachedAt).TotalSeconds,
+                        localCacheExpirationSeconds
+                    );
+                    return;
+                }
+            }
 
             List<string> keys = new List<string>(defaults.Keys);
             foreach (string key in keys)
@@ -219,6 +248,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                     .DispatchDelayedOnMainThread(() => InitializeInternal(), 1.0f);
                 return;
             }
+
+            FirebaseRemoteConfig.DefaultInstance.OnConfigUpdateListener
+                += ConfigUpdateListenerEventHandler;
         }
 
         public void Refresh()
@@ -241,7 +273,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             IsReady = false;
             FirebaseRemoteConfig
                 .DefaultInstance
-                .FetchAsync(TimeSpan.Zero)
+                .FetchAsync(TimeSpan.FromSeconds(sdkCacheExpirationSeconds))
                 .ContinueTaskOnMainThread(HandleFirebaseFetchTaskCompleted);
         }
 
@@ -312,6 +344,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                         break;
                 }
             }
+            jObject["_metadata"] = new JObject
+            {
+                ["cachedAt"] = DateTime.UtcNow
+            };
             await File.WriteAllTextAsync(path, jObject.ToString());
         }
 
@@ -334,6 +370,50 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                 "Failed to cache Firebase Remote Config: {0}",
                 task.Exception
             );
+        }
+
+        private void ConfigUpdateListenerEventHandler(
+            object sender, ConfigUpdateEventArgs args)
+        {
+            if (args.Error != RemoteConfigError.None)
+            {
+                QuickLog.Warning<FirebaseRemoteConfigProvider>(
+                    "Config update listener error: {0}", args.Error
+                );
+                return;
+            }
+
+            QuickLog.Info<FirebaseRemoteConfigProvider>(
+                "Updated keys: {0}", string.Join(", ", args.UpdatedKeys)
+            );
+
+            FirebaseRemoteConfig.DefaultInstance.ActivateAsync()
+                .ContinueTaskOnMainThread(HandleConfigUpdateActivateCompleted);
+        }
+
+        private async void HandleConfigUpdateActivateCompleted(Task<bool> task)
+        {
+            if (this == null) return;
+
+            if (!task.IsCompleted || task.IsFaulted || !task.Result) return;
+
+            try
+            {
+                await CacheRemoteConfig();
+
+                var method = Manager?.GetType().GetMethod(
+                    "AcquireRemoteConfig",
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Instance
+                );
+                method?.Invoke(Manager, null);
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Warning<FirebaseRemoteConfigProvider>(
+                    "Failed to handle config update: {0}", ex
+                );
+            }
         }
 
         public bool TryGetConfig<T>(string key, out T result)

@@ -13,7 +13,10 @@
         "Google.Play.Common",
         "Google.Play.Core",
         "Google.Play.Review",
-        "Unity.TextMeshPro"
+        "Unity.TextMeshPro",
+        "Unity.Addressables",
+        "Unity.Addressables.Android",
+        "Unity.ResourceManager"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -37,6 +40,21 @@
             "name": "io.appmetrica.analytics",
             "expression": "0",
             "define": "TRACKING_APPMETRICA"
+        },
+        {
+            "name": "com.unity.addressables",
+            "expression": "0",
+            "define": "UNITY_ADDRESSABLES"
+        },
+        {
+            "name": "com.google.firebase.analytics",
+            "expression": "0",
+            "define": "FIREBASE_ANALYTICS"
+        },
+        {
+            "name": "com.google.firebase.remote-config",
+            "expression": "0",
+            "define": "FIREBASE_REMOTE"
         }
     ],
     "noEngineReferences": false

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Callbacks;
@@ -68,6 +69,42 @@ namespace Com.Hapiga.Scheherazade.Integration
         }
 
         protected virtual void DrawExtraContent(ScriptableObject manager) { }
+    }
+
+    public class IntegrationCentreSettingsProvider : SettingsProvider
+    {
+        private IntegrationCentreSettingsProvider(
+            string path, SettingsScope scopes,
+            IEnumerable<string> keywords = null
+        ) : base(path, scopes, keywords)
+        { }
+
+        [SettingsProvider]
+        public static SettingsProvider CreateSettingsProvider()
+        {
+            return new IntegrationCentreSettingsProvider(
+                "Project/Integration", SettingsScope.Project,
+                new[] { "integration", "centre", "center", "module", "modules" }
+            );
+        }
+
+        public override void OnGUI(string searchContext)
+        {
+            base.OnGUI(searchContext);
+
+            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
+
+            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
+            if (centre == null) return;
+
+            EditorGUILayout.LabelField("Integration Centre Configuration", EditorStyles.boldLabel);
+            GUILayout.Space(4);
+
+            IntegrationSettingsDrawingUtils.DrawInlineInspector(
+                centre,
+                "INTEGRATION CENTRE"
+            );
+        }
     }
 
     public class AdsIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IAdsManager>
@@ -455,6 +492,283 @@ namespace Com.Hapiga.Scheherazade.Integration
             return new UserSegmentationIntegrationSettingsProvider(
                 "Project/Integration/User Segmentation", SettingsScope.Project);
         }
+    }
+
+    public class AsyncResourceManagerSettingsProvider : SettingsProvider
+    {
+        private int _selectedManagerIndex;
+        private int _selectedTabIndex;
+        private ScriptableObject _pendingProviderToAdd;
+        private Vector2 _scrollPosition;
+
+        private readonly string[] TabNames = { "Manager Config", "Providers" };
+
+        private AsyncResourceManagerSettingsProvider(
+            string path, SettingsScope scopes,
+            IEnumerable<string> keywords = null
+        ) : base(path, scopes, keywords)
+        { }
+
+        [SettingsProvider]
+        public static SettingsProvider CreateSettingsProvider()
+        {
+            return new AsyncResourceManagerSettingsProvider(
+                "Project/Integration/Async Resource Manager",
+                SettingsScope.Project,
+                new[] { "resource", "MPRL", "async", "provider", "reference", "folder" }
+            );
+        }
+
+        public override void OnGUI(string searchContext)
+        {
+            base.OnGUI(searchContext);
+
+            IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
+
+            var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
+            if (centre == null) return;
+
+            var resourceManagers = FindResourceManagers(centre);
+
+            if (resourceManagers.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "No Async Resource Managers found in Integration Centre.\n\n" +
+                    "Create a resource manager ScriptableObject, assign its providers, " +
+                    "then add it to the Integration Centre's module list.",
+                    MessageType.Info
+                );
+                return;
+            }
+
+            if (_selectedManagerIndex >= resourceManagers.Count)
+                _selectedManagerIndex = 0;
+
+            GUILayout.Space(4);
+            EditorGUILayout.LabelField("Async Resource Manager Configuration", EditorStyles.boldLabel);
+
+            GUILayout.Space(2);
+
+            var managerNames = resourceManagers.Select(m => m.DisplayName).ToArray();
+            _selectedManagerIndex = EditorGUILayout.Popup(
+                "Resource Manager",
+                _selectedManagerIndex,
+                managerNames
+            );
+
+            var entry = resourceManagers[_selectedManagerIndex];
+
+            GUILayout.Space(6);
+            _selectedTabIndex = GUILayout.Toolbar(_selectedTabIndex, TabNames);
+            GUILayout.Space(4);
+
+            var dividerRect = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(dividerRect, new Color(0.5f, 0.5f, 0.5f, 0.3f));
+            GUILayout.Space(4);
+
+            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
+
+            switch (_selectedTabIndex)
+            {
+                case 0:
+                    DrawManagerConfig(entry);
+                    break;
+                case 1:
+                    DrawProviders(entry);
+                    break;
+            }
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawManagerConfig(ResourceManagerEntry entry)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Resource Type", entry.ResourceType.Name);
+                EditorGUILayout.LabelField("Manager Type", entry.ConcreteType.FullName);
+
+                bool isInitialized = GetManagerStatus(entry.Manager);
+                var statusStyle = new GUIStyle(EditorStyles.label)
+                {
+                    normal = { textColor = isInitialized ? Color.green : Color.gray }
+                };
+                EditorGUILayout.LabelField(
+                    "Status",
+                    isInitialized ? "Initialized" : "Not Initialized",
+                    statusStyle
+                );
+            }
+
+            GUILayout.Space(6);
+            IntegrationSettingsDrawingUtils.DrawInlineInspector(
+                entry.Manager,
+                $"{PascalCaseToSpaced(entry.Manager.name).ToUpperInvariant()} CONFIGURATION"
+            );
+        }
+
+        private void DrawProviders(ResourceManagerEntry entry)
+        {
+            var serializedManager = new SerializedObject(entry.Manager);
+            var providersProp = serializedManager.FindProperty("initialProviders");
+
+            if (providersProp == null || !providersProp.isArray)
+            {
+                EditorGUILayout.HelpBox(
+                    "Could not find 'initialProviders' field on this manager.",
+                    MessageType.Error
+                );
+                return;
+            }
+
+            bool anyVisible = false;
+            for (int i = providersProp.arraySize - 1; i >= 0; i--)
+            {
+                var element = providersProp.GetArrayElementAtIndex(i);
+                var provider = element.objectReferenceValue as ScriptableObject;
+
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        string displayName = provider != null
+                            ? provider.name
+                            : $"<missing> (slot {i})";
+
+                        EditorGUILayout.LabelField(displayName, EditorStyles.miniBoldLabel);
+
+                        if (DrawSmallButton("−", $"Remove provider at slot {i}"))
+                        {
+                            providersProp.DeleteArrayElementAtIndex(i);
+                            serializedManager.ApplyModifiedProperties();
+                            EditorUtility.SetDirty(entry.Manager);
+                            AssetDatabase.SaveAssets();
+                            break;
+                        }
+                    }
+
+                    if (provider != null)
+                    {
+                        IntegrationSettingsDrawingUtils.DrawInlineInspector(
+                            provider,
+                            $"{PascalCaseToSpaced(provider.name).ToUpperInvariant()} PROVIDER"
+                        );
+                        anyVisible = true;
+                    }
+                }
+            }
+
+            if (!anyVisible && providersProp.arraySize == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "No providers assigned. Use the field below to add one.",
+                    MessageType.Info
+                );
+            }
+
+            GUILayout.Space(4);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                _pendingProviderToAdd = EditorGUILayout.ObjectField(
+                    "Add Provider",
+                    _pendingProviderToAdd,
+                    typeof(ScriptableObject),
+                    false
+                ) as ScriptableObject;
+
+                if (_pendingProviderToAdd != null && GUILayout.Button("+", GUILayout.Width(24)))
+                {
+                    int newIndex = providersProp.arraySize++;
+                    providersProp.GetArrayElementAtIndex(newIndex).objectReferenceValue =
+                        _pendingProviderToAdd;
+                    serializedManager.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(entry.Manager);
+                    AssetDatabase.SaveAssets();
+                    _pendingProviderToAdd = null;
+                }
+            }
+        }
+
+        private struct ResourceManagerEntry
+        {
+            public ScriptableObject Manager;
+            public Type ConcreteType;
+            public Type ResourceType;
+            public string DisplayName;
+        }
+
+        private static List<ResourceManagerEntry> FindResourceManagers(IntegrationCentre centre)
+        {
+            var results = new List<ResourceManagerEntry>();
+            var serializedCentre = new SerializedObject(centre);
+            var listProp = serializedCentre.FindProperty("moduleScriptableObjects");
+            if (listProp == null) return results;
+
+            for (int i = 0; i < listProp.arraySize; i++)
+            {
+                var element = listProp.GetArrayElementAtIndex(i);
+                var module = element.objectReferenceValue as ScriptableObject;
+                if (module == null) continue;
+
+                foreach (Type iface in module.GetType().GetInterfaces())
+                {
+                    if (!iface.IsGenericType) continue;
+                    if (iface.GetGenericTypeDefinition() != typeof(IResourceManager<>)) continue;
+
+                    Type resourceType = iface.GenericTypeArguments[0];
+                    results.Add(new ResourceManagerEntry
+                    {
+                        Manager = module,
+                        ConcreteType = module.GetType(),
+                        ResourceType = resourceType,
+                        DisplayName = $"{PascalCaseToSpaced(module.name)} ({module.GetType().Name}<{resourceType.Name}>)"
+                    });
+                    break;
+                }
+            }
+
+            return results;
+        }
+
+        private static bool DrawSmallButton(string label, string tooltip)
+        {
+            return GUILayout.Button(
+                new GUIContent(label, tooltip),
+                EditorStyles.miniButton,
+                GUILayout.Width(22),
+                GUILayout.Height(18)
+            );
+        }
+
+        private static bool GetManagerStatus(ScriptableObject manager)
+        {
+            foreach (Type iface in manager.GetType().GetInterfaces())
+            {
+                if (!iface.IsGenericType) continue;
+                if (iface.GetGenericTypeDefinition() != typeof(IResourceManager<>)) continue;
+
+                var statusProp = iface.GetProperty("Status");
+                if (statusProp == null) continue;
+
+                object status = statusProp.GetValue(manager);
+                return status is ResourceManagerStatus s && s == ResourceManagerStatus.Initialized;
+            }
+
+            return false;
+        }
+
+        private static readonly Regex PascalCaseRegex = new Regex(
+            @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
+            RegexOptions.Compiled
+        );
+
+        private static string PascalCaseToSpaced(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+            return PascalCaseRegex.Replace(name, " ");
+        }
+
     }
 
     internal enum ProviderBindingMode
@@ -1155,7 +1469,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
         }
 
-        private static void DrawInlineInspector(ScriptableObject asset, string header)
+        internal static void DrawInlineInspector(ScriptableObject asset, string header)
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {

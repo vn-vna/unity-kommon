@@ -374,6 +374,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         private void HandleProductsFetchFailed(ProductFetchFailed failed)
         {
             List<ProductDefinition> productsToRetry = new List<ProductDefinition>();
+            List<ProductDefinition> productNoRetry = new List<ProductDefinition>();
 
             foreach (ProductDefinition productDef in failed.FailedFetchProducts)
             {
@@ -397,10 +398,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 }
                 else
                 {
-                    QuickLog.Error<UnityInAppPurchaseProvider>(
-                        "Product fetch permanently failed after {0} retries [Product: {1}] [Reason: {2}]",
-                        maxProductFetchRetries, productId, failed.FailureReason
-                    );
+                    productNoRetry.Add(productDef);
                 }
             }
 
@@ -415,6 +413,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 Dispatcher.DispatchDelayedOnMainThread(
                     () => RetryFailedProducts(productsToRetry),
                     productFetchRetryInterval
+                );
+            }
+            else if (productNoRetry.Count > 0)
+            {
+                QuickLog.Critical<UnityInAppPurchaseProvider>(
+                    "Several product(s) fetching will be permanently terminated" +
+                    "due to multiple failure attempts including: [{0}]",
+                    (Func<object>)(() => string.Join(",", productNoRetry.Select(p => p.id)))
                 );
             }
         }
