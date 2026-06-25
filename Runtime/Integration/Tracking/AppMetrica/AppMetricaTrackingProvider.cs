@@ -24,6 +24,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool IsInitialized { get; private set; }
         public bool IsTrackingEnabled { get; private set; }
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
+        public TrackingProviderFeatures EnabledFeatures => enabledFeatures;
         public int Priority => 1;
         public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
         public bool IsFirstSession
@@ -63,6 +64,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private float iapMultiplier;
+
+        [SerializeField]
+        [TrackingFeatureFilter]
+        private TrackingProviderFeatures enabledFeatures = TrackingProviderFeatures.AllFeatures;
 
         [SerializeField]
         private ActionSeverity minimumActionSeverity = ActionSeverity.Info;

@@ -42,6 +42,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool IsTrackingEnabled { get; private set; }
 
         public TrackingProviderFeatures Features => TrackingProviderFeatures.Revenue;
+        public TrackingProviderFeatures EnabledFeatures => enabledFeatures;
 
         public int Priority => 1;
 
@@ -86,6 +87,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private string iosAppToken;
+
+        [SerializeField]
+        [TrackingFeatureFilter]
+        private TrackingProviderFeatures enabledFeatures = TrackingProviderFeatures.AllFeatures;
 
         [SerializeField]
         private AdjustEnvironment environment;

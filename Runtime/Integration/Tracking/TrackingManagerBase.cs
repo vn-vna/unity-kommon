@@ -38,6 +38,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
 
         [SerializeField]
+        [TrackingFeatureFilter]
+        private TrackingProviderFeatures enabledFeatures = TrackingProviderFeatures.AllFeatures;
+
+        [SerializeField]
         private ScriptableObject[] initialProviders;
 
         [SerializeField]
@@ -236,6 +240,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if ((enabledFeatures & TrackingProviderFeatures.ScreenView) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Screen view tracking is disabled in manager features. Skipping."
+                );
+                return;
+            }
+
             if (Status != TrackingManagerStatus.Ready)
             {
                 _pendingActions.Enqueue(() => TrackScreen(screenId));
@@ -245,7 +257,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.ScreenView) == 0) continue;
+                if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.ScreenView) == 0) continue;
                 provider.TrackScreen(screenId);
             }
         }
@@ -282,6 +294,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if ((enabledFeatures & TrackingProviderFeatures.IngameAction) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Ingame action tracking is disabled in manager features. Skipping."
+                );
+                return;
+            }
+
             QuickLog.Debug<TrackingManagerBase<T>>(
                 "Tracking action: [ActionId = {0}, Severity = {1}], Parameters = {2}",
                 info.ActionId, info.Severity,
@@ -296,7 +316,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
+                if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
                 if (info.Severity < provider.MinimumActionSeverity) continue;
                 if (info.ProviderMask != ProviderIdentity.None
                     && (info.ProviderMask & provider.ProviderIdentity) == 0) continue;
@@ -345,10 +365,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if ((enabledFeatures & TrackingProviderFeatures.AdRevenue) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Ad revenue tracking is disabled in manager features. Skipping."
+                );
+                return;
+            }
+
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.AdRevenue) == 0) continue;
+                if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.AdRevenue) == 0) continue;
 
                 provider.TrackAdRevenue(info);
             }
@@ -394,10 +422,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if ((enabledFeatures & TrackingProviderFeatures.PurchaseRevenue) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Purchase revenue tracking is disabled in manager features. Skipping."
+                );
+                return;
+            }
+
             foreach (ITrackingProvider provider in _providers)
             {
                 if (!provider.IsTrackingEnabled) continue;
-                if ((provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) continue;
+                if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) continue;
                 provider.TrackPurchaseRevenue(info);
             }
 #endif

@@ -41,6 +41,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public ITrackingManager TrackingManager { get; set; }
         public bool IsTrackingEnabled { get; private set; }
         public TrackingProviderFeatures Features => TrackingProviderFeatures.AllFeatures;
+        public TrackingProviderFeatures EnabledFeatures => enabledFeatures;
         public int Priority => 0;
         public ActionSeverity MinimumActionSeverity => minimumActionSeverity;
         public FirebaseRevenueTrackingEvent[] RevenueTrackingConfig => adsRevenueTrackingConfig;
@@ -51,6 +52,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private float iapMultiplier = 0.7f;
+
+        [SerializeField]
+        [TrackingFeatureFilter]
+        private TrackingProviderFeatures enabledFeatures = TrackingProviderFeatures.AllFeatures;
 
         [SerializeField]
         private ActionSeverity minimumActionSeverity = ActionSeverity.Debug;
