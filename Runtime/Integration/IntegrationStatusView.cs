@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
@@ -30,9 +31,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
 
         [Header("Expanded Panel")]
         [SerializeField] private Vector2 panelSize = new Vector2(960f, 720f);
-        [SerializeField] private bool autoCalculateExpandedPanelSize;
-        [SerializeField] private HorizontalPanelAlignment horizontalAlignment = HorizontalPanelAlignment.Left;
-        [SerializeField] private VerticalPanelAlignment verticalAlignment = VerticalPanelAlignment.Top;
+        [SerializeField] private bool autoCalculateExpandedPanelSize = true;
+        [SerializeField] private HorizontalPanelAlignment horizontalAlignment = HorizontalPanelAlignment.Center;
+        [SerializeField] private VerticalPanelAlignment verticalAlignment = VerticalPanelAlignment.Middle;
         [SerializeField] private Vector2 panelOffset = new Vector2(24f, -24f);
         [SerializeField] private Vector4 panelPadding = new Vector4(24f, 24f, 24f, 24f);
         [SerializeField] private float moduleSpacing = 10f;
@@ -59,8 +60,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
 
         [Header("Text")]
         [SerializeField] private TMP_FontAsset fontAsset;
-        [SerializeField] private float moduleFontSize = 28f;
-        [SerializeField] private float providerFontSize = 24f;
+        [SerializeField] private float moduleFontSize = 14f;
+        [SerializeField] private float providerFontSize = 12f;
         [SerializeField] private FontStyles moduleFontStyle = FontStyles.Bold;
         [SerializeField] private FontStyles providerFontStyle = FontStyles.Normal;
         [SerializeField] private Color labelColor = Color.white;
@@ -81,7 +82,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
         [SerializeField] private Color failedColor = new Color(1f, 0.25f, 0.25f);
         [SerializeField] private Color unknownColor = new Color(0.8f, 0.8f, 0.8f);
 
+        [Header("Config Table")]
+        [SerializeField] private float configKeyColumnWidth = 200f;
+        [SerializeField] private float configTypeColumnWidth = 120f;
+        [SerializeField] private float configValueColumnWidth = 340f;
+        [SerializeField] private float configDefaultColumnWidth = 240f;
+        [SerializeField] private float configFontSize = 11f;
+        [SerializeField] private float configSectionSpacing = 14f;
+        [SerializeField] private int configMaxCollectionItems = 5;
+        [SerializeField] private int configMaxDepth = 3;
+        [SerializeField] private int configMaxStringLength = 60;
+
         private readonly List<ModuleRowView> _moduleRows = new List<ModuleRowView>();
+        private ConfigSectionView _configSection;
 
         private Canvas _canvas;
         private RectTransform _expandedPanelRect;
@@ -389,9 +402,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             EnsureCanvas();
 
             List<ModuleSnapshot> modules = CollectModules();
+            List<ConfigEntrySnapshot> configEntries = CollectConfigEntries();
+
             if (_moduleRows.Count != modules.Count)
             {
-                RebuildRows(modules);
+                RebuildRows(modules, configEntries);
             }
             else
             {
@@ -399,13 +414,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 {
                     _moduleRows[i].Apply(modules[i], this);
                 }
+
+                UpdateConfigSection(configEntries);
             }
 
             _minimizedSummaryText.text = BuildMinimizedSummary(modules);
             ApplyPanelSizeSettings();
         }
 
-        private void RebuildRows(List<ModuleSnapshot> modules)
+        private void RebuildRows(List<ModuleSnapshot> modules, List<ConfigEntrySnapshot> configEntries)
         {
             for (int i = _expandedContentRect.childCount - 1; i >= 0; i--)
             {
@@ -413,6 +430,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             }
 
             _moduleRows.Clear();
+            _configSection = null;
 
             for (int i = 0; i < modules.Count; i++)
             {
@@ -420,6 +438,33 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 row.Apply(modules[i], this);
                 _moduleRows.Add(row);
             }
+
+            if (configEntries.Count > 0)
+            {
+                _configSection = new ConfigSectionView(_expandedContentRect, this);
+                _configSection.Apply(configEntries, this);
+            }
+        }
+
+        private void UpdateConfigSection(List<ConfigEntrySnapshot> configEntries)
+        {
+            if (configEntries.Count == 0)
+            {
+                if (_configSection != null)
+                {
+                    _configSection.Dispose();
+                    _configSection = null;
+                }
+
+                return;
+            }
+
+            if (_configSection == null)
+            {
+                _configSection = new ConfigSectionView(_expandedContentRect, this);
+            }
+
+            _configSection.Apply(configEntries, this);
         }
 
         private List<ModuleSnapshot> CollectModules()
@@ -434,6 +479,263 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 CreateSegmentationSnapshot(),
                 CreateManagerSnapshot("Currency Converter", Integration.CurrencyConverter, new[] { "Modules", "_modules" })
             };
+        }
+
+        private List<ConfigEntrySnapshot> CollectConfigEntries()
+        {
+            List<ConfigEntrySnapshot> entries = new List<ConfigEntrySnapshot>();
+            IRemoteConfigManager manager = Integration.RemoteConfigManager;
+            if (manager == null || manager.Config == null || manager.RemoteConfigType == null)
+            {
+                return entries;
+            }
+
+            PropertyInfo[] properties = manager.RemoteConfigType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
+            for (int i = 0; i < properties.Length; i++)
+            {
+                RemoteConfigAttribute attribute = properties[i].GetCustomAttribute<RemoteConfigAttribute>();
+                if (attribute == null)
+                {
+                    continue;
+                }
+
+                object currentValue = properties[i].GetValue(manager.Config);
+                string valueDisplay = FormatValueForDisplay(currentValue, configMaxDepth, configMaxCollectionItems, configMaxStringLength);
+                string defaultDisplay = FormatValueForDisplay(attribute.DefaultValue, configMaxDepth, configMaxCollectionItems, configMaxStringLength);
+                string typeName = GetFriendlyTypeName(properties[i].PropertyType);
+
+                entries.Add(new ConfigEntrySnapshot(attribute.Key, valueDisplay, defaultDisplay, typeName));
+            }
+
+            return entries;
+        }
+
+        private static string FormatValueForDisplay(object value, int maxDepth, int maxCollectionItems, int maxStringLength)
+        {
+            if (value == null)
+            {
+                return "<i>null</i>";
+            }
+
+            if (maxDepth <= 0)
+            {
+                return value.GetType().Name;
+            }
+
+            Type type = value.GetType();
+
+            if (value is string str)
+            {
+                string escaped = str.Replace("<", "<\u200B").Replace(">", "\u200B>");
+                if (escaped.Length <= maxStringLength)
+                {
+                    return "\"" + escaped + "\"";
+                }
+
+                return "\"" + escaped.Substring(0, maxStringLength) + "...\"";
+            }
+
+            if (type.IsPrimitive)
+            {
+                return value.ToString();
+            }
+
+            if (value is decimal dec)
+            {
+                return dec.ToString();
+            }
+
+            if (type.IsEnum)
+            {
+                return value + " (" + Convert.ToInt64(value) + ")";
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append("{");
+                int count = 0;
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (count >= maxCollectionItems)
+                    {
+                        sb.Append(", ...");
+                        break;
+                    }
+
+                    if (count > 0)
+                    {
+                        sb.Append(", ");
+                    }
+
+                    sb.Append(FormatValueForDisplay(entry.Key, maxDepth - 1, maxCollectionItems, maxStringLength));
+                    sb.Append(": ");
+                    sb.Append(FormatValueForDisplay(entry.Value, maxDepth - 1, maxCollectionItems, maxStringLength));
+                    count++;
+                }
+
+                sb.Append("}");
+                return sb.ToString();
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append("[");
+                int count = 0;
+                foreach (object item in enumerable)
+                {
+                    if (count >= maxCollectionItems)
+                    {
+                        sb.Append(", ...");
+                        break;
+                    }
+
+                    if (count > 0)
+                    {
+                        sb.Append(", ");
+                    }
+
+                    sb.Append(FormatValueForDisplay(item, maxDepth - 1, maxCollectionItems, maxStringLength));
+                    count++;
+                }
+
+                sb.Append("]");
+                return sb.ToString();
+            }
+
+            PropertyInfo[] props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.GetIndexParameters().Length == 0)
+                .ToArray();
+
+            if (props.Length == 0)
+            {
+                return value.ToString();
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append("{ ");
+            for (int i = 0; i < props.Length && i < maxCollectionItems; i++)
+            {
+                if (i > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                try
+                {
+                    object propValue = props[i].GetValue(value);
+                    builder.Append(props[i].Name);
+                    builder.Append(": ");
+                    builder.Append(FormatValueForDisplay(propValue, maxDepth - 1, maxCollectionItems, maxStringLength));
+                }
+                catch
+                {
+                    builder.Append(props[i].Name);
+                    builder.Append(": ?");
+                }
+            }
+
+            if (props.Length > maxCollectionItems)
+            {
+                builder.Append(", ...");
+            }
+
+            builder.Append(" }");
+            return builder.ToString();
+        }
+
+        private static string GetFriendlyTypeName(Type type)
+        {
+            if (type == typeof(int))
+            {
+                return "int";
+            }
+
+            if (type == typeof(float))
+            {
+                return "float";
+            }
+
+            if (type == typeof(bool))
+            {
+                return "bool";
+            }
+
+            if (type == typeof(string))
+            {
+                return "string";
+            }
+
+            if (type == typeof(long))
+            {
+                return "long";
+            }
+
+            if (type == typeof(double))
+            {
+                return "double";
+            }
+
+            if (type == typeof(byte))
+            {
+                return "byte";
+            }
+
+            if (type == typeof(short))
+            {
+                return "short";
+            }
+
+            if (type == typeof(uint))
+            {
+                return "uint";
+            }
+
+            if (type == typeof(ulong))
+            {
+                return "ulong";
+            }
+
+            if (type == typeof(ushort))
+            {
+                return "ushort";
+            }
+
+            if (type == typeof(sbyte))
+            {
+                return "sbyte";
+            }
+
+            if (type == typeof(char))
+            {
+                return "char";
+            }
+
+            if (type == typeof(decimal))
+            {
+                return "decimal";
+            }
+
+            if (type.IsGenericType)
+            {
+                string name = type.Name.Split('`')[0];
+                Type[] args = type.GetGenericArguments();
+                string[] argNames = new string[args.Length];
+                for (int i = 0; i < args.Length; i++)
+                {
+                    argNames[i] = GetFriendlyTypeName(args[i]);
+                }
+
+                return name + "<" + string.Join(", ", argNames) + ">";
+            }
+
+            if (type.IsArray)
+            {
+                return GetFriendlyTypeName(type.GetElementType()) + "[]";
+            }
+
+            return type.Name;
         }
 
         private ModuleSnapshot CreateManagerSnapshot(string moduleName, object manager, string[] providerMemberNames)
@@ -735,16 +1037,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 maxWidth = Mathf.Max(maxWidth, _moduleRows[i].GetPreferredWidth(this));
             }
 
+            if (_configSection != null)
+            {
+                maxWidth = Mathf.Max(maxWidth, _configSection.GetPreferredWidth(this));
+            }
+
             return maxWidth;
         }
 
         private float GetExpandedContentPreferredHeight()
         {
-            if (_moduleRows.Count == 0)
-            {
-                return 0f;
-            }
-
             float totalHeight = 0f;
             for (int i = 0; i < _moduleRows.Count; i++)
             {
@@ -754,6 +1056,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 }
 
                 totalHeight += _moduleRows[i].GetPreferredHeight(this);
+            }
+
+            if (_configSection != null)
+            {
+                if (_moduleRows.Count > 0)
+                {
+                    totalHeight += configSectionSpacing;
+                }
+
+                totalHeight += _configSection.GetPreferredHeight(this);
             }
 
             return totalHeight;
@@ -1256,6 +1568,189 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             }
         }
 
+        private sealed class ConfigSectionView
+        {
+            private readonly GameObject _rootObject;
+            private readonly TextMeshProUGUI _headerText;
+            private readonly RectTransform _entriesRoot;
+            private readonly List<ConfigEntryRowView> _entryRows = new List<ConfigEntryRowView>();
+
+            public ConfigSectionView(Transform parent, IntegrationStatusView owner)
+            {
+                _rootObject = new GameObject("ConfigSection", typeof(RectTransform), typeof(LayoutElement));
+                _rootObject.transform.SetParent(parent, false);
+
+                VerticalLayoutGroup rootLayout = owner.AddVerticalLayout(_rootObject, owner.configFontSize * 0.25f);
+                rootLayout.padding = new RectOffset(0, 0, 0, 0);
+
+                GameObject headerObject = new GameObject("ConfigHeader", typeof(RectTransform));
+                headerObject.transform.SetParent(_rootObject.transform, false);
+                HorizontalLayoutGroup headerLayout = owner.AddHorizontalLayout(headerObject);
+                headerLayout.padding = new RectOffset(0, 0, 0, 0);
+
+                _headerText = owner.CreateText("ConfigHeaderLabel", headerObject.transform, owner.configFontSize, FontStyles.Bold, owner.labelColor);
+                _headerText.text = "Remote Config Values";
+                LayoutElement headerLayoutElement = _headerText.GetComponent<LayoutElement>();
+                headerLayoutElement.flexibleWidth = 1f;
+
+                GameObject entriesObject = new GameObject("ConfigEntries", typeof(RectTransform), typeof(LayoutElement));
+                entriesObject.transform.SetParent(_rootObject.transform, false);
+                _entriesRoot = entriesObject.GetComponent<RectTransform>();
+                owner.AddVerticalLayout(entriesObject, 0f);
+
+                LayoutElement entriesLayout = entriesObject.GetComponent<LayoutElement>();
+                entriesLayout.flexibleWidth = 1f;
+            }
+
+            public void Apply(List<ConfigEntrySnapshot> entries, IntegrationStatusView owner)
+            {
+                if (_entryRows.Count != entries.Count)
+                {
+                    ResizeEntries(entries.Count, owner);
+                }
+
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    _entryRows[i].Apply(entries[i], owner);
+                }
+            }
+
+            public void Dispose()
+            {
+                for (int i = _entryRows.Count - 1; i >= 0; i--)
+                {
+                    _entryRows[i].Dispose();
+                }
+
+                _entryRows.Clear();
+                UnityEngine.Object.Destroy(_rootObject);
+            }
+
+            private void ResizeEntries(int targetCount, IntegrationStatusView owner)
+            {
+                for (int i = _entryRows.Count - 1; i >= targetCount; i--)
+                {
+                    _entryRows[i].Dispose();
+                    _entryRows.RemoveAt(i);
+                }
+
+                while (_entryRows.Count < targetCount)
+                {
+                    _entryRows.Add(new ConfigEntryRowView(_entriesRoot, owner));
+                }
+            }
+
+            public float GetPreferredWidth(IntegrationStatusView owner)
+            {
+                float headerWidth = owner.configKeyColumnWidth
+                    + 8f
+                    + owner.configTypeColumnWidth
+                    + 8f
+                    + owner.configValueColumnWidth
+                    + 8f
+                    + owner.configDefaultColumnWidth;
+
+                float maxWidth = Mathf.Max(headerWidth, _headerText.GetPreferredValues(_headerText.text).x);
+
+                for (int i = 0; i < _entryRows.Count; i++)
+                {
+                    maxWidth = Mathf.Max(maxWidth, _entryRows[i].GetPreferredWidth(owner));
+                }
+
+                return maxWidth;
+            }
+
+            public float GetPreferredHeight(IntegrationStatusView owner)
+            {
+                float headerHeight = Mathf.Max(owner.configFontSize + 6f, _headerText.GetPreferredValues(_headerText.text).y);
+                float entriesHeight = 0f;
+                for (int i = 0; i < _entryRows.Count; i++)
+                {
+                    entriesHeight += _entryRows[i].GetPreferredHeight(owner);
+                }
+
+                return headerHeight + entriesHeight;
+            }
+        }
+
+        private sealed class ConfigEntryRowView
+        {
+            private readonly GameObject _rootObject;
+            private readonly TextMeshProUGUI _keyText;
+            private readonly TextMeshProUGUI _typeText;
+            private readonly TextMeshProUGUI _valueText;
+            private readonly TextMeshProUGUI _defaultText;
+
+            public ConfigEntryRowView(Transform parent, IntegrationStatusView owner)
+            {
+                _rootObject = new GameObject("ConfigEntry", typeof(RectTransform));
+                _rootObject.transform.SetParent(parent, false);
+
+                owner.AddHorizontalLayout(_rootObject);
+
+                _keyText = owner.CreateText("Key", _rootObject.transform, owner.configFontSize, FontStyles.Normal, owner.labelColor);
+                LayoutElement keyLayout = _keyText.GetComponent<LayoutElement>();
+                keyLayout.preferredWidth = owner.configKeyColumnWidth;
+                keyLayout.flexibleWidth = 0f;
+
+                _typeText = owner.CreateText("Type", _rootObject.transform, owner.configFontSize, FontStyles.Normal, new Color(0.65f, 0.65f, 0.9f));
+                LayoutElement typeLayout = _typeText.GetComponent<LayoutElement>();
+                typeLayout.preferredWidth = owner.configTypeColumnWidth;
+                typeLayout.flexibleWidth = 0f;
+
+                _valueText = owner.CreateText("Value", _rootObject.transform, owner.configFontSize, FontStyles.Normal, owner.initializedColor);
+                LayoutElement valueLayout = _valueText.GetComponent<LayoutElement>();
+                valueLayout.preferredWidth = owner.configValueColumnWidth;
+                valueLayout.flexibleWidth = 0f;
+
+                _defaultText = owner.CreateText("Default", _rootObject.transform, owner.configFontSize, FontStyles.Normal, owner.disabledColor);
+                LayoutElement defaultLayout = _defaultText.GetComponent<LayoutElement>();
+                defaultLayout.preferredWidth = owner.configDefaultColumnWidth;
+                defaultLayout.flexibleWidth = 0f;
+            }
+
+            public void Apply(ConfigEntrySnapshot snapshot, IntegrationStatusView owner)
+            {
+                _keyText.text = snapshot.Key;
+                owner.ApplyTextStyle(_keyText, owner.configFontSize, FontStyles.Normal, owner.labelColor);
+
+                _typeText.text = snapshot.TypeName;
+                owner.ApplyTextStyle(_typeText, owner.configFontSize, FontStyles.Normal, new Color(0.65f, 0.65f, 0.9f));
+
+                _valueText.text = snapshot.ValueDisplay;
+                owner.ApplyTextStyle(_valueText, owner.configFontSize, FontStyles.Normal, owner.initializedColor);
+
+                _defaultText.text = snapshot.DefaultDisplay;
+                owner.ApplyTextStyle(_defaultText, owner.configFontSize, FontStyles.Normal, owner.disabledColor);
+            }
+
+            public void Dispose()
+            {
+                UnityEngine.Object.Destroy(_rootObject);
+            }
+
+            public float GetPreferredWidth(IntegrationStatusView owner)
+            {
+                return owner.configKeyColumnWidth
+                    + 8f
+                    + owner.configTypeColumnWidth
+                    + 8f
+                    + owner.configValueColumnWidth
+                    + 8f
+                    + owner.configDefaultColumnWidth;
+            }
+
+            public float GetPreferredHeight(IntegrationStatusView owner)
+            {
+                return Mathf.Max(
+                    owner.configFontSize + 6f,
+                    _keyText.GetPreferredValues(_keyText.text).y,
+                    _typeText.GetPreferredValues(_typeText.text).y,
+                    _valueText.GetPreferredValues(_valueText.text).y,
+                    _defaultText.GetPreferredValues(_defaultText.text).y);
+            }
+        }
+
         private readonly struct ModuleSnapshot
         {
             public ModuleSnapshot(string name, DisplayStatus status, List<ProviderSnapshot> providers)
@@ -1283,6 +1778,25 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             public string Name { get; }
 
             public DisplayStatus Status { get; }
+        }
+
+        private readonly struct ConfigEntrySnapshot
+        {
+            public ConfigEntrySnapshot(string key, string valueDisplay, string defaultDisplay, string typeName)
+            {
+                Key = key;
+                ValueDisplay = valueDisplay;
+                DefaultDisplay = defaultDisplay;
+                TypeName = typeName;
+            }
+
+            public string Key { get; }
+
+            public string ValueDisplay { get; }
+
+            public string DefaultDisplay { get; }
+
+            public string TypeName { get; }
         }
 
         private enum DisplayStatus
