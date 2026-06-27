@@ -5,12 +5,11 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
 {
-
     public class ResourceFolderAsyncResourceProvider<ResourceType> :
-            ScriptableObject,
-            IAsyncResourceProvider<ResourceType>, 
-            IResourceFolderAsyncResourceProvider<ResourceType> 
-            where ResourceType : UnityEngine.Object
+        ScriptableObject,
+        IAsyncResourceProvider<ResourceType>, 
+        IResourceFolderAsyncResourceProvider<ResourceType> 
+        where ResourceType : UnityEngine.Object
     {
         public bool IsInitialized => _isInitialized;
         public int Priority => priority;
@@ -99,31 +98,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
                     ResourceType resource = request.asset as ResourceType;
                     if (resource != null)
                     {
-                        handler.Resouce = resource;
-                        handler.LoadingStatus = LoadingStatus.Completed;
-                        handler.ResourceStatus = ResourceStatus.Loaded;
-
-                        QuickLog.Info<ResourceFolderAsyncResourceProvider<ResourceType>>(
-                            "Resource '{0}' loaded successfully from folder '{1}'.",
-                            fullPath, folderName
-                        );
+                        HandleResourceFound(handler, fullPath, resource);
                     }
                     else
                     {
-                        handler.LoadingStatus = LoadingStatus.Completed;
-                        handler.ResourceStatus = ResourceStatus.Failed;
-                        handler.Exception = new InvalidOperationException(
-                            $"Resources.LoadAsync returned null for " +
-                            $"'{fullPath}'. The asset may not exist or " +
-                            $"may not be of the expected type " +
-                            $"({typeof(ResourceType).Name})."
-                        );
-
-                        QuickLog.Error<ResourceFolderAsyncResourceProvider<ResourceType>>(
-                            "Resources.LoadAsync returned null for '{0}'. " +
-                            "Expected type: {1}.",
-                            fullPath, typeof(ResourceType).Name
-                        );
+                        HandleResourceNotFound(handler, fullPath);
                     }
                 };
             }
@@ -138,6 +117,36 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
                     fullPath, ex.Message
                 );
             }
+        }
+
+        private void HandleResourceFound(ResourceLoadingHandler<ResourceType> handler, string fullPath, ResourceType resource)
+        {
+            handler.Resouce = resource;
+            handler.LoadingStatus = LoadingStatus.Completed;
+            handler.ResourceStatus = ResourceStatus.Loaded;
+
+            QuickLog.Info<ResourceFolderAsyncResourceProvider<ResourceType>>(
+                "Resource '{0}' loaded successfully from folder '{1}'.",
+                fullPath, folderName
+            );
+        }
+
+        private void HandleResourceNotFound(ResourceLoadingHandler<ResourceType> handler, string fullPath)
+        {
+            handler.LoadingStatus = LoadingStatus.Completed;
+            handler.ResourceStatus = ResourceStatus.Failed;
+            handler.Exception = new InvalidOperationException(
+                $"Resources.LoadAsync returned null for " +
+                $"'{fullPath}'. The asset may not exist or " +
+                $"may not be of the expected type " +
+                $"({typeof(ResourceType).Name})."
+            );
+
+            QuickLog.Warning<ResourceFolderAsyncResourceProvider<ResourceType>>(
+                "Resources.LoadAsync returned null for '{0}'. " +
+                "Expected type: {1}.",
+                fullPath, typeof(ResourceType).Name
+            );
         }
     }
 

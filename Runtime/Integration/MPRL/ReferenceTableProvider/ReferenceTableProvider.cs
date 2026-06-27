@@ -22,7 +22,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
         [SerializeField]
         private float timeout;
 
-        public void Initialize()
+        public virtual void Initialize()
         {
             IsInitialized = ReferenceTable != null;
 
