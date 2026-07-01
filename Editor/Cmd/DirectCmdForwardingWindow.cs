@@ -665,6 +665,7 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             private string _fullContent = string.Empty;
             private string _tempFileFullContent = string.Empty;
             private string _oneLinerFullContent = string.Empty;
+            private string _rawCommand = string.Empty;
             private string _fileContent = string.Empty;
             private Vector2 _scrollPos;
             private string _copyStatus = string.Empty;
@@ -684,31 +685,24 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                     ? "# (empty)"
                     : commands.Trim();
 
-                StringBuilder tempFileSb = new();
-                tempFileSb.AppendLine("=== ADB Commands (temp file) ===");
-                tempFileSb.AppendLine($"adb -s {deviceSerial} shell mkdir -p {remoteDir}");
-                tempFileSb.AppendLine($"adb -s {deviceSerial} push \"<your_temp_file>\" \"{remotePath}\"");
-                tempFileSb.AppendLine();
-                tempFileSb.AppendLine("=== File Content (write this to your temp file) ===");
-                tempFileSb.Append(fileContent);
-
                 string base64Content = Convert.ToBase64String(
                     System.Text.Encoding.UTF8.GetBytes(fileContent));
 
+                window._rawCommand =
+                    $"adb -s {deviceSerial} shell \"mkdir -p {remoteDir} && echo '{base64Content}' | base64 -d > {remotePath}\"";
+
                 StringBuilder oneLinerSb = new();
-                oneLinerSb.AppendLine("=== ADB One-Liner ===");
-                oneLinerSb.Append($"adb -s {deviceSerial} shell ");
-                oneLinerSb.Append($"\"mkdir -p {remoteDir} && ");
-                oneLinerSb.Append($"echo '{base64Content}' | base64 -d > {remotePath}\"");
+                oneLinerSb.AppendLine("=== Executable Command ===");
+                oneLinerSb.Append(window._rawCommand);
                 oneLinerSb.AppendLine();
                 oneLinerSb.AppendLine();
                 oneLinerSb.AppendLine("=== Embedded File Content ===");
                 oneLinerSb.Append(fileContent);
 
-                window._tempFileFullContent = tempFileSb.ToString();
                 window._oneLinerFullContent = oneLinerSb.ToString();
                 window._fileContent = fileContent;
-                window._fullContent = window._tempFileFullContent;
+                window._fullContent = oneLinerSb.ToString();
+                window._isOneLiner = true;
             }
 
             private void OnGUI()
@@ -718,34 +712,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
                 EditorGUILayout.Space(2f);
 
-                EditorGUILayout.BeginHorizontal();
-                bool prevOneLiner = _isOneLiner;
-
-                EditorGUI.BeginDisabledGroup(!_isOneLiner);
-                if (GUILayout.Toggle(!_isOneLiner, "Temp File + Push", EditorStyles.miniButtonLeft))
-                {
-                    _isOneLiner = false;
-                    _copyStatus = string.Empty;
-                }
-                EditorGUI.EndDisabledGroup();
-
-                EditorGUI.BeginDisabledGroup(_isOneLiner);
-                if (GUILayout.Toggle(_isOneLiner, "One-Liner", EditorStyles.miniButtonRight))
-                {
-                    _isOneLiner = true;
-                    _copyStatus = string.Empty;
-                }
-                EditorGUI.EndDisabledGroup();
-
-                EditorGUILayout.EndHorizontal();
-
-                if (_isOneLiner != prevOneLiner)
-                    _fullContent = _isOneLiner ? _oneLinerFullContent : _tempFileFullContent;
-
                 EditorGUILayout.LabelField(
-                    _isOneLiner
-                        ? "Single base64-encoded ADB shell command. Safe for all characters."
-                        : "Multi-step approach: create a temp file first, then push.",
+                    "Copy and paste the command below into your terminal — it executes immediately.",
                     EditorStyles.miniLabel);
 
                 EditorGUILayout.Space(4f);
@@ -760,21 +728,19 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
                 EditorGUILayout.Space(4f);
 
-                EditorGUILayout.BeginHorizontal();
-
-                if (GUILayout.Button("Copy All", GUILayout.Height(28f)))
+                if (GUILayout.Button("Copy Command", GUILayout.Height(32f)))
                 {
-                    GUIUtility.systemCopyBuffer = _fullContent;
-                    _copyStatus = "All copied to clipboard.";
+                    GUIUtility.systemCopyBuffer = _rawCommand;
+                    _copyStatus = "Command copied — paste in terminal and press Enter.";
                 }
 
-                if (GUILayout.Button("Copy File Content", GUILayout.Height(28f)))
+                EditorGUILayout.Space(2f);
+
+                if (GUILayout.Button("Copy File Content", EditorStyles.miniButton))
                 {
                     GUIUtility.systemCopyBuffer = _fileContent;
                     _copyStatus = "File content copied to clipboard.";
                 }
-
-                EditorGUILayout.EndHorizontal();
 
                 if (!string.IsNullOrEmpty(_copyStatus))
                 {
