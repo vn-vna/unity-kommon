@@ -20,6 +20,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         ScriptableObject,
         IUserSegmentationProvider
     {
+        const string UnknownAttributePlaceholder = "<unknown>";
+
         [SerializeField]
         private int attributionRetry = 5;
 
@@ -163,34 +165,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         }
 
         private static SegmentationInformation BuildSegmentationInfo(AdjustAttribution attribution)
-        {
-            string campaignName = attribution.Campaign ?? "unknown_campaign";
-            string creativeName = attribution.Creative ?? "unknown_creative";
-
-            using SHA256 sha256 = SHA256.Create();
-
-            byte[] campaignHashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(campaignName));
-            StringBuilder campaignHashBuilder = new StringBuilder();
-            foreach (byte b in campaignHashBytes)
+            => new SegmentationInformation
             {
-                campaignHashBuilder.Append(b.ToString("x2"));
-            }
-
-            byte[] creativeHashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(creativeName));
-            StringBuilder creativeHashBuilder = new StringBuilder();
-            foreach (byte b in creativeHashBytes)
-            {
-                creativeHashBuilder.Append(b.ToString("x2"));
-            }
-
-            return new SegmentationInformation
-            {
-                CampaignHash = campaignHashBuilder.ToString(),
-                CreativeHash = creativeHashBuilder.ToString(),
-                CampaignName = campaignName,
-                CreativeName = creativeName
+                CampaignName =      attribution.Campaign ?? UnknownAttributePlaceholder,
+                CreativeName =      attribution.Creative ?? UnknownAttributePlaceholder,
+                AdGroup =           attribution.Adgroup ?? UnknownAttributePlaceholder,
+                Label =             attribution.ClickLabel ?? UnknownAttributePlaceholder,
+                Network =           attribution.Network ?? UnknownAttributePlaceholder,
+                TrackerId =         attribution.TrackerToken ?? UnknownAttributePlaceholder,
+                TrackerName =       attribution.TrackerName ?? UnknownAttributePlaceholder
             };
-        }
     }
 }
 

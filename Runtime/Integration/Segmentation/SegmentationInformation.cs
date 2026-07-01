@@ -11,7 +11,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
     {
         public string CampaignName;
         public string CreativeName;
-        public string CreativeHash;
-        public string CampaignHash;
+        public string AdGroup;
+        public string Network;
+        public string Label;
+        public string TrackerName;
+        public string TrackerId;
     }
 }

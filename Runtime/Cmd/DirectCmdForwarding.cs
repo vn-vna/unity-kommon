@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
@@ -299,7 +300,15 @@ namespace Com.Hapiga.Scheherazade.Common
                 commandName,
                 namedValues,
                 positionalArgs.ToArray(),
-                registration.Parameters);
+                registration.Parameters
+            );
+
+            QuickLog.Info<DirectCmdForwarding>(
+                "Executing command '{0}', with positional parameters: [{1}] and arguments: [{2}]",
+                commandName,
+                (Func<object>)(() => string.Join(",", positionalArgs)),
+                (Func<object>)(() => string.Join(";", namedValues.Select(p => $"{{{p.Key} = {p.Value?.ToString() ?? "null"}}}")))
+            );
 
             registration.Callback(context);
         }

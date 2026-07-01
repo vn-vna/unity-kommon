@@ -194,6 +194,15 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 EditorGUILayout.HelpBox("Package ID is required for Android target.", MessageType.Warning);
             }
 
+            bool canExport = !string.IsNullOrEmpty(_packageId) && _selectedDeviceIndex >= 0;
+            EditorGUI.BeginDisabledGroup(!canExport);
+            if (GUILayout.Button("Export ADB Command...", GUILayout.Height(22f)))
+            {
+                RoapDeviceInfo device = _devices[_selectedDeviceIndex];
+                AdbCommandExportWindow.Show(device.Serial, _packageId, _commands);
+            }
+            EditorGUI.EndDisabledGroup();
+
             EditorGUILayout.EndVertical();
         }
 
@@ -649,6 +658,130 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             public int ExitCode { get; set; }
             public string StandardOutput { get; set; }
             public string StandardError { get; set; }
+        }
+
+        private sealed class AdbCommandExportWindow : EditorWindow
+        {
+            private string _fullContent = string.Empty;
+            private string _tempFileFullContent = string.Empty;
+            private string _oneLinerFullContent = string.Empty;
+            private string _fileContent = string.Empty;
+            private Vector2 _scrollPos;
+            private string _copyStatus = string.Empty;
+            private bool _isOneLiner;
+
+            public static void Show(string deviceSerial, string packageId, string commands)
+            {
+                AdbCommandExportWindow window = GetWindow<AdbCommandExportWindow>(
+                    true, "Export ADB Command");
+                window.minSize = new Vector2(420f, 320f);
+                window.maxSize = new Vector2(700f, 600f);
+
+                string remoteDir = $"/sdcard/Android/data/{packageId}/files";
+                string remotePath = $"{remoteDir}/{FileName}";
+
+                string fileContent = string.IsNullOrWhiteSpace(commands)
+                    ? "# (empty)"
+                    : commands.Trim();
+
+                StringBuilder tempFileSb = new();
+                tempFileSb.AppendLine("=== ADB Commands (temp file) ===");
+                tempFileSb.AppendLine($"adb -s {deviceSerial} shell mkdir -p {remoteDir}");
+                tempFileSb.AppendLine($"adb -s {deviceSerial} push \"<your_temp_file>\" \"{remotePath}\"");
+                tempFileSb.AppendLine();
+                tempFileSb.AppendLine("=== File Content (write this to your temp file) ===");
+                tempFileSb.Append(fileContent);
+
+                string base64Content = Convert.ToBase64String(
+                    System.Text.Encoding.UTF8.GetBytes(fileContent));
+
+                StringBuilder oneLinerSb = new();
+                oneLinerSb.AppendLine("=== ADB One-Liner ===");
+                oneLinerSb.Append($"adb -s {deviceSerial} shell ");
+                oneLinerSb.Append($"\"mkdir -p {remoteDir} && ");
+                oneLinerSb.Append($"echo '{base64Content}' | base64 -d > {remotePath}\"");
+                oneLinerSb.AppendLine();
+                oneLinerSb.AppendLine();
+                oneLinerSb.AppendLine("=== Embedded File Content ===");
+                oneLinerSb.Append(fileContent);
+
+                window._tempFileFullContent = tempFileSb.ToString();
+                window._oneLinerFullContent = oneLinerSb.ToString();
+                window._fileContent = fileContent;
+                window._fullContent = window._tempFileFullContent;
+            }
+
+            private void OnGUI()
+            {
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("ADB Command Export", EditorStyles.boldLabel);
+
+                EditorGUILayout.Space(2f);
+
+                EditorGUILayout.BeginHorizontal();
+                bool prevOneLiner = _isOneLiner;
+
+                EditorGUI.BeginDisabledGroup(!_isOneLiner);
+                if (GUILayout.Toggle(!_isOneLiner, "Temp File + Push", EditorStyles.miniButtonLeft))
+                {
+                    _isOneLiner = false;
+                    _copyStatus = string.Empty;
+                }
+                EditorGUI.EndDisabledGroup();
+
+                EditorGUI.BeginDisabledGroup(_isOneLiner);
+                if (GUILayout.Toggle(_isOneLiner, "One-Liner", EditorStyles.miniButtonRight))
+                {
+                    _isOneLiner = true;
+                    _copyStatus = string.Empty;
+                }
+                EditorGUI.EndDisabledGroup();
+
+                EditorGUILayout.EndHorizontal();
+
+                if (_isOneLiner != prevOneLiner)
+                    _fullContent = _isOneLiner ? _oneLinerFullContent : _tempFileFullContent;
+
+                EditorGUILayout.LabelField(
+                    _isOneLiner
+                        ? "Single base64-encoded ADB shell command. Safe for all characters."
+                        : "Multi-step approach: create a temp file first, then push.",
+                    EditorStyles.miniLabel);
+
+                EditorGUILayout.Space(4f);
+
+                _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
+                EditorGUI.BeginDisabledGroup(true);
+                EditorGUILayout.TextArea(
+                    _fullContent,
+                    GUILayout.ExpandHeight(true));
+                EditorGUI.EndDisabledGroup();
+                EditorGUILayout.EndScrollView();
+
+                EditorGUILayout.Space(4f);
+
+                EditorGUILayout.BeginHorizontal();
+
+                if (GUILayout.Button("Copy All", GUILayout.Height(28f)))
+                {
+                    GUIUtility.systemCopyBuffer = _fullContent;
+                    _copyStatus = "All copied to clipboard.";
+                }
+
+                if (GUILayout.Button("Copy File Content", GUILayout.Height(28f)))
+                {
+                    GUIUtility.systemCopyBuffer = _fileContent;
+                    _copyStatus = "File content copied to clipboard.";
+                }
+
+                EditorGUILayout.EndHorizontal();
+
+                if (!string.IsNullOrEmpty(_copyStatus))
+                {
+                    EditorGUILayout.Space(4f);
+                    EditorGUILayout.HelpBox(_copyStatus, MessageType.Info);
+                }
+            }
         }
     }
 }
