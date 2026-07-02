@@ -7,6 +7,7 @@ namespace Com.Hapiga.Scheherazade.Common
     public sealed class DirectCmdContext
     {
         public string CommandName { get; }
+        public string SubcommandPath { get; }
         public int PositionalCount => _positionalArgs.Length;
 
         private readonly Dictionary<string, string> _namedValues;
@@ -15,11 +16,13 @@ namespace Com.Hapiga.Scheherazade.Common
 
         internal DirectCmdContext(
             string commandName,
+            string subcommandPath,
             Dictionary<string, string> namedValues,
             string[] positionalArgs,
             IReadOnlyList<IDirectCmdParameter> parameters)
         {
             CommandName = commandName;
+            SubcommandPath = subcommandPath;
             _namedValues = namedValues;
             _positionalArgs = positionalArgs;
             _parameters = parameters;

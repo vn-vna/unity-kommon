@@ -105,6 +105,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             foreach (string deviceId in ids) _filteredTrackingIds.Add(deviceId);
         }
 
+        public void UnassignFilteredTrackingDevices(params string[] ids)
+        {
+            foreach (string deviceId in ids) _filteredTrackingIds.Remove(deviceId);
+        }
+
         public void Tick(float deltaTime)
         {
             if (Status != TrackingManagerStatus.Ready) return;

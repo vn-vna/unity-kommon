@@ -1,5 +1,6 @@
 #if FIREBASE_ANALYTICS
 
+using System;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Firebase.Analytics;
 using UnityEngine;
@@ -34,15 +35,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
                 declaration.SegmentName
             );
 
+            try
+            {
 #pragma warning disable format
-            FirebaseAnalytics.SetUserProperty("user_segment",           declaration.SegmentName);
-            FirebaseAnalytics.SetUserProperty("attrib_tracker_id",      info.TrackerId);
-            FirebaseAnalytics.SetUserProperty("attrib_tracker_name",    info.TrackerName);
-            FirebaseAnalytics.SetUserProperty("attrib_ad_group",        info.AdGroup);
-            FirebaseAnalytics.SetUserProperty("attrib_creative",        info.CreativeName);
-            FirebaseAnalytics.SetUserProperty("attrib_campaign",        info.CampaignName);
-            FirebaseAnalytics.SetUserProperty("attrib_network",         info.Network);
+                FirebaseAnalytics.SetUserProperty("user_segment",        declaration.SegmentName);
+                FirebaseAnalytics.SetUserProperty("attrib_tracker_id",   info.TrackerId);
+                FirebaseAnalytics.SetUserProperty("attrib_tracker_name", info.TrackerName);
+                FirebaseAnalytics.SetUserProperty("attrib_ad_group",     info.AdGroup);
+                FirebaseAnalytics.SetUserProperty("attrib_creative",     info.CreativeName);
+                FirebaseAnalytics.SetUserProperty("attrib_campaign",     info.CampaignName);
+                FirebaseAnalytics.SetUserProperty("attrib_network",      info.Network);
 #pragma warning restore format
+            }
+            catch (Exception)
+            { /* .. */ }
         }
     }
 }

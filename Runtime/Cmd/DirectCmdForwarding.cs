@@ -104,34 +104,48 @@ namespace Com.Hapiga.Scheherazade.Common
             _pollInterval = Mathf.Max(0.05f, _pollInterval);
         }
 
-        internal static void Register(
-            string commandName,
-            IReadOnlyList<IDirectCmdParameter> parameters,
-            Action<DirectCmdContext> callback)
+        internal static void Register(DirectCmdCommandBuilder builder)
         {
             DirectCmdForwarding instance = Instance;
             if (instance == null)
             {
                 QuickLog.Error<DirectCmdForwarding>(
                     "DirectCmdForwarding instance is not available. Cannot register command '{0}'.",
-                    commandName);
+                    builder.CommandName);
                 return;
             }
 
-            if (instance._registrations.ContainsKey(commandName))
+            if (instance._registrations.ContainsKey(builder.CommandName))
             {
                 QuickLog.Warning<DirectCmdForwarding>(
                     "Command '{0}' is already registered and will be overwritten.",
-                    commandName);
+                    builder.CommandName);
             }
 
-            instance._registrations[commandName] = new DirectCmdRegistration(
-                commandName, parameters, callback);
+            DirectCmdRegistration registration = ConvertToRegistration(builder);
+            instance._registrations[builder.CommandName] = registration;
 
             QuickLog.Debug<DirectCmdForwarding>(
-                "Registered command '{0}' with {1} parameter(s).",
-                commandName,
-                parameters.Count);
+                "Registered command '{0}' with {1} parameter(s) and {2} subcommand(s).",
+                builder.CommandName,
+                builder.Parameters.Count,
+                builder.Subcommands.Count);
+        }
+
+        private static DirectCmdRegistration ConvertToRegistration(DirectCmdCommandBuilder builder)
+        {
+            var subRegs = new Dictionary<string, DirectCmdRegistration>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, DirectCmdCommandBuilder> kvp in builder.Subcommands)
+            {
+                subRegs[kvp.Key] = ConvertToRegistration(kvp.Value);
+            }
+
+            return new DirectCmdRegistration(
+                builder.CommandName,
+                builder.Parameters,
+                subRegs,
+                builder.Callback,
+                builder.AllowPositional);
         }
 
         private static void EnsureInstance()
@@ -254,30 +268,127 @@ namespace Com.Hapiga.Scheherazade.Common
                 return;
             }
 
-            Dictionary<string, string> namedValues = new(StringComparer.OrdinalIgnoreCase);
-            List<string> positionalArgs = new();
+            var chain = new List<DirectCmdContext>();
+            ResolveAndDispatch(registration, tokens, 1, chain, null);
+        }
 
-            for (int i = 1; i < tokens.Count; i++)
+        private bool ResolveAndDispatch(
+            DirectCmdRegistration registration,
+            List<string> tokens,
+            int startIndex,
+            List<DirectCmdContext> chain,
+            string subcommandPath)
+        {
+            var namedValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var positionalArgs = new List<string>();
+            int i = startIndex;
+            DirectCmdRegistration subRegistration = null;
+            string subName = null;
+            int subTokenIndex = -1;
+
+            while (i < tokens.Count)
             {
                 string token = tokens[i];
 
                 if (token.StartsWith("--") && token.Length > 2)
                 {
-                    string key = token.Substring(2);
+                    string key;
+                    int eqIndex = token.IndexOf('=', 2);
+                    if (eqIndex >= 0)
+                    {
+                        key = token.Substring(2, eqIndex - 2);
+                        string value = token.Substring(eqIndex + 1);
+                        namedValues[key] = UnquoteValue(value);
+                        i++;
+                        continue;
+                    }
+
+                    key = token.Substring(2);
                     namedValues[key] = ReadParameterValue(tokens, ref i);
+                    i++;
+                    continue;
                 }
-                else if (token.StartsWith("-") && token.Length == 2 && char.IsLetter(token[1]))
+
+                if (token.StartsWith("-") && token.Length >= 4 && token[2] == '=' && char.IsLetter(token[1]))
+                {
+                    string key = token.Substring(1, 1);
+                    string value = token.Substring(3);
+                    namedValues[key] = UnquoteValue(value);
+                    i++;
+                    continue;
+                }
+
+                if (token.StartsWith("-") && token.Length == 2 && char.IsLetter(token[1]))
                 {
                     string key = token.Substring(1);
                     namedValues[key] = ReadParameterValue(tokens, ref i);
+                    i++;
+                    continue;
                 }
-                else
+
+                if (registration.Subcommands.Count > 0 &&
+                    registration.Subcommands.TryGetValue(token, out subRegistration))
                 {
-                    positionalArgs.Add(token);
+                    subName = token;
+                    subTokenIndex = i;
+                    break;
                 }
+
+                positionalArgs.Add(token);
+                i++;
             }
 
-            foreach (IDirectCmdParameter param in registration.Parameters)
+            if (!registration.AllowPositional && positionalArgs.Count > 0)
+            {
+                QuickLog.Error<DirectCmdForwarding>(
+                    "Command '{0}' does not accept positional arguments.",
+                    registration.CommandName);
+                return false;
+            }
+
+            if (!ValidateRequiredParams(registration.Parameters, namedValues))
+                return false;
+
+            var context = new DirectCmdContext(
+                registration.CommandName,
+                subcommandPath,
+                namedValues,
+                positionalArgs.ToArray(),
+                registration.Parameters);
+            chain.Add(context);
+
+            if (subRegistration != null)
+            {
+                string newPath = string.IsNullOrEmpty(subcommandPath)
+                    ? subName
+                    : subcommandPath + "." + subName;
+                return ResolveAndDispatch(subRegistration, tokens, subTokenIndex + 1, chain, newPath);
+            }
+
+            if (registration.Callback == null)
+            {
+                QuickLog.Warning<DirectCmdForwarding>(
+                    "No handler registered for command '{0}'.",
+                    string.Join(" ", chain.ConvertAll(c => c.CommandName)));
+                return false;
+            }
+
+            QuickLog.Info<DirectCmdForwarding>(
+                "Executing command '{0}', with positional parameters: [{1}] and arguments: [{2}]",
+                string.Join(" ", chain.ConvertAll(c => c.CommandName)),
+                (Func<object>)(() => string.Join(",", positionalArgs)),
+                (Func<object>)(() => string.Join(";", namedValues.Select(p => $"{{{p.Key} = {p.Value?.ToString() ?? "null"}}}")))
+            );
+
+            registration.Callback(chain.ToArray());
+            return true;
+        }
+
+        private static bool ValidateRequiredParams(
+            IReadOnlyList<IDirectCmdParameter> parameters,
+            Dictionary<string, string> namedValues)
+        {
+            foreach (IDirectCmdParameter param in parameters)
             {
                 if (!param.IsRequired)
                     continue;
@@ -290,27 +401,12 @@ namespace Com.Hapiga.Scheherazade.Common
                     continue;
 
                 QuickLog.Error<DirectCmdForwarding>(
-                    "Missing required parameter '--{0}' for command '{1}'.",
-                    param.LongName,
-                    commandName);
-                return;
+                    "Missing required parameter '--{0}'.",
+                    param.LongName);
+                return false;
             }
 
-            DirectCmdContext context = new(
-                commandName,
-                namedValues,
-                positionalArgs.ToArray(),
-                registration.Parameters
-            );
-
-            QuickLog.Info<DirectCmdForwarding>(
-                "Executing command '{0}', with positional parameters: [{1}] and arguments: [{2}]",
-                commandName,
-                (Func<object>)(() => string.Join(",", positionalArgs)),
-                (Func<object>)(() => string.Join(";", namedValues.Select(p => $"{{{p.Key} = {p.Value?.ToString() ?? "null"}}}")))
-            );
-
-            registration.Callback(context);
+            return true;
         }
 
         private static string ReadParameterValue(List<string> tokens, ref int index)
@@ -326,8 +422,26 @@ namespace Com.Hapiga.Scheherazade.Common
 
         private static bool IsParameterToken(string token)
         {
-            return token.StartsWith("--") ||
-                   (token.StartsWith("-") && token.Length == 2 && char.IsLetter(token[1]));
+            if (token.StartsWith("--"))
+                return true;
+
+            if (token.StartsWith("-") && token.Length >= 2)
+            {
+                if (token.Length == 2 && char.IsLetter(token[1]))
+                    return true;
+
+                if (token.Length >= 4 && token[2] == '=' && char.IsLetter(token[1]))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static string UnquoteValue(string value)
+        {
+            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+                return value.Substring(1, value.Length - 2);
+            return value;
         }
 
         private static List<string> Tokenize(string line)
@@ -360,7 +474,20 @@ namespace Com.Hapiga.Scheherazade.Common
 
                 int tokenStart = i;
                 while (i < line.Length && !char.IsWhiteSpace(line[i]))
-                    i++;
+                {
+                    if (line[i] == '"')
+                    {
+                        i++;
+                        while (i < line.Length && line[i] != '"')
+                            i++;
+                        if (i < line.Length)
+                            i++;
+                    }
+                    else
+                    {
+                        i++;
+                    }
+                }
 
                 tokens.Add(line.Substring(tokenStart, i - tokenStart));
             }
