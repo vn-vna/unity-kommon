@@ -8,12 +8,53 @@
     "includePlatforms": [
         "Editor"
     ],
-    "excludePlatforms": [],
+    "excludePlatforms": [ ],
     "allowUnsafeCode": false,
     "overrideReferences": false,
-    "precompiledReferences": [],
+    "precompiledReferences": [ ],
     "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
+    "defineConstraints": [ ],
+    "versionDefines": [
+        {
+            "name": "com.unity.purchasing",
+            "expression": "0",
+            "define": "UNITY_PURCHASING"
+        },
+        {
+            "name": "com.applovin.mediation.ads",
+            "expression": "0",
+            "define": "APPLOVIN_MAX"
+        },
+        {
+            "name": "io.appmetrica.analytics",
+            "expression": "0",
+            "define": "TRACKING_APPMETRICA"
+        },
+        {
+            "name": "com.unity.addressables",
+            "expression": "0",
+            "define": "UNITY_ADDRESSABLES"
+        },
+        {
+            "name": "com.google.firebase.analytics",
+            "expression": "0",
+            "define": "FIREBASE_ANALYTICS"
+        },
+        {
+            "name": "com.google.firebase.remote-config",
+            "expression": "0",
+            "define": "FIREBASE_REMOTE"
+        },
+        {
+            "name": "com.google.firebase.remote-config",
+            "expression": "0",
+            "define": "FIREBASE_REMOTE"
+        },
+        {
+            "name": "com.unity.nuget.newtonsoft-json",
+            "expression": "0",
+            "define": "NEWTONSOFT_JSON"
+        }
+    ],
     "noEngineReferences": false
 }
