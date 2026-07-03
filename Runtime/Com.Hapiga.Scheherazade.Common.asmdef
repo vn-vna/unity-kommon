@@ -55,6 +55,16 @@
             "name": "com.google.firebase.remote-config",
             "expression": "0",
             "define": "FIREBASE_REMOTE"
+        },
+        {
+            "name": "com.google.firebase.remote-config",
+            "expression": "0",
+            "define": "FIREBASE_REMOTE"
+        },
+        {
+            "name": "com.unity.nuget.newtonsoft-json",
+            "expression": "0",
+            "define": "NEWTONSOFT_JSON"
         }
     ],
     "noEngineReferences": false

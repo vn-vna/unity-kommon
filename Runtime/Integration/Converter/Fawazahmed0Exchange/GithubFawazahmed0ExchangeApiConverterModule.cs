@@ -1,3 +1,5 @@
+#if NEWTONSOFT_JSON
+
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
@@ -85,3 +87,5 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
     }
 
 }
+
+#endif
