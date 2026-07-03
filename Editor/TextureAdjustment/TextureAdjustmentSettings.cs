@@ -1,3 +1,5 @@
+#if NEWTONSOFT_JSON
+
 using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
@@ -245,3 +247,5 @@ namespace Com.Hapiga.Scheherazade.Editor.TextureAdjustment
         }
     }
 }
+
+#endif

@@ -1,5 +1,8 @@
 using System;
+
+#if NEWTONSOFT_JSON
 using Newtonsoft.Json;
+#endif
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
@@ -15,7 +18,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             get
             {
+#if NEWTONSOFT_JSON
                 return JsonConvert.DeserializeObject<Receipt>(ReceiptRaw);
+#else   
+                throw new Exception("Newtonsoft JSON package is required");
+#endif
             }
         }
     }
@@ -31,7 +38,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             get
             {
+#if NEWTONSOFT_JSON
                 return JsonConvert.DeserializeObject<PayloadAndroid>(Payload);
+#else   
+                throw new Exception("Newtonsoft JSON package is required");
+#endif
             }
         }
     }
