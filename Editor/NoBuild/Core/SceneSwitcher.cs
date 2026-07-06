@@ -59,42 +59,39 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         }
 
         /// <summary>
-        /// Switches to the scene defined by a combination (shortcut).
-        /// If the scene is already open, sets it active; otherwise loads it additively.
+        /// Opens all scenes in the combination. First valid scene is opened as single
+        /// (closing others), remaining are loaded additively. The first scene is set active.
         /// </summary>
         public static void SwitchToCombination(SceneCombination combination)
         {
             if (combination == null) { FireFailed("Combination is null."); return; }
-            SceneSlot slot = combination.targetScene;
-            if (slot == null || !slot.IsValid)
+            var valid = combination.scenes
+                .Where(s => s != null && s.enabled && s.IsValid)
+                .ToList();
+
+            if (valid.Count == 0)
             {
-                FireFailed($"Combination '{combination.DisplayName}' has an invalid scene.");
+                FireFailed($"Combination '{combination.DisplayName}' has no valid scenes.");
                 return;
             }
 
             try
             {
-                string path = slot.ScenePath;
-                for (int i = 0; i < SceneManager.sceneCount; i++)
-                {
-                    Scene loaded = SceneManager.GetSceneAt(i);
-                    if (loaded.path == path)
-                    {
-                        SceneManager.SetActiveScene(loaded);
-                        CombinationSwitched?.Invoke(combination);
-                        return;
-                    }
-                }
-
                 if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
-                Scene newScene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
-                SceneManager.SetActiveScene(newScene);
+
+                Scene first = EditorSceneManager.OpenScene(
+                    valid[0].ScenePath, OpenSceneMode.Single);
+                SceneManager.SetActiveScene(first);
+
+                for (int i = 1; i < valid.Count; i++)
+                    EditorSceneManager.OpenScene(
+                        valid[i].ScenePath, OpenSceneMode.Additive);
+
                 CombinationSwitched?.Invoke(combination);
             }
             catch (Exception ex)
             {
-                FireFailed(
-                    $"Failed to switch to '{combination.DisplayName}': {ex.Message}");
+                FireFailed($"Failed to switch to '{combination.DisplayName}': {ex.Message}");
                 Debug.LogException(ex);
             }
         }

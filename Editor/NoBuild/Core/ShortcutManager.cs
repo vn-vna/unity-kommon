@@ -85,7 +85,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings s = NoBuildResourceUtility.GetSettings();
             if (s == null || !s.shortcutsEnabled) return;
 
-            List<SceneCombination> combos = s.GetEnabledCombinations();
+            SceneSet active = s.ActiveSceneSet;
+            if (active == null) return;
+            List<SceneCombination> combos = active.GetEnabledCombinations();
             if (index < 0 || index >= combos.Count) return;
 
             SceneSwitcher.SwitchToCombination(combos[index]);

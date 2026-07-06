@@ -13,14 +13,57 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
     public sealed class NoBuildSettingsProvider : SettingsProvider
     {
         private const string Path = "Project/NoBuild";
-        private static readonly string[] Tabs =
-            { "Scene Sets", "Combinations", "Defines", "Build Profiles" };
+        private const float SidebarW = 190f;
+        private const float LabelW = 130f;
+        private const float EntryH = 26f;
+        private static readonly string[] Tabs = { "Scene Sets", "Defines", "Build Profiles" };
 
         private SerializedObject _so;
-        private SerializedProperty _sceneSets, _combos, _defineSets, _buildProfiles;
+        private SerializedProperty _sceneSets, _defineSets, _buildProfiles;
         private SerializedProperty _activeScene, _activeDefine, _shortcuts;
         private int _tab;
-        private Vector2 _scroll;
+        private int _selSet = -1, _selDef = -1, _selBuild = -1;
+        private Vector2 _sbScroll, _pvScroll;
+
+        // ── GUI Styles (lazy) ────────────────────────
+        private GUIStyle _entryStyle, _entrySelStyle, _entryActStyle, _badgeStyle;
+        private bool _stylesBuilt;
+
+        private void BuildStyles()
+        {
+            if (_stylesBuilt) return;
+            _stylesBuilt = true;
+
+            Texture2D blank = new Texture2D(1, 1);
+            blank.SetPixel(0, 0, Color.clear); blank.Apply();
+
+            _entryStyle = new GUIStyle
+            {
+                fixedHeight = EntryH,
+                alignment = TextAnchor.MiddleLeft,
+                padding = new RectOffset(8, 4, 0, 0),
+                margin = new RectOffset(),
+                clipping = TextClipping.Clip,
+                fontSize = 11,
+                normal = { textColor = new Color(0.85f, 0.85f, 0.85f), background = blank },
+                hover = { textColor = Color.white, background = blank },
+            };
+            _entrySelStyle = new GUIStyle(_entryStyle)
+            {
+                normal = { textColor = Color.white },
+                fontStyle = FontStyle.Bold
+            };
+            _entryActStyle = new GUIStyle(_entryStyle)
+            {
+                normal = { textColor = new Color(0.3f, 0.95f, 0.3f) }
+            };
+            _badgeStyle = new GUIStyle(GUI.skin.box)
+            {
+                fixedHeight = 18, fixedWidth = 22,
+                alignment = TextAnchor.MiddleCenter, fontSize = 10,
+                padding = new RectOffset(), margin = new RectOffset(2, 4, 2, 2)
+            };
+        }
 
         private NoBuildSettingsProvider(string p, SettingsScope sc,
             IEnumerable<string> kw = null) : base(p, sc, kw)
@@ -30,506 +73,607 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         }
 
         [SettingsProvider]
-        public static SettingsProvider Create()
-        {
-            return new NoBuildSettingsProvider(Path, SettingsScope.Project,
-                new[] { "nobuild", "scene", "switch", "define", "build", "profile", "combo" });
-        }
+        public static SettingsProvider Create() => new NoBuildSettingsProvider(Path,
+            SettingsScope.Project,
+            new[] { "nobuild", "scene", "switch", "define", "build", "profile", "combo" });
 
         public override void OnGUI(string searchContext)
         {
             base.OnGUI(searchContext);
             if (_so?.targetObject == null) { Refresh(); if (_so?.targetObject == null) return; }
             _so.Update();
+            BuildStyles();
 
-            // Header
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("NoBuild", EditorStyles.boldLabel,
-                GUILayout.Width(100));
-            EditorGUILayout.PropertyField(_shortcuts,
-                new GUIContent("Shortcuts"));
-            if (GUILayout.Button("Open Window", GUILayout.Width(110)))
-                NoBuildWindow.ShowWindow();
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.LabelField(
-                "Scene sets, combinations, defines, and build profiles.",
-                EditorStyles.miniLabel);
+            // Auto-select first entry when tab has no selection
+            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+            if (_tab == 0 && (_selSet < 0 || _selSet >= s.sceneSets.Count) && s.sceneSets.Count > 0)
+                _selSet = 0;
+            if (_tab == 1 && (_selDef < 0 || _selDef >= s.scriptDefinitionSets.Count) && s.scriptDefinitionSets.Count > 0)
+                _selDef = 0;
+            if (_tab == 2 && (_selBuild < 0 || _selBuild >= s.buildProfiles.Count) && s.buildProfiles.Count > 0)
+                _selBuild = 0;
+
+            DrawHeader();
+            _tab = GUILayout.Toolbar(_tab, Tabs);
             GUILayout.Space(4);
 
-            _tab = GUILayout.Toolbar(_tab, Tabs);
-            GUILayout.Space(8);
-            _scroll = EditorGUILayout.BeginScrollView(_scroll);
+            EditorGUILayout.BeginHorizontal();
+            DrawSidebar();
+            GUILayout.Space(2);
+            DrawPreview();
+            EditorGUILayout.EndHorizontal();
 
-            switch (_tab)
-            {
-                case 0: DrawSceneSets(); break;
-                case 1: DrawCombinations(); break;
-                case 2: DrawDefines(); break;
-                case 3: DrawBuildProfiles(); break;
-            }
-
-            EditorGUILayout.EndScrollView();
             _so.ApplyModifiedProperties();
         }
 
         // ══════════════════════════════════════════════════
-        // ── Tab 0: Scene Sets
+        // ── Header
         // ══════════════════════════════════════════════════
 
-        private void DrawSceneSets()
+        private void DrawHeader()
         {
-            EditorGUILayout.LabelField("Scene Sets", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                "Defined collections of scenes for full-set switching and builds.",
-                EditorStyles.miniLabel);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("NoBuild", EditorStyles.boldLabel, GUILayout.Width(100));
+            EditorGUILayout.PropertyField(_shortcuts, new GUIContent("Shortcuts"));
+            if (GUILayout.Button("Open Window", GUILayout.Width(110))) NoBuildWindow.ShowWindow();
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.LabelField("Scene sets, defines, and build profiles.", EditorStyles.miniLabel);
             GUILayout.Space(4);
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Sidebar (fixed-width, constant-height entries)
+        // ══════════════════════════════════════════════════
+
+        private void DrawSidebar()
+        {
+            EditorGUILayout.BeginVertical(GUILayout.Width(SidebarW));
+            _sbScroll = EditorGUILayout.BeginScrollView(_sbScroll, GUIStyle.none, GUI.skin.verticalScrollbar);
 
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
-            if (s.sceneSets.Count > 0)
+
+            switch (_tab)
             {
-                string[] names = s.sceneSets.Select(x => x.setName).ToArray();
-                string[] opts = new string[names.Length + 1];
-                opts[0] = "(None)"; Array.Copy(names, 0, opts, 1, names.Length);
-                int val = EditorGUILayout.Popup("Active Set",
-                    s.activeSceneSetIndex + 1, opts) - 1;
-                if (val != s.activeSceneSetIndex)
+                case 0: DrawSidebarList(s.sceneSets.Select(x => x.setName).ToList(),
+                    s.activeSceneSetIndex, ref _selSet); break;
+                case 1: DrawSidebarList(s.scriptDefinitionSets.Select(x => x.setName).ToList(),
+                    s.activeScriptDefinitionSetIndex, ref _selDef); break;
+                case 2: DrawSidebarList(s.buildProfiles.Select(x =>
+                    x.profileName + "  [" + x.buildConfiguration.platform + "]").ToList(),
+                    -1, ref _selBuild); break;
+            }
+
+            EditorGUILayout.EndScrollView();
+            GUILayout.Space(4);
+
+            string add = _tab switch { 0 => "+ Scene Set", 1 => "+ Define Set", _ => "+ Build Profile" };
+            if (GUILayout.Button(add, GUILayout.Height(28))) AddNew();
+            EditorGUILayout.EndVertical();
+
+            // Vertical separator
+            GUILayout.Box("", GUILayout.Width(2), GUILayout.ExpandHeight(true));
+        }
+
+        private void DrawSidebarList(List<string> names, int activeIdx, ref int selIdx)
+        {
+            for (int i = 0; i < names.Count; i++)
+            {
+                bool isSel = selIdx == i;
+                bool isAct = activeIdx == i;
+
+                Rect rowRect = GUILayoutUtility.GetRect(
+                    new GUIContent(names[i]), _entryStyle,
+                    GUILayout.Height(EntryH), GUILayout.ExpandWidth(true));
+
+                // ── Background + Border ──
+                Color bgColor, borderColor;
+                float borderW;
+
+                if (isAct)
                 {
-                    s.activeSceneSetIndex = val; EditorUtility.SetDirty(s);
+                    bgColor    = new Color(0.15f, 0.5f, 0.15f, 0.45f);
+                    borderColor = isSel
+                        ? new Color(0.35f, 0.65f, 0.9f, 1f)
+                        : new Color(0.2f, 0.55f, 0.2f, 0.7f);
+                    borderW = isSel ? 2f : 1f;
                 }
-            }
+                else if (isSel)
+                {
+                    bgColor    = new Color(0.22f, 0.42f, 0.7f, 0.35f);
+                    borderColor = new Color(0.35f, 0.55f, 0.85f, 0.9f);
+                    borderW = 2f;
+                }
+                else
+                {
+                    bgColor    = new Color(0.25f, 0.25f, 0.25f, 0.15f);
+                    borderColor = new Color(0.4f, 0.4f, 0.4f, 0.4f);
+                    borderW = 1f;
+                }
 
-            GUILayout.Space(8);
+                // Fill
+                EditorGUI.DrawRect(rowRect, bgColor);
+                // Inner fill (slightly smaller for border effect)
+                Rect inner = rowRect;
+                inner.x += borderW; inner.y += borderW;
+                inner.width -= borderW * 2f; inner.height -= borderW * 2f;
+                EditorGUI.DrawRect(inner, new Color(bgColor.r, bgColor.g, bgColor.b, bgColor.a * 0.7f));
+                // Border (draw edges)
+                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, rowRect.width, borderW), borderColor);               // top
+                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.yMax - borderW, rowRect.width, borderW), borderColor);    // bottom
+                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, borderW, rowRect.height), borderColor);                // left
+                EditorGUI.DrawRect(new Rect(rowRect.xMax - borderW, rowRect.y, borderW, rowRect.height), borderColor);    // right
 
-            for (int i = 0; i < _sceneSets.arraySize; i++)
-            {
-                SerializedProperty sp = _sceneSets.GetArrayElementAtIndex(i);
-                DrawSetElement(sp, i);
-            }
-
-            if (GUILayout.Button("+ Add Scene Set", GUILayout.Height(28)))
-            {
-                _sceneSets.arraySize++;
-                _so.ApplyModifiedProperties();
-                int ni = _sceneSets.arraySize - 1;
-                _sceneSets.GetArrayElementAtIndex(ni)
-                    .FindPropertyRelative("setName").stringValue =
-                    "Scene Set " + (ni + 1);
+                // ── Label ──
+                var style = isSel ? _entrySelStyle : isAct ? _entryActStyle : _entryStyle;
+                string label = Trunc(names[i], 18);
+                if (GUI.Button(rowRect, label, style))
+                {
+                    selIdx = i;
+                }
             }
         }
 
-        private void DrawSetElement(SerializedProperty sp, int idx)
+        private void AddNew()
         {
+            switch (_tab)
+            {
+                case 0: _sceneSets.arraySize++; _so.ApplyModifiedProperties();
+                    _selSet = _sceneSets.arraySize - 1;
+                    _sceneSets.GetArrayElementAtIndex(_selSet)
+                        .FindPropertyRelative("setName").stringValue = "Scene Set " + _sceneSets.arraySize;
+                    break;
+                case 1: _defineSets.arraySize++; _so.ApplyModifiedProperties();
+                    _selDef = _defineSets.arraySize - 1;
+                    _defineSets.GetArrayElementAtIndex(_selDef)
+                        .FindPropertyRelative("setName").stringValue = "Define Set " + _defineSets.arraySize;
+                    break;
+                case 2: _buildProfiles.arraySize++; _so.ApplyModifiedProperties();
+                    _selBuild = _buildProfiles.arraySize - 1;
+                    _buildProfiles.GetArrayElementAtIndex(_selBuild)
+                        .FindPropertyRelative("profileName").stringValue = "Build Profile " + _buildProfiles.arraySize;
+                    break;
+            }
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Preview Panel
+        // ══════════════════════════════════════════════════
+
+        private void DrawPreview()
+        {
+            EditorGUILayout.BeginVertical();
+            _pvScroll = EditorGUILayout.BeginScrollView(_pvScroll);
+
+            switch (_tab) { case 0: DrawSceneSetPreview(); break; case 1: DrawDefinePreview(); break; case 2: DrawBuildPreview(); break; }
+
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndVertical();
+        }
+
+        // ──────────────────────────────────────────────
+        // Scene Set Preview
+        // ──────────────────────────────────────────────
+
+        private void DrawSceneSetPreview()
+        {
+            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+            if (_selSet < 0 || _selSet >= _sceneSets.arraySize)
+            { EditorGUILayout.LabelField("Select a scene set from the sidebar.", EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true)); return; }
+
+            var sp = _sceneSets.GetArrayElementAtIndex(_selSet);
             var nameP = sp.FindPropertyRelative("setName");
             var scenesP = sp.FindPropertyRelative("scenes");
             var buildP = sp.FindPropertyRelative("buildOrderOverride");
-            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
-            bool active = s.activeSceneSetIndex == idx;
+            var combosP = sp.FindPropertyRelative("combinations");
+            bool active = s.activeSceneSetIndex == _selSet;
 
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            // Title
             EditorGUILayout.BeginHorizontal();
-            if (active) { GUI.color = Color.green; GUILayout.Label("\u25CF", GUILayout.Width(20)); GUI.color = Color.white; }
-            nameP.stringValue = EditorGUILayout.TextField(
-                nameP.stringValue, EditorStyles.boldLabel);
+            var oldC = GUI.contentColor;
+            if (active) GUI.contentColor = Color.green;
+            EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
+            GUI.contentColor = oldC; GUILayout.FlexibleSpace();
             if (!active && GUILayout.Button("Set Active", GUILayout.Width(80)))
-            {
-                s.activeSceneSetIndex = idx; EditorUtility.SetDirty(s);
-            }
-
+            { s.activeSceneSetIndex = _selSet; EditorUtility.SetDirty(s); }
             GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
-            if (GUILayout.Button("\u00D7", GUILayout.Width(24)))
-            {
-                if (EditorUtility.DisplayDialog("Remove Set",
-                        $"Remove '{nameP.stringValue}'?", "Remove", "Cancel"))
-                {
-                    _sceneSets.DeleteArrayElementAtIndex(idx);
-                    _so.ApplyModifiedProperties();
-                    if (s.activeSceneSetIndex == idx) s.activeSceneSetIndex = -1;
-                    if (s.activeSceneSetIndex > idx) s.activeSceneSetIndex--;
-                    return;
-                }
-            }
-
+            if (GUILayout.Button("Delete", GUILayout.Width(55)))
+            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                { _sceneSets.DeleteArrayElementAtIndex(_selSet); _so.ApplyModifiedProperties();
+                  if (s.activeSceneSetIndex == _selSet) s.activeSceneSetIndex = -1;
+                  if (s.activeSceneSetIndex > _selSet) s.activeSceneSetIndex--;
+                  _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return; } }
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
-
-            // Scenes list
-            DrawSlotList("Scenes", scenesP);
-
-            // Build order override
             GUILayout.Space(4);
-            EditorGUILayout.LabelField("Build Order Override (optional)",
-                EditorStyles.miniBoldLabel);
-            if (buildP.arraySize == 0)
-                EditorGUILayout.LabelField("  (uses natural order)",
-                    EditorStyles.miniLabel);
 
-            for (int j = 0; j < buildP.arraySize; j++)
+            // Name
+            nameP.stringValue = LblTxt("Name", nameP.stringValue);
+            GUILayout.Space(6);
+
+            // ── Scenes + Build Order (integrated) ──
+            EditorGUILayout.LabelField("Scenes", EditorStyles.boldLabel);
+            bool hasCustomOrder = buildP.arraySize > 0;
+            var source = hasCustomOrder ? buildP : scenesP;
+
+            if (source.arraySize == 0)
+                EditorGUILayout.LabelField("  (no scenes)", EditorStyles.miniLabel);
+
+            for (int i = 0; i < source.arraySize; i++)
             {
-                var slot = buildP.GetArrayElementAtIndex(j);
-                EditorGUILayout.BeginHorizontal();
-                GUI.backgroundColor = Color.gray;
-                GUILayout.Label(" " + (j + 1) + " ", GUI.skin.box,
-                    GUILayout.Width(28));
-                GUI.backgroundColor = Color.white;
-                var en = slot.FindPropertyRelative("enabled");
-                en.boolValue = EditorGUILayout.Toggle(en.boolValue,
-                    GUILayout.Width(20));
-                slot.FindPropertyRelative("scene").objectReferenceValue =
-                    EditorGUILayout.ObjectField(
-                        slot.FindPropertyRelative("scene").objectReferenceValue,
-                        typeof(SceneAsset), false);
-                if (GUILayout.Button("\u2212", GUILayout.Width(22)))
-                { buildP.DeleteArrayElementAtIndex(j); break; }
-                EditorGUILayout.EndHorizontal();
-            }
-
-            if (GUILayout.Button("+ Add to build order",
-                    GUILayout.Height(20)))
-            {
-                buildP.arraySize++;
-                buildP.GetArrayElementAtIndex(buildP.arraySize - 1)
-                    .FindPropertyRelative("enabled").boolValue = true;
-            }
-
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(4);
-        }
-
-        private void DrawSlotList(string label, SerializedProperty listP)
-        {
-            EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
-            for (int i = 0; i < listP.arraySize; i++)
-            {
-                var slot = listP.GetArrayElementAtIndex(i);
+                var slot = source.GetArrayElementAtIndex(i);
                 var en = slot.FindPropertyRelative("enabled");
                 var sc = slot.FindPropertyRelative("scene");
+
                 EditorGUILayout.BeginHorizontal();
-                en.boolValue = EditorGUILayout.Toggle(en.boolValue,
-                    GUILayout.Width(20));
+
+                // Position badge
+                GUI.backgroundColor = hasCustomOrder ? new Color(0.4f, 0.6f, 0.9f) : Color.gray;
+                GUILayout.Label((i + 1).ToString(), _badgeStyle);
+                GUI.backgroundColor = Color.white;
+
+                en.boolValue = EditorGUILayout.Toggle(en.boolValue, GUILayout.Width(16));
                 sc.objectReferenceValue = EditorGUILayout.ObjectField(
                     sc.objectReferenceValue, typeof(SceneAsset), false);
+
+                // Reorder controls (only for custom order)
+                if (hasCustomOrder)
+                {
+                    GUI.enabled = i > 0;
+                    if (GUILayout.Button("\u25B2", GUILayout.Width(22)))
+                    { buildP.MoveArrayElement(i, i - 1); break; }
+                    GUI.enabled = i < buildP.arraySize - 1;
+                    if (GUILayout.Button("\u25BC", GUILayout.Width(22)))
+                    { buildP.MoveArrayElement(i, i + 1); break; }
+                    GUI.enabled = true;
+                }
+
                 if (GUILayout.Button("\u2212", GUILayout.Width(22)))
-                { listP.DeleteArrayElementAtIndex(i); break; }
+                { source.DeleteArrayElementAtIndex(i); break; }
+
                 EditorGUILayout.EndHorizontal();
             }
 
-            if (GUILayout.Button("+ Add Scene", GUILayout.Height(20)))
+            // Add scene button
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("+ Add Scene", GUILayout.Height(22), GUILayout.Width(100)))
             {
-                listP.arraySize++;
-                listP.GetArrayElementAtIndex(listP.arraySize - 1)
+                var target = hasCustomOrder ? buildP : scenesP;
+                target.arraySize++;
+                target.GetArrayElementAtIndex(target.arraySize - 1)
                     .FindPropertyRelative("enabled").boolValue = true;
             }
-        }
 
-        // ══════════════════════════════════════════════════
-        // ── Tab 1: Combinations
-        // ══════════════════════════════════════════════════
-
-        private void DrawCombinations()
-        {
-            EditorGUILayout.LabelField("Scene Combinations (Shortcuts)",
-                EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                "Toolbar buttons [1]..[9] and Shift+Ctrl+1..9 map to these in order. " +
-                "Each combination switches to a single target scene.",
-                EditorStyles.miniLabel);
-            GUILayout.Space(4);
-
-            if (_combos.arraySize == 0)
+            // Enable/disable custom order
+            GUILayout.FlexibleSpace();
+            if (hasCustomOrder)
             {
-                EditorGUILayout.HelpBox(
-                    "No combinations. Add some to enable quick-scene switching.",
-                    MessageType.Info);
+                if (GUILayout.Button("Reset Order", GUILayout.Width(100)))
+                {
+                    buildP.ClearArray();
+                    _so.ApplyModifiedProperties();
+                }
+            }
+            else
+            {
+                GUI.color = new Color(0.7f, 0.7f, 1f);
+                if (GUILayout.Button("Customize Order", GUILayout.Width(120)))
+                {
+                    // Copy scenes to build order override
+                    buildP.arraySize = scenesP.arraySize;
+                    for (int i = 0; i < scenesP.arraySize; i++)
+                    {
+                        var src = scenesP.GetArrayElementAtIndex(i);
+                        var dst = buildP.GetArrayElementAtIndex(i);
+                        dst.FindPropertyRelative("scene").objectReferenceValue =
+                            src.FindPropertyRelative("scene").objectReferenceValue;
+                        dst.FindPropertyRelative("enabled").boolValue =
+                            src.FindPropertyRelative("enabled").boolValue;
+                    }
+                }
+                GUI.color = Color.white;
             }
 
-            for (int i = 0; i < _combos.arraySize; i++)
+            GUILayout.EndHorizontal();
+            GUILayout.Space(8);
+
+            // ── Combinations ──
+            EditorGUILayout.LabelField("Shortcut Combinations", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("  Toolbar [1]..[9] map to these when this set is active.",
+                EditorStyles.miniLabel);
+
+            for (int i = 0; i < combosP.arraySize; i++)
             {
-                var cp = _combos.GetArrayElementAtIndex(i);
-                var nameP = cp.FindPropertyRelative("name");
-                var enP = cp.FindPropertyRelative("enabled");
-                var targetP = cp.FindPropertyRelative("targetScene");
-                var tScene = targetP.FindPropertyRelative("scene");
-                var tEn = targetP.FindPropertyRelative("enabled");
+                var cp = combosP.GetArrayElementAtIndex(i);
+                var cName = cp.FindPropertyRelative("name");
+                var cEn = cp.FindPropertyRelative("enabled");
+                var cScenes = cp.FindPropertyRelative("scenes");
 
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
                 EditorGUILayout.BeginHorizontal();
-
-                // Shortcut number badge
                 GUI.backgroundColor = Color.gray;
-                GUILayout.Label(" " + (i + 1) + " ", GUI.skin.box,
-                    GUILayout.Width(26));
+                GUILayout.Label((i + 1).ToString(), _badgeStyle);
                 GUI.backgroundColor = Color.white;
-
-                enP.boolValue = EditorGUILayout.Toggle(enP.boolValue,
-                    GUILayout.Width(20));
-                nameP.stringValue = EditorGUILayout.TextField(
-                    nameP.stringValue);
-
-                GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
-                if (GUILayout.Button("\u00D7", GUILayout.Width(24)))
-                { _combos.DeleteArrayElementAtIndex(i); break; }
-                GUI.backgroundColor = Color.white;
-
+                cEn.boolValue = EditorGUILayout.Toggle(cEn.boolValue, GUILayout.Width(16));
+                cName.stringValue = EditorGUILayout.TextField(cName.stringValue, GUILayout.Width(120));
+                if (GUILayout.Button("\u00D7", GUILayout.Width(22)))
+                { combosP.DeleteArrayElementAtIndex(i); break; }
                 EditorGUILayout.EndHorizontal();
 
-                EditorGUI.indentLevel++;
-                tEn.boolValue = EditorGUILayout.Toggle("Target enabled",
-                    tEn.boolValue, GUILayout.Width(150));
-                tScene.objectReferenceValue = EditorGUILayout.ObjectField(
-                    "Target Scene", tScene.objectReferenceValue,
-                    typeof(SceneAsset), false);
-                EditorGUI.indentLevel--;
+                // Scene rows
+                for (int j = 0; j < cScenes.arraySize; j++)
+                {
+                    var slotP = cScenes.GetArrayElementAtIndex(j);
+                    var sEn = slotP.FindPropertyRelative("enabled");
+                    var sSc = slotP.FindPropertyRelative("scene");
+
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Space(42); // indent under badge+checkbox
+                    sEn.boolValue = EditorGUILayout.Toggle(sEn.boolValue, GUILayout.Width(16));
+                    sSc.objectReferenceValue = EditorGUILayout.ObjectField(
+                        sSc.objectReferenceValue, typeof(SceneAsset), false);
+
+                    GUI.enabled = j > 0;
+                    if (GUILayout.Button("\u25B2", GUILayout.Width(22)))
+                    { cScenes.MoveArrayElement(j, j - 1); break; }
+                    GUI.enabled = j < cScenes.arraySize - 1;
+                    if (GUILayout.Button("\u25BC", GUILayout.Width(22)))
+                    { cScenes.MoveArrayElement(j, j + 1); break; }
+                    GUI.enabled = true;
+                    if (GUILayout.Button("\u2212", GUILayout.Width(22)))
+                    { cScenes.DeleteArrayElementAtIndex(j); break; }
+                    EditorGUILayout.EndHorizontal();
+                }
+
+                if (GUILayout.Button("+ Add Scene", GUILayout.Height(20)))
+                {
+                    cScenes.arraySize++;
+                    cScenes.GetArrayElementAtIndex(cScenes.arraySize - 1)
+                        .FindPropertyRelative("enabled").boolValue = true;
+                }
 
                 EditorGUILayout.EndVertical();
                 GUILayout.Space(2);
             }
 
-            GUILayout.Space(4);
-            if (GUILayout.Button("+ Add Combination", GUILayout.Height(28)))
+            if (GUILayout.Button("+ Add Combination", GUILayout.Height(22)))
             {
-                _combos.arraySize++;
-                _so.ApplyModifiedProperties();
-                int ni = _combos.arraySize - 1;
-                var nc = _combos.GetArrayElementAtIndex(ni);
-                nc.FindPropertyRelative("name").stringValue =
-                    "Combo " + (ni + 1);
+                combosP.arraySize++; var nc = combosP.GetArrayElementAtIndex(combosP.arraySize - 1);
+                nc.FindPropertyRelative("name").stringValue = "Combo " + combosP.arraySize;
                 nc.FindPropertyRelative("enabled").boolValue = true;
-                nc.FindPropertyRelative("targetScene")
-                    .FindPropertyRelative("enabled").boolValue = true;
             }
-
-            // Reorder hint
-            EditorGUILayout.HelpBox(
-                "Drag to reorder in the Inspector (lock icon → Debug mode) " +
-                "or remove and re-add in the desired order.",
-                MessageType.Info);
         }
 
-        // ══════════════════════════════════════════════════
-        // ── Tab 2: Defines
-        // ══════════════════════════════════════════════════
+        // ──────────────────────────────────────────────
+        // Define Preview
+        // ──────────────────────────────────────────────
 
-        private void DrawDefines()
+        private void DrawDefinePreview()
         {
-            EditorGUILayout.LabelField("Script Definition Sets",
-                EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                "Collections of scripting define symbols for conditional compilation.",
-                EditorStyles.miniLabel);
-            GUILayout.Space(4);
-
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
-            if (s.scriptDefinitionSets.Count > 0)
-            {
-                string[] names = s.scriptDefinitionSets
-                    .Select(x => x.setName).ToArray();
-                string[] opts = new string[names.Length + 1];
-                opts[0] = "(None)"; Array.Copy(names, 0, opts, 1, names.Length);
-                int val = EditorGUILayout.Popup("Active Set",
-                    s.activeScriptDefinitionSetIndex + 1, opts) - 1;
-                if (val != s.activeScriptDefinitionSetIndex)
-                {
-                    s.activeScriptDefinitionSetIndex = val;
-                    EditorUtility.SetDirty(s);
-                    if (val >= 0)
-                        ScriptDefinitionSwitcher.ApplySet(
-                            s.scriptDefinitionSets[val]);
-                }
-            }
+            if (_selDef < 0 || _selDef >= _defineSets.arraySize)
+            { EditorGUILayout.LabelField("Select a define set.", EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true)); return; }
 
-            GUILayout.Space(8);
-
-            for (int i = 0; i < _defineSets.arraySize; i++)
-            {
-                var sp = _defineSets.GetArrayElementAtIndex(i);
-                DrawDefineElement(sp, i);
-            }
-
-            if (GUILayout.Button("+ Add Define Set", GUILayout.Height(28)))
-            {
-                _defineSets.arraySize++;
-                _so.ApplyModifiedProperties();
-                _defineSets.GetArrayElementAtIndex(
-                    _defineSets.arraySize - 1)
-                    .FindPropertyRelative("setName").stringValue =
-                    "Define Set " + _defineSets.arraySize;
-            }
-        }
-
-        private void DrawDefineElement(SerializedProperty sp, int idx)
-        {
+            var sp = _defineSets.GetArrayElementAtIndex(_selDef);
             var nameP = sp.FindPropertyRelative("setName");
             var slotsP = sp.FindPropertyRelative("slots");
-            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
-            bool active = s.activeScriptDefinitionSetIndex == idx;
+            bool active = s.activeScriptDefinitionSetIndex == _selDef;
 
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
-            if (active) { GUI.color = Color.green; GUILayout.Label("\u25CF", GUILayout.Width(20)); GUI.color = Color.white; }
-            nameP.stringValue = EditorGUILayout.TextField(
-                nameP.stringValue, EditorStyles.boldLabel);
+            var oldC = GUI.contentColor;
+            if (active) GUI.contentColor = Color.green;
+            EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
+            GUI.contentColor = oldC; GUILayout.FlexibleSpace();
             if (!active && GUILayout.Button("Apply", GUILayout.Width(60)))
-            {
-                s.activeScriptDefinitionSetIndex = idx;
-                EditorUtility.SetDirty(s);
+            { s.activeScriptDefinitionSetIndex = _selDef; EditorUtility.SetDirty(s);
                 _so.ApplyModifiedProperties();
-                ScriptDefinitionSwitcher.ApplySet(
-                    s.scriptDefinitionSets[idx]);
-            }
-
+                ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]); }
             GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
-            if (GUILayout.Button("\u00D7", GUILayout.Width(24)))
-            {
-                if (EditorUtility.DisplayDialog("Remove Set",
-                        $"Remove '{nameP.stringValue}'?", "Remove", "Cancel"))
-                {
-                    _defineSets.DeleteArrayElementAtIndex(idx);
-                    _so.ApplyModifiedProperties();
-                    if (s.activeScriptDefinitionSetIndex == idx)
-                        s.activeScriptDefinitionSetIndex = -1;
-                    if (s.activeScriptDefinitionSetIndex > idx)
-                        s.activeScriptDefinitionSetIndex--;
-                    return;
-                }
-            }
-
+            if (GUILayout.Button("Delete", GUILayout.Width(55)))
+            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                { _defineSets.DeleteArrayElementAtIndex(_selDef); _so.ApplyModifiedProperties();
+                  if (s.activeScriptDefinitionSetIndex == _selDef) s.activeScriptDefinitionSetIndex = -1;
+                  if (s.activeScriptDefinitionSetIndex > _selDef) s.activeScriptDefinitionSetIndex--;
+                  _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return; } }
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
+            GUILayout.Space(4);
 
-            EditorGUI.indentLevel++;
-            for (int j = 0; j < slotsP.arraySize; j++)
+            nameP.stringValue = LblTxt("Name", nameP.stringValue);
+            GUILayout.Space(6);
+
+            EditorGUILayout.LabelField("Symbols", EditorStyles.boldLabel);
+            if (slotsP.arraySize == 0)
+                EditorGUILayout.LabelField("  (no symbols)", EditorStyles.miniLabel);
+            for (int i = 0; i < slotsP.arraySize; i++)
             {
-                var slot = slotsP.GetArrayElementAtIndex(j);
+                var slot = slotsP.GetArrayElementAtIndex(i);
                 var def = slot.FindPropertyRelative("defineSymbol");
                 var en = slot.FindPropertyRelative("enabled");
                 EditorGUILayout.BeginHorizontal();
-                en.boolValue = EditorGUILayout.Toggle(en.boolValue,
-                    GUILayout.Width(20));
-                def.stringValue = EditorGUILayout.TextField(
-                    def.stringValue);
+                en.boolValue = EditorGUILayout.Toggle(en.boolValue, GUILayout.Width(16));
+                def.stringValue = EditorGUILayout.TextField(def.stringValue);
                 if (GUILayout.Button("\u2212", GUILayout.Width(22)))
-                { slotsP.DeleteArrayElementAtIndex(j); break; }
+                { slotsP.DeleteArrayElementAtIndex(i); break; }
                 EditorGUILayout.EndHorizontal();
             }
 
-            if (GUILayout.Button("+ Add Symbol", GUILayout.Height(20)))
-                slotsP.arraySize++;
-            EditorGUI.indentLevel--;
-            EditorGUILayout.EndVertical();
+            if (GUILayout.Button("+ Add Symbol", GUILayout.Height(22))) slotsP.arraySize++;
+        }
+
+        // ──────────────────────────────────────────────
+        // Build Preview
+        // ──────────────────────────────────────────────
+
+        private void DrawBuildPreview()
+        {
+            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+            if (_selBuild < 0 || _selBuild >= _buildProfiles.arraySize)
+            { EditorGUILayout.LabelField("Select a build profile.", EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true)); return; }
+
+            var pp = _buildProfiles.GetArrayElementAtIndex(_selBuild);
+            var nameP = pp.FindPropertyRelative("profileName");
+            var ssP = pp.FindPropertyRelative("sceneSetIndex");
+            var dsP = pp.FindPropertyRelative("scriptDefinitionSetIndex");
+            var cfgP = pp.FindPropertyRelative("buildConfiguration");
+            var folderP = pp.FindPropertyRelative("buildFolder.template");
+            var nameTplP = pp.FindPropertyRelative("buildNameTemplate.template");
+
+            // Title
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
+            if (GUILayout.Button("\u25B6 Build", GUILayout.Width(70)))
+            { _so.ApplyModifiedProperties();
+                BuildExecutor.Build(s.buildProfiles[_selBuild]); }
+            GUI.backgroundColor = Color.white;
+            if (s.buildProfiles[_selBuild].buildConfiguration.platform == BuildTarget.Android)
+            {
+                GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
+                if (GUILayout.Button("\u25B6\u25B6 Run", GUILayout.Width(65)))
+                { _so.ApplyModifiedProperties();
+                    BuildExecutor.BuildAndRun(s.buildProfiles[_selBuild]); }
+                GUI.backgroundColor = Color.white;
+            }
+            GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
+            if (GUILayout.Button("Delete", GUILayout.Width(55)))
+            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                { _buildProfiles.DeleteArrayElementAtIndex(_selBuild); _so.ApplyModifiedProperties();
+                  _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1); return; } }
+            GUI.backgroundColor = Color.white;
+            EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
+
+            nameP.stringValue = LblTxt("Name", nameP.stringValue);
+
+            string[] ssN = s.sceneSets.Select(x => x.setName).ToArray();
+            ssP.intValue = LPopup("Scene Set", ssP.intValue + 1,
+                new[] { "(None)" }.Concat(ssN).ToArray()) - 1;
+
+            string[] dsN = s.scriptDefinitionSets.Select(x => x.setName).ToArray();
+            dsP.intValue = LPopup("Define Set", dsP.intValue + 1,
+                new[] { "(None)" }.Concat(dsN).ToArray()) - 1;
+            GUILayout.Space(6);
+
+            // Build folder with [?]
+            LblTxtHint("Build Folder", folderP);
+            string fPrev = BuildNameResolver.Resolve(folderP.stringValue,
+                _selBuild < s.buildProfiles.Count ? s.buildProfiles[_selBuild] : null, s);
+            EditorGUILayout.LabelField("", "\u2192 " + fPrev, EditorStyles.miniLabel);
+
+            // Build name with [?]
+            LblTxtHint("Build Name", nameTplP);
+            string nPrev = BuildNameResolver.Resolve(nameTplP.stringValue,
+                _selBuild < s.buildProfiles.Count ? s.buildProfiles[_selBuild] : null, s);
+            EditorGUILayout.LabelField("", "\u2192 " + nPrev, EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("", "Full: " + fPrev + "/" + nPrev, EditorStyles.miniLabel);
+            GUILayout.Space(8);
+
+            // ── Build Configuration (two-column, one per line) ──
+            var platP = cfgP.FindPropertyRelative("platform");
+            EditorGUILayout.PropertyField(platP);
+            BuildTarget selPlat = (BuildTarget)platP.enumValueIndex;
+            GUILayout.Space(4);
+
+            // General
+            EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
+            LblChk("Development Build", cfgP.FindPropertyRelative("developmentBuild"));
+            LblChk("Script Debugging", cfgP.FindPropertyRelative("allowDebugging"));
+            LblChk("Connect Profiler", cfgP.FindPropertyRelative("connectWithProfiler"));
+            LblProp("Scripting Backend", cfgP.FindPropertyRelative("scriptingBackend"));
+            LblProp("IL2CPP Code Gen", cfgP.FindPropertyRelative("il2CppCodeGeneration"));
+            LblProp("Stripping Level", cfgP.FindPropertyRelative("strippingLevel"));
+            LblChk("Strip Engine Code", cfgP.FindPropertyRelative("stripEngineCode"));
+            LblTxt("Bundle Identifier", cfgP.FindPropertyRelative("bundleIdentifierOverride"));
+            LblTxt("Product Name", cfgP.FindPropertyRelative("productNameOverride"));
+
+            // Windows
+            if (selPlat == BuildTarget.StandaloneWindows || selPlat == BuildTarget.StandaloneWindows64)
+            {
+                GUILayout.Space(4);
+                EditorGUILayout.LabelField("Windows", EditorStyles.boldLabel);
+                LblChk("Create VS Solution", cfgP.FindPropertyRelative("windowsCreateVSProject"));
+                LblChk("Copy PDB Files", cfgP.FindPropertyRelative("windowsCopyPDB"));
+                LblChk("Copy References", cfgP.FindPropertyRelative("windowsCopyReferences"));
+            }
+
+            // Android
+            if (selPlat == BuildTarget.Android)
+            {
+                GUILayout.Space(4);
+                EditorGUILayout.LabelField("Android", EditorStyles.boldLabel);
+                LblChk("Export Project", cfgP.FindPropertyRelative("androidExportProject"));
+                LblChk("Build App Bundle (AAB)", cfgP.FindPropertyRelative("androidBuildAppBundle"));
+                LblChk("Split Binary", cfgP.FindPropertyRelative("androidSplitBinary"));
+                LblProp("Target Architectures", cfgP.FindPropertyRelative("androidTargetArchitecture"));
+            }
+
+            // iOS
+            if (selPlat == BuildTarget.iOS)
+            {
+                GUILayout.Space(4);
+                EditorGUILayout.LabelField("iOS", EditorStyles.boldLabel);
+                LblChk("Symlink Framework", cfgP.FindPropertyRelative("iosSymlinkFramework"));
+                LblChk("Run in Xcode", cfgP.FindPropertyRelative("iosRunInXcode"));
+                LblTxt("Team ID", cfgP.FindPropertyRelative("iosTeamId"));
+                LblChk("Automatic Signing", cfgP.FindPropertyRelative("iosAutomaticSigning"));
+            }
         }
 
         // ══════════════════════════════════════════════════
-        // ── Tab 3: Build Profiles
+        // ── Two-Column Layout Helpers
         // ══════════════════════════════════════════════════
 
-        private void DrawBuildProfiles()
+        private static void LblChk(string label, SerializedProperty prop)
         {
-            EditorGUILayout.LabelField("Build Profiles", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                "Configure one-click builds with scene sets, defines, and platform settings.",
-                EditorStyles.miniLabel);
-            GUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            prop.boolValue = EditorGUILayout.Toggle(prop.boolValue);
+            EditorGUILayout.EndHorizontal();
+        }
 
-            if (_buildProfiles.arraySize == 0)
-            {
-                EditorGUILayout.HelpBox(
-                    "No build profiles. Click 'Add Build Profile' to create one.",
-                    MessageType.Info);
-            }
+        private static void LblTxt(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
+            EditorGUILayout.EndHorizontal();
+        }
 
-            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+        private static string LblTxt(string label, string val)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            string result = EditorGUILayout.TextField(val);
+            EditorGUILayout.EndHorizontal();
+            return result;
+        }
 
-            for (int i = 0; i < _buildProfiles.arraySize; i++)
-            {
-                var pp = _buildProfiles.GetArrayElementAtIndex(i);
-                var nameP = pp.FindPropertyRelative("profileName");
-                var ssP = pp.FindPropertyRelative("sceneSetIndex");
-                var dsP = pp.FindPropertyRelative("scriptDefinitionSetIndex");
-                var cfgP = pp.FindPropertyRelative("buildConfiguration");
-                var tmplP = pp.FindPropertyRelative("buildNameTemplate.template");
+        private static void LblProp(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            EditorGUILayout.PropertyField(prop, GUIContent.none);
+            EditorGUILayout.EndHorizontal();
+        }
 
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.BeginHorizontal();
-                nameP.stringValue = EditorGUILayout.TextField(
-                    nameP.stringValue, EditorStyles.boldLabel);
+        private static int LPopup(string label, int val, string[] opts)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            int r = EditorGUILayout.Popup(val, opts);
+            EditorGUILayout.EndHorizontal();
+            return r;
+        }
 
-                GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
-                if (GUILayout.Button("\u25B6 Build", GUILayout.Width(80)))
-                {
-                    _so.ApplyModifiedProperties();
-                    BuildExecutor.Build(s.buildProfiles[i]);
-                }
-
-                GUI.backgroundColor = Color.white;
-
-                GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
-                if (GUILayout.Button("\u00D7", GUILayout.Width(24)))
-                { _buildProfiles.DeleteArrayElementAtIndex(i); break; }
-                GUI.backgroundColor = Color.white;
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUI.indentLevel++;
-                string[] ssNames = s.sceneSets.Select(x => x.setName).ToArray();
-                ssP.intValue = EditorGUILayout.Popup("Scene Set",
-                    ssP.intValue + 1,
-                    new[] { "(None)" }.Concat(ssNames).ToArray()) - 1;
-
-                string[] dsNames = s.scriptDefinitionSets
-                    .Select(x => x.setName).ToArray();
-                dsP.intValue = EditorGUILayout.Popup("Define Set",
-                    dsP.intValue + 1,
-                    new[] { "(None)" }.Concat(dsNames).ToArray()) - 1;
-
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Build Name", GUILayout.Width(80));
-                tmplP.stringValue = EditorGUILayout.TextField(
-                    tmplP.stringValue);
-                EditorGUILayout.EndHorizontal();
-
-                string prev = BuildNameResolver.Resolve(
-                    tmplP.stringValue,
-                    s.buildProfiles.Count > i ? s.buildProfiles[i] : null, s);
-                EditorGUILayout.LabelField("  Preview: " + prev,
-                    EditorStyles.miniLabel);
-
-                var platformP = cfgP.FindPropertyRelative("platform");
-                var devP = cfgP.FindPropertyRelative("developmentBuild");
-                var dbgP = cfgP.FindPropertyRelative("allowDebugging");
-                var profP = cfgP.FindPropertyRelative("connectWithProfiler");
-                var beP = cfgP.FindPropertyRelative("scriptingBackend");
-                var ilP = cfgP.FindPropertyRelative("il2CppCodeGeneration");
-                var slP = cfgP.FindPropertyRelative("strippingLevel");
-                var seP = cfgP.FindPropertyRelative("stripEngineCode");
-                var biP = cfgP.FindPropertyRelative("bundleIdentifierOverride");
-                var pnP = cfgP.FindPropertyRelative("productNameOverride");
-
-                EditorGUILayout.PropertyField(platformP);
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.PropertyField(devP, GUILayout.Width(150));
-                EditorGUILayout.PropertyField(dbgP, GUILayout.Width(150));
-                EditorGUILayout.PropertyField(profP, GUILayout.Width(150));
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.PropertyField(beP);
-                EditorGUILayout.PropertyField(ilP);
-                EditorGUILayout.PropertyField(slP);
-                EditorGUILayout.PropertyField(seP);
-                EditorGUILayout.PropertyField(biP);
-                EditorGUILayout.PropertyField(pnP);
-                EditorGUI.indentLevel--;
-                EditorGUILayout.EndVertical();
-                GUILayout.Space(6);
-            }
-
-            if (GUILayout.Button("+ Add Build Profile", GUILayout.Height(28)))
-            {
-                _buildProfiles.arraySize++;
-                _so.ApplyModifiedProperties();
-                _buildProfiles.GetArrayElementAtIndex(
-                    _buildProfiles.arraySize - 1)
-                    .FindPropertyRelative("profileName").stringValue =
-                    "Build Profile " + _buildProfiles.arraySize;
-            }
+        private static void LblTxtHint(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
+            if (GUILayout.Button("?", GUILayout.Width(22)))
+                PlaceholderGuide.Show(GUILayoutUtility.GetLastRect());
+            EditorGUILayout.EndHorizontal();
         }
 
         // ══════════════════════════════════════════════════
@@ -539,15 +683,24 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private void Refresh()
         {
             _so?.Dispose();
-            NoBuildSettings s = NoBuildResourceUtility.GetOrCreateSettings();
-            _so = new SerializedObject(s);
+            _so = new SerializedObject(NoBuildResourceUtility.GetOrCreateSettings());
             _sceneSets = _so.FindProperty("sceneSets");
-            _combos = _so.FindProperty("combinations");
             _defineSets = _so.FindProperty("scriptDefinitionSets");
             _buildProfiles = _so.FindProperty("buildProfiles");
             _activeScene = _so.FindProperty("activeSceneSetIndex");
             _activeDefine = _so.FindProperty("activeScriptDefinitionSetIndex");
             _shortcuts = _so.FindProperty("shortcutsEnabled");
+
+            NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+            _selSet = Mathf.Min(_selSet, s.sceneSets.Count - 1);
+            _selDef = Mathf.Min(_selDef, s.scriptDefinitionSets.Count - 1);
+            _selBuild = Mathf.Min(_selBuild, s.buildProfiles.Count - 1);
+        }
+
+        private static string Trunc(string s, int max)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return s.Length > max ? s.Substring(0, max - 1) + "\u2026" : s;
         }
     }
 }

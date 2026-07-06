@@ -3,6 +3,8 @@
 // ═══════════════════════════════════════════════════════════
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -22,8 +24,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         [Tooltip("Display name for this combination (e.g., 'Main Menu', 'Game Level 1').")]
         public string name = "New Combination";
 
-        [Tooltip("The scene this combination switches to.")]
-        public SceneSlot targetScene = new();
+        [Tooltip("Scenes opened together when this combination is activated.")]
+        public List<SceneSlot> scenes = new();
 
         [Tooltip("When disabled, this combination is hidden from shortcuts.")]
         public bool enabled = true;
@@ -32,6 +34,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             !string.IsNullOrWhiteSpace(name) ? name : "(Unnamed)";
 
         public bool IsValid =>
-            enabled && targetScene != null && targetScene.IsValid;
+            enabled && scenes != null && scenes.Count > 0
+            && scenes.Any(s => s != null && s.IsValid);
     }
 }

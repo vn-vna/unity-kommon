@@ -119,12 +119,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             GUILayout.Space(12);
 
-            // Combinations (shortcuts)
-            if (_settings.combinations.Count > 0)
+            // Combinations (from active set)
+            var activeSet = _settings.ActiveSceneSet;
+            if (activeSet != null && activeSet.combinations.Count > 0)
             {
-                EditorGUILayout.LabelField("Open Scenes (Combinations)",
-                    EditorStyles.boldLabel);
-                List<SceneCombination> combos = _settings.GetEnabledCombinations();
+                EditorGUILayout.LabelField("Open Scenes (Combinations)", EditorStyles.boldLabel);
+                var combos = activeSet.GetEnabledCombinations();
                 for (int i = 0; i < Mathf.Min(combos.Count, 9); i++)
                 {
                     var c = combos[i];
@@ -197,9 +197,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private void DrawFullCombos()
         {
-            EditorGUILayout.LabelField("Combinations (Shortcuts)",
-                EditorStyles.boldLabel);
-            foreach (var c in _settings.combinations)
+            EditorGUILayout.LabelField("Combinations (Shortcuts)", EditorStyles.boldLabel);
+            var activeSet = _settings.ActiveSceneSet;
+            if (activeSet == null) { EditorGUILayout.HelpBox("No active scene set.", MessageType.Info); return; }
+            foreach (var c in activeSet.combinations)
             {
                 EditorGUILayout.BeginHorizontal();
                 GUI.enabled = c.IsValid;

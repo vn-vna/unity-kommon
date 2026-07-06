@@ -116,6 +116,16 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             Resolvers["time"]     = (_, _) => DateTime.Now.ToString("HHmmss");
             Resolvers["datetime"] = (_, _) => DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
 
+            // ── Folder paths ──────────────────
+            Resolvers["project-root"] = (_, _) =>
+                NormalizeSlashes(
+                    System.IO.Path.GetDirectoryName(Application.dataPath) ?? "");
+            Resolvers["asset-folder"] = (_, _) =>
+                NormalizeSlashes(Application.dataPath);
+            Resolvers["project-name"] = (_, _) =>
+                System.IO.Path.GetFileName(
+                    System.IO.Path.GetDirectoryName(Application.dataPath)) ?? "";
+
             // ── Platform ──────────────────────
             Resolvers["platform"] = (profile, _) =>
                 profile?.buildConfiguration?.platform.ToString() ?? "Unknown";
@@ -191,6 +201,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Normalizes all path separators to forward slashes for cross-platform builds.
+        /// </summary>
+        private static string NormalizeSlashes(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            return path.Replace('\\', '/');
         }
     }
 }

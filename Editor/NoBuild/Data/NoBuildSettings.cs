@@ -18,13 +18,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         [Tooltip("All configured scene sets (for full-set switching and builds).")]
         public List<SceneSet> sceneSets = new();
 
-        [Header("Scene Combinations (Shortcuts)")]
-        [Tooltip(
-            "Named shortcut targets. Toolbar buttons [1]..[9] map to these in order. " +
-            "Each combination switches to a single scene."
-        )]
-        public List<SceneCombination> combinations = new();
-
         [Header("Script Definition Sets")]
         [Tooltip("All configured scripting define symbol sets.")]
         public List<ScriptDefinitionSet> scriptDefinitionSets = new();
@@ -67,21 +60,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     return null;
                 return scriptDefinitionSets[activeScriptDefinitionSetIndex];
             }
-        }
-
-        /// <summary>
-        /// Returns enabled combinations, indexed for shortcut mapping.
-        /// </summary>
-        public List<SceneCombination> GetEnabledCombinations()
-        {
-            List<SceneCombination> result = new();
-            if (combinations == null) return result;
-            foreach (SceneCombination c in combinations)
-            {
-                if (c != null && c.IsValid) result.Add(c);
-            }
-
-            return result;
         }
     }
 }

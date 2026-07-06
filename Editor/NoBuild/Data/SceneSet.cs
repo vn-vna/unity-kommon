@@ -8,14 +8,6 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 {
-    /// <summary>
-    /// A named collection of scene slots. Used for:
-    ///   - Switching ALL scenes at once (the entire set)
-    ///   - Providing the scene list for build profiles
-    ///
-    /// <c>buildOrderOverride</c> is an optional ordered list that
-    /// overrides the default scene order when building.
-    /// </summary>
     [Serializable]
     public sealed class SceneSet
     {
@@ -31,10 +23,23 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         )]
         public List<SceneSlot> buildOrderOverride = new();
 
-        // ══════════════════════════════════════════════════
-        // ── Properties
-        // ══════════════════════════════════════════════════
+        [Header("Shortcut Combinations")]
+        [Tooltip(
+            "Per-set shortcut targets. Toolbar buttons [1]..[9] map to " +
+            "enabled combinations in order. Switching to this set also " +
+            "switches the active combinations context."
+        )]
+        public List<SceneCombination> combinations = new();
 
         public bool HasContent => scenes != null && scenes.Count > 0;
+
+        public List<SceneCombination> GetEnabledCombinations()
+        {
+            List<SceneCombination> r = new();
+            if (combinations == null) return r;
+            foreach (var c in combinations)
+                if (c != null && c.IsValid) r.Add(c);
+            return r;
+        }
     }
 }

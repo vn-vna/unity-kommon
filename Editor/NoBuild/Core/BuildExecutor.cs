@@ -102,14 +102,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     throw new InvalidOperationException("No valid scenes to build.");
                 }
 
-                // Resolve output path
+                // Resolve output path: folder + name template + platform extension
+                string resolvedFolder =
+                    BuildNameResolver.Resolve(
+                        profile.buildFolder?.template ?? "{project-root}/Builds",
+                        profile, settings);
                 string resolvedName =
                     BuildNameResolver.Resolve(
                         profile.buildNameTemplate?.template ?? "{app-version}",
-                        profile,
-                        settings);
+                        profile, settings);
                 string resolvedOutputPath = outputPath
-                    ?? Path.Combine(DefaultBuildDir, resolvedName, GetPlatformExtension(buildTarget));
+                    ?? Path.Combine(resolvedFolder,
+                        resolvedName + GetPlatformExtension(buildTarget));
 
                 // Ensure output directory exists
                 string outputDir = Path.GetDirectoryName(resolvedOutputPath);
@@ -184,6 +188,90 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 // ── Restore Phase ──────────────────
                 RestoreBuildState(snapshot, namedTarget, targetGroup);
             }
+        }
+
+        /// <summary>
+        /// Builds and runs on an Android device. If multiple devices are connected,
+        /// shows a picker. Remembers the last-used device.
+        /// </summary>
+        public static void BuildAndRun(BuildProfile profile)
+        {
+            if (profile.buildConfiguration.platform != BuildTarget.Android)
+            {
+                EditorUtility.DisplayDialog("NoBuild",
+                    "Build & Run currently only supports Android.", "OK");
+                return;
+            }
+
+            // Build first
+            Build(profile);
+
+            // Check for devices
+            var devices = AdbUtility.GetDevices();
+            if (devices.Count == 0)
+            {
+                EditorUtility.DisplayDialog("NoBuild",
+                    "No Android device connected via ADB.", "OK");
+                return;
+            }
+
+            string serial;
+            if (devices.Count == 1)
+            {
+                serial = devices[0].Serial;
+            }
+            else
+            {
+                // Show device picker
+                var menu = new GenericMenu();
+                foreach (var d in devices)
+                {
+                    var s = d.Serial;
+                    menu.AddItem(new GUIContent(d.DisplayName), false,
+                        () => InstallAndLaunch(profile, s));
+                }
+                menu.ShowAsContext();
+                return;
+            }
+
+            InstallAndLaunch(profile, serial);
+        }
+
+        private static void InstallAndLaunch(BuildProfile profile, string deviceSerial)
+        {
+            // Resolve the built APK path
+            NoBuildSettings s = NoBuildResourceUtility.GetSettings();
+            string folder = BuildNameResolver.Resolve(
+                profile.buildFolder?.template ?? "{project-root}/Builds",
+                profile, s);
+            string name = BuildNameResolver.Resolve(
+                profile.buildNameTemplate?.template ?? "{app-version}", profile, s);
+            string apkPath = Path.Combine(folder, name + ".apk");
+
+            if (!File.Exists(apkPath))
+            {
+                EditorUtility.DisplayDialog("NoBuild",
+                    $"APK not found at:\n{apkPath}", "OK");
+                return;
+            }
+
+            EditorUtility.DisplayProgressBar("NoBuild", "Installing APK...", 0.5f);
+            bool ok = AdbUtility.InstallApk(apkPath, deviceSerial);
+            EditorUtility.ClearProgressBar();
+
+            if (!ok)
+            {
+                EditorUtility.DisplayDialog("NoBuild",
+                    "Failed to install APK on device.", "OK");
+                return;
+            }
+
+            string pkg = AdbUtility.GetPackageName();
+            AdbUtility.LaunchApp(deviceSerial, pkg);
+            Debug.Log($"[NoBuild] Launched on {deviceSerial} ({pkg})");
+
+            // Remember device
+            EditorPrefs.SetString("NoBuild_LastAdbDevice", deviceSerial);
         }
 
         // ══════════════════════════════════════════════════
@@ -284,6 +372,20 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 #if UNITY_ANDROID
                 androidArchitecture =
                     PlayerSettings.Android.targetArchitectures,
+                androidExportProject =
+                    EditorUserBuildSettings.exportAsGoogleAndroidProject,
+                androidBuildAppBundle =
+                    EditorUserBuildSettings.buildAppBundle,
+                androidSplitBinary =
+                    PlayerSettings.Android.splitApplicationBinary,
+#endif
+#if UNITY_IOS
+                iosSymlinkFramework =
+                    PlayerSettings.iOS.symlinkUnityLibraries,
+                iosTeamId =
+                    PlayerSettings.iOS.appleDeveloperTeamID,
+                iosAutomaticSigning =
+                    PlayerSettings.iOS.appleEnableAutomaticSigning,
 #endif
             };
         }
@@ -303,20 +405,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorUserBuildSettings.connectProfiler = config.connectWithProfiler;
 
             if (!string.IsNullOrEmpty(config.bundleIdentifierOverride))
-            {
-                PlayerSettings.SetApplicationIdentifier(
-                    namedTarget,
-                    config.bundleIdentifierOverride
-                );
-            }
-
+                PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride);
             if (!string.IsNullOrEmpty(config.productNameOverride))
-            {
                 PlayerSettings.productName = config.productNameOverride;
-            }
 
 #if UNITY_ANDROID
-            PlayerSettings.Android.targetArchitectures = config.targetArchitecture;
+            PlayerSettings.Android.targetArchitectures = config.androidTargetArchitecture;
+            EditorUserBuildSettings.exportAsGoogleAndroidProject = config.androidExportProject;
+            EditorUserBuildSettings.buildAppBundle = config.androidBuildAppBundle;
+            PlayerSettings.Android.splitApplicationBinary = config.androidSplitBinary;
+#endif
+
+#if UNITY_STANDALONE_WIN || UNITY_STANDALONE
+            // Windows-specific
+            // createVSProject is handled via BuildOptions
+#endif
+
+#if UNITY_IOS
+            PlayerSettings.iOS.symlinkUnityLibraries = config.iosSymlinkFramework;
+            if (!string.IsNullOrEmpty(config.iosTeamId))
+                PlayerSettings.iOS.appleDeveloperTeamID = config.iosTeamId;
+            PlayerSettings.iOS.appleEnableAutomaticSigning = config.iosAutomaticSigning;
 #endif
         }
 
@@ -342,20 +451,21 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 EditorUserBuildSettings.connectProfiler = snapshot.connectProfiler;
 
                 if (!string.IsNullOrEmpty(snapshot.bundleIdentifier))
-                {
-                    PlayerSettings.SetApplicationIdentifier(
-                        namedTarget,
-                        snapshot.bundleIdentifier
-                    );
-                }
-
+                    PlayerSettings.SetApplicationIdentifier(namedTarget, snapshot.bundleIdentifier);
                 if (!string.IsNullOrEmpty(snapshot.productName))
-                {
                     PlayerSettings.productName = snapshot.productName;
-                }
 
 #if UNITY_ANDROID
                 PlayerSettings.Android.targetArchitectures = snapshot.androidArchitecture;
+                EditorUserBuildSettings.exportAsGoogleAndroidProject = snapshot.androidExportProject;
+                EditorUserBuildSettings.buildAppBundle = snapshot.androidBuildAppBundle;
+                PlayerSettings.Android.splitApplicationBinary = snapshot.androidSplitBinary;
+#endif
+#if UNITY_IOS
+                PlayerSettings.iOS.symlinkUnityLibraries = snapshot.iosSymlinkFramework;
+                if (!string.IsNullOrEmpty(snapshot.iosTeamId))
+                    PlayerSettings.iOS.appleDeveloperTeamID = snapshot.iosTeamId;
+                PlayerSettings.iOS.appleEnableAutomaticSigning = snapshot.iosAutomaticSigning;
 #endif
             }
             catch (Exception ex)
@@ -409,6 +519,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             public string bundleIdentifier;
             public string productName;
             public AndroidArchitecture androidArchitecture;
+            public bool androidExportProject;
+            public bool androidBuildAppBundle;
+            public bool androidSplitBinary;
+            public bool iosSymlinkFramework;
+            public string iosTeamId;
+            public bool iosAutomaticSigning;
         }
     }
 }

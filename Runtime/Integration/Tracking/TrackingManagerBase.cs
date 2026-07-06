@@ -21,11 +21,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         public bool AllowTracking { get; set; }
         public TrackingManagerStatus Status { get; private set; }
         public List<ITrackingProvider> Providers => _providers;
+        public HashSet<string> FilteredTrackingIds => _filteredTrackingIds;
         public bool? IsTrackingFiltered
         {
             get
             {
-                if (Status != TrackingManagerStatus.Ready) return null;
+                if (Status != TrackingManagerStatus.Ready
+                    && Status != TrackingManagerStatus.PartiallyReady) return null;
                 if (_filteredTrackingIds == null) return false;
                 if (string.IsNullOrWhiteSpace(DeviceTrackingIdentifier)) return false;
                 return _filteredTrackingIds.Contains(DeviceTrackingIdentifier);
@@ -49,12 +51,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         [SerializeField]
         private string[] filteredTrackingIds;
+
+        [SerializeField]
+        [Tooltip("Determines when the tracking manager reports as Ready.")]
+        private ReadyThreshold readyThreshold = ReadyThreshold.AllProviders;
         #endregion
 
         #region Private Fields
+        private const int MaxPendingActionsPerProvider = 500;
         private List<ITrackingProvider> _providers;
         private HashSet<string> _filteredTrackingIds;
         private Queue<Action> _pendingActions;
+        private Dictionary<ITrackingProvider, Queue<Action>> _providerPendingBuffers;
         private float _timer;
         #endregion
 
@@ -64,13 +72,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             base.OnEnable();
             _providers ??= new List<ITrackingProvider>();
             _pendingActions ??= new Queue<Action>();
+            _providerPendingBuffers ??= new Dictionary<ITrackingProvider, Queue<Action>>();
             Integration.RegisterManager(this);
         }
 
         public virtual void Reset()
         {
-            _providers = new List<ITrackingProvider>();
+            Queue<Action> preservedActions = _pendingActions;
             _pendingActions = new Queue<Action>();
+
+            if (preservedActions != null && preservedActions.Count > 0)
+            {
+                while (preservedActions.Count > 0)
+                {
+                    _pendingActions.Enqueue(preservedActions.Dequeue());
+                }
+
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Preserved {0} pending tracking event(s) across Reset().",
+                    _pendingActions.Count
+                );
+            }
+
+            _providerPendingBuffers = new Dictionary<ITrackingProvider, Queue<Action>>();
+            _providers = new List<ITrackingProvider>();
             _filteredTrackingIds = new HashSet<string>(filteredTrackingIds);
 
             Status = TrackingManagerStatus.Uninitialized;
@@ -112,7 +137,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void Tick(float deltaTime)
         {
-            if (Status != TrackingManagerStatus.Ready) return;
+            DrainProviderPendingBuffers();
+
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady) return;
 
             while (_pendingActions.Count > 0)
             {
@@ -184,10 +212,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             while (true)
             {
-                if (_providers.Any(p => p.IsInitialized))
+                bool anyReady = _providers.Any(p => p.IsInitialized);
+                bool allReady = _providers.Count > 0 && _providers.All(p => p.IsInitialized);
+
+                if (allReady)
                 {
                     Status = TrackingManagerStatus.Ready;
                     yield break;
+                }
+
+                if (anyReady && readyThreshold == ReadyThreshold.AnyProvider)
+                {
+                    Status = TrackingManagerStatus.Ready;
+                    yield break;
+                }
+
+                if (anyReady && readyThreshold == ReadyThreshold.AllProviders)
+                {
+                    Status = TrackingManagerStatus.PartiallyReady;
                 }
 
                 if (_timer > timeOut)
@@ -253,7 +295,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready)
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
             {
                 _pendingActions.Enqueue(() => TrackScreen(screenId));
                 return;
@@ -261,6 +304,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
+                if (!provider.IsInitialized)
+                {
+                    EnqueueForProvider(provider, () => DispatchScreenToProvider(provider, screenId));
+                    continue;
+                }
+
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.ScreenView) == 0) continue;
                 provider.TrackScreen(screenId);
@@ -285,7 +334,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready)
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
             {
                 _pendingActions.Enqueue(() => TrackAction(info));
                 return;
@@ -320,6 +370,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
+                if (!provider.IsInitialized)
+                {
+                    EnqueueForProvider(provider, () => DispatchActionToProvider(provider, info));
+                    continue;
+                }
+
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.IngameAction) == 0) continue;
                 if (info.Severity < provider.MinimumActionSeverity) continue;
@@ -360,7 +416,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready)
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Tracking manager is not ready. Queuing ad revenue tracking."
@@ -380,6 +437,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
+                if (!provider.IsInitialized)
+                {
+                    EnqueueForProvider(provider, () => DispatchAdRevenueToProvider(provider, info));
+                    continue;
+                }
+
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.AdRevenue) == 0) continue;
 
@@ -417,7 +480,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready)
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Tracking manager is not ready. Queuing purchase revenue tracking."
@@ -437,6 +501,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
             foreach (ITrackingProvider provider in _providers)
             {
+                if (!provider.IsInitialized)
+                {
+                    EnqueueForProvider(
+                        provider,
+                        () => DispatchPurchaseRevenueToProvider(provider, info)
+                    );
+                    continue;
+                }
+
                 if (!provider.IsTrackingEnabled) continue;
                 if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.PurchaseRevenue) == 0) continue;
                 provider.TrackPurchaseRevenue(info);
@@ -446,26 +519,115 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         #endregion
 
         #region Private Methods
+        private void DrainProviderPendingBuffers()
+        {
+            foreach (ITrackingProvider provider in _providers)
+            {
+                if (!provider.IsInitialized) continue;
+
+                if (_providerPendingBuffers.TryGetValue(provider, out Queue<Action> buffer))
+                {
+                    while (buffer.Count > 0)
+                    {
+                        Action action = buffer.Dequeue();
+                        action?.Invoke();
+                    }
+                }
+            }
+        }
+
+        private void EnqueueForProvider(ITrackingProvider provider, Action action)
+        {
+            if (!_providerPendingBuffers.TryGetValue(provider, out Queue<Action> buffer))
+            {
+                buffer = new Queue<Action>();
+                _providerPendingBuffers[provider] = buffer;
+            }
+
+            if (buffer.Count >= MaxPendingActionsPerProvider)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Provider {0} pending buffer full ({1} events). Dropping oldest.",
+                    provider.GetType().Name,
+                    MaxPendingActionsPerProvider
+                );
+                buffer.Dequeue();
+            }
+
+            buffer.Enqueue(action);
+        }
+
+        private static void DispatchScreenToProvider(ITrackingProvider provider, string screenId)
+        {
+            if (!provider.IsTrackingEnabled) return;
+            if ((provider.EnabledFeatures & provider.Features & TrackingProviderFeatures.ScreenView) == 0) return;
+            provider.TrackScreen(screenId);
+        }
+
+        private static void DispatchActionToProvider(
+            ITrackingProvider provider,
+            TrackingActionInfo info
+        )
+        {
+            if (!provider.IsTrackingEnabled) return;
+            if ((provider.EnabledFeatures & provider.Features
+                & TrackingProviderFeatures.IngameAction) == 0) return;
+            if (info.Severity < provider.MinimumActionSeverity) return;
+            if (info.ProviderMask != ProviderIdentity.None
+                && (info.ProviderMask & provider.ProviderIdentity) == 0) return;
+
+            provider.TrackAction(info);
+        }
+
+        private static void DispatchAdRevenueToProvider(
+            ITrackingProvider provider,
+            AdTrackingInfo info
+        )
+        {
+            if (!provider.IsTrackingEnabled) return;
+            if ((provider.EnabledFeatures & provider.Features
+                & TrackingProviderFeatures.AdRevenue) == 0) return;
+
+            provider.TrackAdRevenue(info);
+        }
+
+        private static void DispatchPurchaseRevenueToProvider(
+            ITrackingProvider provider,
+            PurchaseTrackingInfo info
+        )
+        {
+            if (!provider.IsTrackingEnabled) return;
+            if ((provider.EnabledFeatures & provider.Features
+                & TrackingProviderFeatures.PurchaseRevenue) == 0) return;
+
+            provider.TrackPurchaseRevenue(info);
+        }
+
         private void RegisterAllInitialProviders()
         {
             foreach (ScriptableObject providerAsset in initialProviders)
             {
-                if (providerAsset is ITrackingProvider provider)
-                {
-                    RegisterProvider(provider);
-                }
-                else
+                if (providerAsset is not ITrackingProvider provider)
                 {
                     QuickLog.Warning<TrackingManagerBase<T>>(
                         "Initial provider asset {0} does not implement ITrackingProvider. Skipping.",
                         providerAsset.name
                     );
+                    continue;
                 }
+
+                RegisterProvider(provider);
             }
         }
         #endregion
 
         #region Nested Types
+        public enum ReadyThreshold
+        {
+            AnyProvider,
+            AllProviders
+        }
+
         private enum InitialAllowTracking
         {
             Undefined, Yes, No,

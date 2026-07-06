@@ -10,45 +10,82 @@ using UnityEngine;
 namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
-    /// Platform-agnostic build settings bundle.
-    /// When applied by <see cref="BuildExecutor"/>, these override
-    /// <c>PlayerSettings</c> and <c>EditorUserBuildSettings</c> for the build duration.
+    /// Build settings that mirror Unity's Build Settings window.
+    /// Platform-specific sections appear based on the selected <see cref="platform"/>.
     /// </summary>
     [Serializable]
     public sealed class BuildConfiguration
     {
-        [Tooltip("Target platform for this build configuration.")]
+        // ── General ─────────────────────────────────
+        [Tooltip("Target platform.")]
         public BuildTarget platform = BuildTarget.Android;
 
-        [Tooltip("Enable Development Build flag.")]
+        [Header("General")]
+        [Tooltip("Development Build.")]
         public bool developmentBuild;
 
-        [Tooltip("Allow script debugging in development builds.")]
+        [Tooltip("Allow script debugging.")]
         public bool allowDebugging;
 
-        [Tooltip("Connect the profiler automatically.")]
+        [Tooltip("Connect profiler.")]
         public bool connectWithProfiler;
 
-        [Tooltip("Scripting backend (Mono or IL2CPP).")]
+        [Tooltip("Scripting backend.")]
         public ScriptingImplementation scriptingBackend = ScriptingImplementation.IL2CPP;
 
-        [Tooltip("IL2CPP code generation mode.")]
+        [Tooltip("IL2CPP code generation.")]
         public Il2CppCodeGeneration il2CppCodeGeneration = Il2CppCodeGeneration.OptimizeSize;
 
-        [Tooltip("Target Android architectures (Android only).")]
-        public AndroidArchitecture targetArchitecture = AndroidArchitecture.ARM64;
-
-        [Tooltip("Managed code stripping level.")]
+        [Tooltip("Managed stripping level.")]
         public ManagedStrippingLevel strippingLevel = ManagedStrippingLevel.Minimal;
 
-        [Tooltip("Strip engine code (IL2CPP only).")]
+        [Tooltip("Strip engine code (IL2CPP).")]
         public bool stripEngineCode;
 
-        [Tooltip("Override bundle identifier (leave empty to keep current).")]
+        [Tooltip("Override bundle identifier.")]
         public string bundleIdentifierOverride;
 
-        [Tooltip("Override product name (leave empty to keep current).")]
+        [Tooltip("Override product name.")]
         public string productNameOverride;
+
+        // ── Windows ────────────────────────────────
+        [Header("Windows")]
+        [Tooltip("Create Visual Studio solution.")]
+        public bool windowsCreateVSProject;
+
+        [Tooltip("Copy PDB files.")]
+        public bool windowsCopyPDB;
+
+        [Tooltip("Copy references.")]
+        public bool windowsCopyReferences;
+
+        // ── Android ────────────────────────────────
+        [Header("Android")]
+        [Tooltip("Export as Android project.")]
+        public bool androidExportProject;
+
+        [Tooltip("Build Android App Bundle (AAB).")]
+        public bool androidBuildAppBundle;
+
+        [Tooltip("Split application binary.")]
+        public bool androidSplitBinary;
+
+        [Tooltip("Target architectures.")]
+        public AndroidArchitecture androidTargetArchitecture = AndroidArchitecture.ARM64;
+
+        // ── iOS ────────────────────────────────────
+        [Header("iOS")]
+        [Tooltip("Symlink Unity Framework.")]
+        public bool iosSymlinkFramework;
+
+        [Tooltip("Run in Xcode after build.")]
+        public bool iosRunInXcode;
+
+        [Tooltip("Apple Developer Team ID (leave empty for auto).")]
+        public string iosTeamId;
+
+        [Tooltip("Automatic signing.")]
+        public bool iosAutomaticSigning = true;
     }
 
     /// <summary>
@@ -102,6 +139,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         [Tooltip("Template for the build output file/folder name.")]
         public BuildNameTemplate buildNameTemplate = new();
+
+        [Tooltip(
+            "Output folder for builds. Supports placeholders.\n" +
+            "e.g., '{project-root}/Builds/{platform}/{app-version}'")]
+        public BuildNameTemplate buildFolder = new()
+        {
+            template = "{project-root}/Builds/{platform}"
+        };
 
         // ══════════════════════════════════════════════════
         // ── Properties

@@ -4,6 +4,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     {
         Uninitialized,
         Initializing,
+        PartiallyReady,
         Ready
     }
 }

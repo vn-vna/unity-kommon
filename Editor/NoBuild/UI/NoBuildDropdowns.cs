@@ -62,7 +62,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             public override Vector2 GetWindowSize()
             {
                 int sets = _s.sceneSets.Count;
-                int combos = _s.combinations.Count;
+                SceneSet active = _s.ActiveSceneSet;
+                int combos = active?.combinations?.Count ?? 0;
                 float h = HeaderH + (sets > 0 ? SectionH + sets * RowH : 0)
                           + (combos > 0 ? SectionH + combos * RowH + 8 : 0)
                           + FooterH + Pad;
@@ -116,20 +117,25 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 GUILayout.Space(6);
 
-                // ── Open Scenes (Combinations) ────────
-                DrawSectionHeader("Open Scenes",
-                    "Quick-switch shortcuts [1]..[9].");
+                // ── Open Scenes (Combinations from active set) ──
+                SceneSet activeSet = _s.ActiveSceneSet;
+                List<SceneCombination> combos = activeSet?.combinations;
 
-                if (_s.combinations.Count == 0)
+                DrawSectionHeader("Open Scenes",
+                    activeSet != null
+                        ? $"Quick-switch for '{activeSet.setName}' [1]..[9]."
+                        : "Quick-switch shortcuts [1]..[9].");
+
+                if (activeSet == null || combos == null || combos.Count == 0)
                 {
-                    EditorGUILayout.LabelField("  (none)",
+                    EditorGUILayout.LabelField("  (no active set or no combinations)",
                         EditorStyles.miniLabel);
                 }
                 else
                 {
-                    for (int i = 0; i < _s.combinations.Count; i++)
+                    for (int i = 0; i < combos.Count; i++)
                     {
-                        SceneCombination c = _s.combinations[i];
+                        SceneCombination c = combos[i];
                         bool valid = c.IsValid;
 
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
