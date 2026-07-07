@@ -4,17 +4,17 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Com.Hapiga.Scheherazade.Common.Integration;
+using Com.Hapiga.Scheherazade.Common.Integration.Ads;
+using Com.Hapiga.Scheherazade.Common.Integration.IAR;
+using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
+using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
+using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
+using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Callbacks;
 using UnityEngine;
-using Com.Hapiga.Scheherazade.Common.Integration;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
-using Com.Hapiga.Scheherazade.Common.Integration.IAR;
-using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 
 namespace Com.Hapiga.Scheherazade.Integration
 {
@@ -23,7 +23,6 @@ namespace Com.Hapiga.Scheherazade.Integration
     {
         private readonly string _sectionName;
         private readonly string _managerLabel;
-        private readonly string _concreteTypeName;
         private readonly IReadOnlyList<SettingsTab> _tabs;
 
         private int _selectedTabIndex;
@@ -33,14 +32,12 @@ namespace Com.Hapiga.Scheherazade.Integration
             SettingsScope scopes,
             string sectionName,
             string managerLabel,
-            string concreteTypeName,
             IReadOnlyList<SettingsTab> tabs = null,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, keywords)
         {
             _sectionName = sectionName;
             _managerLabel = managerLabel;
-            _concreteTypeName = concreteTypeName;
             _tabs = tabs;
         }
 
@@ -55,10 +52,12 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             ScriptableObject manager = IntegrationSettingsDrawingUtils.FindModuleAsset<TInterface>(centre);
 
+            Type[] concreteTypes = IntegrationSettingsDrawingUtils.FindConcreteManagerTypes<TInterface>();
+
             IntegrationSettingsDrawingUtils.DrawManagerSettings<TInterface>(
                 _sectionName,
                 _managerLabel,
-                _concreteTypeName,
+                concreteTypes,
                 ref manager,
                 centre,
                 _tabs,
@@ -131,7 +130,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Ads Manager Configuration", "Ads Manager Asset",
-            "CoreLoop.BusFlow.AdsManager", Tabs, keywords)
+            Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -181,7 +180,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Tracking Manager Configuration", "Tracking Manager Asset",
-            "CoreLoop.BusFlow.TrackingManager", Tabs, keywords)
+            Tabs, keywords)
         { }
 
         [SettingsProvider]
@@ -221,7 +220,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "In-App Purchase Manager Configuration",
-            "In-App Purchase Manager Asset", "CoreLoop.BusFlow.InAppPurchaseManager",
+            "In-App Purchase Manager Asset",
             Tabs, keywords)
         { }
 
@@ -257,7 +256,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Remote Config Manager Configuration",
-            "Remote Config Manager Asset", "CoreLoop.BusFlow.RemoteConfigManager",
+            "Remote Config Manager Asset",
             Tabs, keywords)
         { }
 
@@ -383,7 +382,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "In-App Review Manager Configuration",
-            "In-App Review Manager Asset", "CoreLoop.BusFlow.InAppReviewManager",
+            "In-App Review Manager Asset",
             Tabs, keywords)
         { }
 
@@ -482,7 +481,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "User Segmentation Manager Configuration",
-            "User Segmentation Manager Asset", "CoreLoop.BusFlow.UserSegmentationManager",
+            "User Segmentation Manager Asset",
             Tabs, keywords)
         { }
 
@@ -589,7 +588,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 EditorGUILayout.LabelField("Manager Type", entry.ConcreteType.FullName);
 
                 bool isInitialized = GetManagerStatus(entry.Manager);
-                var statusStyle = new GUIStyle(EditorStyles.label)
+                GUIStyle statusStyle = new GUIStyle(EditorStyles.label)
                 {
                     normal = { textColor = isInitialized ? Color.green : Color.gray }
                 };
@@ -609,7 +608,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
         private void DrawProviders(ResourceManagerEntry entry)
         {
-            var serializedManager = new SerializedObject(entry.Manager);
+            SerializedObject serializedManager = new SerializedObject(entry.Manager);
             var providersProp = serializedManager.FindProperty("initialProviders");
 
             if (providersProp == null || !providersProp.isArray)
@@ -625,7 +624,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             for (int i = providersProp.arraySize - 1; i >= 0; i--)
             {
                 var element = providersProp.GetArrayElementAtIndex(i);
-                var provider = element.objectReferenceValue as ScriptableObject;
+                ScriptableObject provider = element.objectReferenceValue as ScriptableObject;
 
                 using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
@@ -700,15 +699,15 @@ namespace Com.Hapiga.Scheherazade.Integration
 
         private static List<ResourceManagerEntry> FindResourceManagers(IntegrationCentre centre)
         {
-            var results = new List<ResourceManagerEntry>();
-            var serializedCentre = new SerializedObject(centre);
+            List<ResourceManagerEntry> results = new List<ResourceManagerEntry>();
+            SerializedObject serializedCentre = new SerializedObject(centre);
             var listProp = serializedCentre.FindProperty("moduleScriptableObjects");
             if (listProp == null) return results;
 
             for (int i = 0; i < listProp.arraySize; i++)
             {
                 var element = listProp.GetArrayElementAtIndex(i);
-                var module = element.objectReferenceValue as ScriptableObject;
+                ScriptableObject module = element.objectReferenceValue as ScriptableObject;
                 if (module == null) continue;
 
                 foreach (Type iface in module.GetType().GetInterfaces())
@@ -871,7 +870,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         public static ScriptableObject FindModuleAsset<TInterface>(IntegrationCentre centre)
             where TInterface : class
         {
-            var serializedCentre = new SerializedObject(centre);
+            SerializedObject serializedCentre = new SerializedObject(centre);
             var listProp = serializedCentre.FindProperty("moduleScriptableObjects");
             for (int i = 0; i < listProp.arraySize; i++)
             {
@@ -885,31 +884,62 @@ namespace Com.Hapiga.Scheherazade.Integration
             return null;
         }
 
+        internal static Type[] FindConcreteManagerTypes<TInterface>()
+            where TInterface : class
+        {
+            var interfaceType = typeof(TInterface);
+            return GetAllTypes()
+                .Where(t => t.IsClass
+                            && !t.IsAbstract
+                            && typeof(ScriptableObject).IsAssignableFrom(t)
+                            && interfaceType.IsAssignableFrom(t))
+                .OrderBy(t => t.FullName)
+                .ToArray();
+        }
+
         public static void DrawManagerSettings<TInterface>(
             string sectionName,
             string label,
-            string concreteTypeName,
+            Type[] concreteTypes,
             ref ScriptableObject currentManager,
             IntegrationCentre centre,
             IReadOnlyList<SettingsTab> tabs,
             ref int selectedTabIndex
         ) where TInterface : class
         {
-            Type concreteType = ResolveType(concreteTypeName);
-            if (concreteType == null)
+            if (concreteTypes.Length > 1)
             {
+                GUILayout.Space(10);
+                var typeList = string.Join("\n",
+                    concreteTypes.Select(t => $"  \u2022 {t.FullName}"));
                 EditorGUILayout.HelpBox(
-                    $"Could not find concrete class type '{concreteTypeName}'. Please make sure it is compiled and present.",
+                    $"Multiple concrete ScriptableObject types implementing {typeof(TInterface).Name} were found:\n\n{typeList}\n\n" +
+                    "Only one implementation should exist. Remove or abstract the extra types.",
                     MessageType.Error
                 );
                 return;
             }
 
+            if (concreteTypes.Length == 0)
+            {
+                GUILayout.Space(10);
+                EditorGUILayout.LabelField(sectionName, EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    $"No concrete ScriptableObject class implementing {typeof(TInterface).Name} was found.\n\n" +
+                    "Create a new ScriptableObject class that inherits from the appropriate manager base class " +
+                    "(e.g., public sealed class MyManager : TrackingManagerBase<MyManager> {{ }}).",
+                    MessageType.Warning
+                );
+                return;
+            }
+
+            Type concreteType = concreteTypes[0];
+
             GUILayout.Space(10);
             EditorGUILayout.LabelField(sectionName, EditorStyles.boldLabel);
 
             EditorGUI.BeginChangeCheck();
-            var newManager = EditorGUILayout.ObjectField(
+            ScriptableObject newManager = EditorGUILayout.ObjectField(
                 label,
                 currentManager,
                 concreteType,
@@ -943,7 +973,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                         return;
                     }
 
-                    var newAsset = ScriptableObject.CreateInstance(concreteType);
+                    ScriptableObject newAsset = ScriptableObject.CreateInstance(concreteType);
                     AssetDatabase.CreateAsset(newAsset, path);
                     AssetDatabase.SaveAssets();
                     SetModuleAsset(centre, currentManager, newAsset);
@@ -1034,7 +1064,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             ScriptableObject newManager
         )
         {
-            var serializedCentre = new SerializedObject(centre);
+            SerializedObject serializedCentre = new SerializedObject(centre);
             var listProp = serializedCentre.FindProperty("moduleScriptableObjects");
 
             int foundIndex = -1;
@@ -1076,7 +1106,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         {
             GUILayout.Space(6);
 
-            var serializedManager = new SerializedObject(manager);
+            SerializedObject serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
             if (fieldProp == null)
             {
@@ -1115,7 +1145,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 }
 
                 EditorGUI.BeginChangeCheck();
-                var updatedProvider = EditorGUILayout.ObjectField(
+                ScriptableObject updatedProvider = EditorGUILayout.ObjectField(
                     "Asset",
                     currentProvider,
                     providerType,
@@ -1237,7 +1267,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         {
             if (descriptor.BindingMode == ProviderBindingMode.Single)
             {
-                var assignedProvider = fieldProp.objectReferenceValue as ScriptableObject;
+                ScriptableObject assignedProvider = fieldProp.objectReferenceValue as ScriptableObject;
                 if (assignedProvider == null)
                 {
                     return null;
@@ -1257,7 +1287,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             for (int i = 0; i < fieldProp.arraySize; i++)
             {
-                var value = fieldProp.GetArrayElementAtIndex(i).objectReferenceValue as ScriptableObject;
+                ScriptableObject value = fieldProp.GetArrayElementAtIndex(i).objectReferenceValue as ScriptableObject;
                 if (value == null)
                 {
                     continue;
@@ -1330,7 +1360,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             for (int i = 0; i < fieldProp.arraySize; i++)
             {
-                var value = fieldProp.GetArrayElementAtIndex(i).objectReferenceValue as ScriptableObject;
+                ScriptableObject value = fieldProp.GetArrayElementAtIndex(i).objectReferenceValue as ScriptableObject;
                 if (value == null)
                 {
                     continue;
@@ -1473,18 +1503,30 @@ namespace Com.Hapiga.Scheherazade.Integration
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
-                var editor = UnityEditor.Editor.CreateEditor(asset);
-                try
+                TryDrawingInlineInspector(asset, header);
+            }
+        }
+
+        private static void TryDrawingInlineInspector(ScriptableObject asset, string header)
+        {
+            EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
+            UnityEditor.Editor editor = UnityEditor.Editor.CreateEditor(asset);
+            try
+            {
+#if ODIN_INSPECTOR
+                if (editor is Sirenix.OdinInspector.Editor.OdinEditor odinEditor)
                 {
-                    editor.OnInspectorGUI();
+                    editor.DrawDefaultInspector();
                 }
-                finally
+#else
+                editor.OnInspectorGUI();
+#endif
+            }
+            finally
+            {
+                if (editor != null)
                 {
-                    if (editor != null)
-                    {
-                        UnityEngine.Object.DestroyImmediate(editor);
-                    }
+                    UnityEngine.Object.DestroyImmediate(editor);
                 }
             }
         }
@@ -1529,7 +1571,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            var providerAsset = ScriptableObject.CreateInstance(providerType);
+            ScriptableObject providerAsset = ScriptableObject.CreateInstance(providerType);
             providerAsset.name = providerType.Name;
             AssetDatabase.CreateAsset(providerAsset, assetPath);
 
@@ -1578,7 +1620,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return false;
             }
 
-            var serializedManager = new SerializedObject(manager);
+            SerializedObject serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
             if (fieldProp != null && GetAssignedProvider(fieldProp, descriptor, providerType) == providerAsset)
             {
@@ -1663,14 +1705,14 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return true;
             }
 
-            var descriptor = new ProviderDescriptor(
+            ProviderDescriptor descriptor = new ProviderDescriptor(
                 request.providerDisplayName,
                 request.managerFieldName,
                 request.bindingMode,
                 request.providerTypeName
             );
 
-            var serializedManager = new SerializedObject(manager);
+            SerializedObject serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(request.managerFieldName);
             if (fieldProp == null)
             {
@@ -1775,10 +1817,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
+            NamedBuildTarget namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
                 EditorUserBuildSettings.selectedBuildTargetGroup
             );
-            var defineList = new List<string>(
+            List<string> defineList = new List<string>(
                 PlayerSettings
                     .GetScriptingDefineSymbols(namedBuildTarget)
                     .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
@@ -1814,10 +1856,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
+            NamedBuildTarget namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
                 EditorUserBuildSettings.selectedBuildTargetGroup
             );
-            var defineList = new List<string>(
+            List<string> defineList = new List<string>(
                 PlayerSettings
                     .GetScriptingDefineSymbols(namedBuildTarget)
                     .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
@@ -1842,7 +1884,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
         private static HashSet<string> GetCurrentScriptingDefines()
         {
-            var namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
+            NamedBuildTarget namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(
                 EditorUserBuildSettings.selectedBuildTargetGroup
             );
 
@@ -1900,7 +1942,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return _allTypesCache;
             }
 
-            var allTypes = new List<Type>();
+            List<Type> allTypes = new List<Type>();
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type[] types;
@@ -1937,7 +1979,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             ScriptableObject providerAsset
         )
         {
-            var serializedManager = new SerializedObject(manager);
+            SerializedObject serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
             if (fieldProp == null)
             {
@@ -1969,7 +2011,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return null;
             }
 
-            var providerAsset = AssetDatabase.LoadAssetAtPath(assetPath, providerType ?? typeof(ScriptableObject)) as ScriptableObject;
+            ScriptableObject providerAsset = AssetDatabase.LoadAssetAtPath(assetPath, providerType ?? typeof(ScriptableObject)) as ScriptableObject;
             if (providerAsset == null)
             {
                 return null;
