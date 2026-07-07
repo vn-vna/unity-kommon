@@ -72,7 +72,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static void HandleSetSwitch(int index)
         {
             NoBuildSettings s = NoBuildResourceUtility.GetSettings();
-            if (s == null || !s.shortcutsEnabled) return;
+            if (s == null) return;
             if (index < 0 || index >= s.sceneSets.Count) return;
 
             s.activeSceneSetIndex = index;
@@ -83,14 +83,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static void HandleComboSwitch(int index)
         {
             NoBuildSettings s = NoBuildResourceUtility.GetSettings();
-            if (s == null || !s.shortcutsEnabled) return;
+            if (s == null) return;
 
             SceneSet active = s.ActiveSceneSet;
             if (active == null) return;
             List<SceneCombination> combos = active.GetEnabledCombinations();
             if (index < 0 || index >= combos.Count) return;
 
-            SceneSwitcher.SwitchToCombination(combos[index]);
+            SceneSwitcher.SwitchToCombination(combos[index], active);
         }
     }
 }

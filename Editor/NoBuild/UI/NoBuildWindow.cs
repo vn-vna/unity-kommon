@@ -76,11 +76,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 _compactMode = false;
 
             GUILayout.Space(8);
-            bool se = _settings.shortcutsEnabled;
-            bool ns = GUILayout.Toggle(se, "Shortcuts",
-                EditorStyles.toolbarButton, GUILayout.Width(70));
-            if (ns != se) { _settings.shortcutsEnabled = ns; _dirty = true; }
-
             if (GUILayout.Button("Project Settings", EditorStyles.toolbarButton,
                     GUILayout.Width(110)))
                 SettingsService.OpenProjectSettings("Project/NoBuild");
@@ -131,7 +126,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.Label("  " + (i + 1) + ".", GUILayout.Width(30));
                     if (GUILayout.Button(c.DisplayName, EditorStyles.label))
-                        SceneSwitcher.SwitchToCombination(c);
+                        SceneSwitcher.SwitchToCombination(c, activeSet);
                     EditorGUILayout.EndHorizontal();
                 }
             }
@@ -146,6 +141,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 foreach (var bp in _settings.buildProfiles)
                 {
                     EditorGUILayout.BeginHorizontal();
+                    GUIContent icon = PlatformIconUtility.GetPlatformIcon(
+                        bp.buildConfiguration.platform);
+                    if (icon != null && icon.image != null)
+                        GUILayout.Label(icon, GUILayout.Width(22),
+                            GUILayout.Height(22));
+
                     string prev = BuildNameResolver.Resolve(
                         bp.buildNameTemplate?.template ?? "{app-version}",
                         bp, _settings);
@@ -159,7 +160,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private void DrawFull()
         {
-            _tab = GUILayout.Toolbar(_tab, TabNames);
+            DrawCustomTabBar(ref _tab, TabNames);
             GUILayout.Space(8);
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
@@ -208,7 +209,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.enabled = true;
                 if (c.IsValid && GUILayout.Button("Switch",
                         GUILayout.Width(60)))
-                    SceneSwitcher.SwitchToCombination(c);
+                    SceneSwitcher.SwitchToCombination(c, activeSet);
                 EditorGUILayout.EndHorizontal();
             }
         }
@@ -240,6 +241,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             foreach (var bp in _settings.buildProfiles)
             {
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+                GUIContent icon = PlatformIconUtility.GetPlatformIcon(
+                    bp.buildConfiguration.platform);
+                if (icon != null && icon.image != null)
+                    GUILayout.Label(icon, GUILayout.Width(24),
+                        GUILayout.Height(24));
+
                 EditorGUILayout.BeginVertical();
                 EditorGUILayout.LabelField(bp.profileName,
                     EditorStyles.boldLabel);
@@ -261,6 +269,63 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             string[] r = new string[rest.Length + 1];
             r[0] = first; Array.Copy(rest, 0, r, 1, rest.Length);
             return r;
+        }
+
+        private void DrawCustomTabBar(ref int selectedTab, string[] tabNames)
+        {
+            EditorGUILayout.BeginHorizontal();
+            for (int i = 0; i < tabNames.Length; i++)
+            {
+                bool isActive = selectedTab == i;
+
+                Color oldBg = GUI.backgroundColor;
+                Color oldContent = GUI.contentColor;
+
+                if (isActive)
+                {
+                    GUI.backgroundColor = new Color(0.25f, 0.45f, 0.75f, 1f);
+                    GUI.contentColor = Color.white;
+                }
+                else
+                {
+                    GUI.backgroundColor = Color.clear;
+                    GUI.contentColor = new Color(0.6f, 0.6f, 0.6f);
+                }
+
+                GUIStyle tabStyle = new(GUI.skin.button)
+                {
+                    fixedHeight = 24f,
+                    padding = new RectOffset(12, 12, 2, 2),
+                    margin = new RectOffset(1, 1, 2, 0),
+                    fontSize = 11,
+                    fontStyle = isActive ? FontStyle.Bold : FontStyle.Normal,
+                    normal = { background = Texture2D.whiteTexture },
+                    border = new RectOffset(0, 0, 0, 0)
+                };
+
+                Rect btnRect = GUILayoutUtility.GetRect(
+                    new GUIContent(tabNames[i]), tabStyle,
+                    GUILayout.ExpandWidth(false));
+
+                if (isActive)
+                {
+                    Rect accentRect = new(
+                        btnRect.x, btnRect.yMax - 2f,
+                        btnRect.width, 2f);
+                    EditorGUI.DrawRect(accentRect,
+                        new Color(0.3f, 0.6f, 1f));
+                }
+
+                if (GUI.Button(btnRect, tabNames[i], tabStyle))
+                    selectedTab = i;
+
+                GUI.backgroundColor = oldBg;
+                GUI.contentColor = oldContent;
+            }
+
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(2);
         }
     }
 }

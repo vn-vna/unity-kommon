@@ -22,6 +22,46 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private static float ClampH(float h) => Mathf.Min(MaxH, Mathf.Max(130f, h));
 
+        // ── Shared Hover Style ──────────────────────
+        private static GUIStyle _hoverLabelStyle;
+        private static bool _hoverStyleBuilt;
+
+        private static GUIStyle PopupRowStyle
+        {
+            get
+            {
+                if (!_hoverStyleBuilt) BuildHoverStyle();
+                return _hoverLabelStyle;
+            }
+        }
+
+        private static void BuildHoverStyle()
+        {
+            _hoverStyleBuilt = true;
+            _hoverLabelStyle = new GUIStyle(EditorStyles.label)
+            {
+                padding = new RectOffset(4, 4, 3, 3),
+                hover = new GUIStyleState
+                {
+                    textColor = Color.white,
+                    background = MakeTex(1, 1,
+                        new Color(0.25f, 0.5f, 0.85f, 0.5f))
+                }
+            };
+        }
+
+        private static Texture2D MakeTex(
+            int w, int h, Color col)
+        {
+            Color[] pix = new Color[w * h];
+            for (int i = 0; i < pix.Length; i++)
+                pix[i] = col;
+            Texture2D tex = new(w, h);
+            tex.SetPixels(pix);
+            tex.Apply();
+            return tex;
+        }
+
         public static PopupWindowContent CreateSceneSetDropdown(
             NoBuildSettings s,
             Action<SceneSet> onSet,
@@ -40,6 +80,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings s, Action<BuildProfile> onBuild)
         {
             return new BuildDropdownContent(s, onBuild);
+        }
+
+        public static PopupWindowContent CreatePlatformGridDropdown(
+            BuildTarget currentPlatform,
+            Action<BuildTarget> onPlatformSelected)
+        {
+            return new PlatformGridContent(currentPlatform, onPlatformSelected);
+        }
+
+        public static PopupWindowContent CreateDeviceSelectPopup(
+            Action<BuildExecutor.DeviceOption, string> onSelected)
+        {
+            return new DeviceSelectContent(onSelected);
         }
 
         // ══════════════════════════════════════════════════
@@ -97,7 +150,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         GUI.color = Color.white;
 
                         if (GUILayout.Button(Trunc(set.setName, 32),
-                                EditorStyles.label))
+                                PopupRowStyle))
                         {
                             _s.activeSceneSetIndex = i;
                             EditorUtility.SetDirty(_s);
@@ -156,7 +209,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         if (valid)
                         {
                             if (GUILayout.Button(Trunc(label, 38),
-                                    EditorStyles.label))
+                                    PopupRowStyle))
                             {
                                 _onCombo?.Invoke(c);
                                 editorWindow.Close();
@@ -233,7 +286,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         GUILayout.Width(20));
                     GUI.color = Color.white;
                     if (GUILayout.Button(Trunc(set.setName, 30),
-                            EditorStyles.label))
+                            PopupRowStyle))
                     {
                         _s.activeScriptDefinitionSetIndex = i;
                         EditorUtility.SetDirty(_s);
@@ -311,6 +364,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     foreach (var (p, _) in g)
                     {
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+                        GUIContent icon = PlatformIconUtility.GetPlatformIcon(
+                            p.buildConfiguration.platform);
+                        if (icon != null && icon.image != null)
+                            GUILayout.Label(icon, GUILayout.Width(22), GUILayout.Height(22));
+
                         EditorGUILayout.BeginVertical();
                         GUILayout.Label(Trunc(p.profileName, 30),
                             EditorStyles.boldLabel);
@@ -344,6 +403,227 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 {
                     SettingsService.OpenProjectSettings("Project/NoBuild");
                     editorWindow.Close();
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Platform Grid Dropdown
+        // ══════════════════════════════════════════════════
+
+        private sealed class PlatformGridContent : PopupWindowContent
+        {
+            private const int Columns = 3;
+            private const float TileWidth = 96f;
+            private const float TileHeight = 86f;
+            private const float IconSize = 48f;
+            private const float TilePad = 8f;
+
+            private readonly BuildTarget _currentPlatform;
+            private readonly Action<BuildTarget> _onPlatformSelected;
+            private readonly BuildTarget[] _platforms;
+
+            public PlatformGridContent(BuildTarget currentPlatform,
+                Action<BuildTarget> onPlatformSelected)
+            {
+                _currentPlatform = currentPlatform;
+                _onPlatformSelected = onPlatformSelected;
+                _platforms = PlatformIconUtility.AvailablePlatforms;
+            }
+
+            public override Vector2 GetWindowSize()
+            {
+                int rows = Mathf.CeilToInt(
+                    (float)_platforms.Length / Columns);
+                float width = Columns * (TileWidth + TilePad) + TilePad * 2f;
+                float height = rows * (TileHeight + TilePad) + TilePad * 2f
+                    + 28f; // header
+                return new Vector2(width, Mathf.Min(height, 400f));
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                EditorGUILayout.LabelField("Select Platform",
+                    EditorStyles.boldLabel);
+                GUILayout.Space(4);
+
+                for (int i = 0; i < _platforms.Length; i += Columns)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    for (int j = 0;
+                        j < Columns && i + j < _platforms.Length;
+                        j++)
+                    {
+                        BuildTarget platform = _platforms[i + j];
+                        bool isSelected = platform == _currentPlatform;
+                        DrawPlatformTile(platform, isSelected);
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+            }
+
+            private void DrawPlatformTile(
+                BuildTarget platform, bool isSelected)
+            {
+                GUIContent icon =
+                    PlatformIconUtility.GetPlatformIcon(platform);
+                string displayName =
+                    PlatformIconUtility.GetPlatformDisplayName(platform);
+
+                Rect bgRect = GUILayoutUtility.GetRect(
+                    TileWidth, TileHeight);
+
+                // Hover highlight
+                bool isHovered = bgRect.Contains(
+                    Event.current.mousePosition);
+                if (!isSelected && isHovered)
+                {
+                    EditorGUI.DrawRect(bgRect,
+                        new Color(0.35f, 0.5f, 0.75f,
+                            0.3f));
+                }
+
+                // Selection highlight
+                if (isSelected)
+                {
+                    EditorGUI.DrawRect(bgRect,
+                        new Color(0.2f, 0.4f, 0.7f, 0.45f));
+                }
+
+                // Icon centered in the tile
+                if (icon != null && icon.image != null)
+                {
+                    Rect iconRect = new(
+                        bgRect.x + (TileWidth - IconSize) / 2f,
+                        bgRect.y + 6f,
+                        IconSize, IconSize);
+                    GUI.DrawTexture(iconRect,
+                        icon.image, ScaleMode.ScaleToFit);
+                }
+
+                // Label below the icon
+                Rect labelRect = new(
+                    bgRect.x + 4f,
+                    bgRect.y + IconSize + 8f,
+                    TileWidth - 8f, 18f);
+                GUIStyle labelStyle = new(GUI.skin.label)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontSize = 10,
+                    fontStyle = isSelected
+                        ? FontStyle.Bold
+                        : FontStyle.Normal,
+                    wordWrap = true
+                };
+                GUI.Label(labelRect, displayName, labelStyle);
+
+                // Click detection on the whole tile
+                if (Event.current.type == EventType.MouseDown
+                    && bgRect.Contains(
+                        Event.current.mousePosition))
+                {
+                    _onPlatformSelected?.Invoke(platform);
+                    editorWindow.Close();
+                    Event.current.Use();
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Device Select Popup (Build & Run)
+        // ══════════════════════════════════════════════════
+
+        private sealed class DeviceSelectContent : PopupWindowContent
+        {
+            private readonly Action<
+                BuildExecutor.DeviceOption, string> _onSelected;
+            private List<AdbDeviceInfo> _devices;
+
+            public DeviceSelectContent(
+                Action<BuildExecutor.DeviceOption, string>
+                    onSelected)
+            {
+                _onSelected = onSelected;
+                _devices = AdbUtility.GetDevices();
+            }
+
+            public override Vector2 GetWindowSize()
+            {
+                int rows = 2 // First Device + All Devices
+                    + _devices.Count;
+                float h = HeaderH + rows * RowH + FooterH + Pad;
+                return new Vector2(MinW, ClampH(h));
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                DrawHdr("Build & Run",
+                    "Select target device(s).");
+
+                if (_devices.Count == 0)
+                {
+                    DrawEmpty("No devices connected.",
+                        "Connect via USB or start an emulator.");
+                    return;
+                }
+
+                // ── First Device ──
+                EditorGUILayout.BeginHorizontal(
+                    EditorStyles.helpBox);
+                if (GUILayout.Button(
+                        "\u25B6 First Device",
+                        PopupRowStyle))
+                {
+                    _onSelected?.Invoke(
+                        BuildExecutor.DeviceOption
+                            .FirstDevice, null);
+                    editorWindow.Close();
+                }
+                GUILayout.Label(_devices[0].DisplayName,
+                    EditorStyles.miniLabel);
+                EditorGUILayout.EndHorizontal();
+
+                // ── All Devices ──
+                EditorGUILayout.BeginHorizontal(
+                    EditorStyles.helpBox);
+                if (GUILayout.Button(
+                        "All Devices",
+                        PopupRowStyle))
+                {
+                    _onSelected?.Invoke(
+                        BuildExecutor.DeviceOption
+                            .AllDevices, null);
+                    editorWindow.Close();
+                }
+                GUILayout.Label(
+                    $"{_devices.Count} device(s)",
+                    EditorStyles.miniLabel);
+                EditorGUILayout.EndHorizontal();
+                GUILayout.Space(2);
+
+                // ── Individual Devices ──
+                EditorGUILayout.LabelField(
+                    "Specific Device",
+                    EditorStyles.miniLabel);
+                for (int i = 0; i < _devices.Count; i++)
+                {
+                    var d = _devices[i];
+                    EditorGUILayout.BeginHorizontal(
+                        EditorStyles.helpBox);
+                    if (GUILayout.Button(
+                            Trunc(d.DisplayName, 30),
+                            PopupRowStyle))
+                    {
+                        _onSelected?.Invoke(
+                            BuildExecutor.DeviceOption
+                                .SpecificDevice,
+                            d.Serial);
+                        editorWindow.Close();
+                    }
+                    GUILayout.Label(d.Serial,
+                        EditorStyles.miniLabel,
+                        GUILayout.Width(120));
+                    EditorGUILayout.EndHorizontal();
                 }
             }
         }

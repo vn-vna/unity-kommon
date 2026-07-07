@@ -70,6 +70,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         [Tooltip("Split application binary.")]
         public bool androidSplitBinary;
 
+#if UNITY_ANDROID
+        [Tooltip("Debug symbol level: None, SymbolTable (public), or Full (debugging).")]
+        public Unity.Android.Types.DebugSymbolLevel debugSymbolLevel =
+            Unity.Android.Types.DebugSymbolLevel.None;
+
+        [Tooltip(
+            "Symbol output format (flags):\n" +
+            "  Zip = separate symbols.zip\n" +
+            "  IncludeInBundle = embed in bundle\n" +
+            "  LegacyExtensions = .so.dbg extension style"
+        )]
+        public Unity.Android.Types.DebugSymbolFormat debugSymbolFormat =
+            Unity.Android.Types.DebugSymbolFormat.Zip |
+            Unity.Android.Types.DebugSymbolFormat.IncludeInBundle;
+#endif
+
         [Tooltip("Target architectures.")]
         public AndroidArchitecture androidTargetArchitecture = AndroidArchitecture.ARM64;
 
@@ -97,24 +113,28 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
     {
         [Tooltip(
             "Template for the build output file/folder name. Supported placeholders:\n" +
-            "  {git-commit}       → 7-char short hash\n" +
-            "  {git-commit-full}  → full 40-char hash\n" +
-            "  {git-branch}       → current branch name\n" +
-            "  {app-version}      → Application.version\n" +
-            "  {app-bundle}       → Android bundleVersionCode or iOS buildNumber\n" +
-            "  {platform}         → BuildTarget name (e.g., 'Android')\n" +
-            "  {profile-name}     → Name of this BuildProfile\n" +
-            "  {date}             → yyyy-MM-dd\n" +
-            "  {time}             → HHmmss\n" +
-            "  {datetime}         → yyyy-MM-dd_HHmmss\n" +
-            "  {script-defines}   → Enabled defines, comma-separated\n" +
-            "  {scene-set}        → Name of the associated scene set"
+            "  {git-commit}        → 7-char short hash\n" +
+            "  {git-commit-full}   → full 40-char hash\n" +
+            "  {git-branch}        → current branch name\n" +
+            "  {app-version}       → Application.version\n" +
+            "  {app-bundle}        → Android bundleVersionCode or iOS buildNumber\n" +
+            "  {platform}          → BuildTarget name (e.g., 'Android')\n" +
+            "  {profile-name}      → Name of this BuildProfile\n" +
+            "  {project-name}      → Project folder name\n" +
+            "  {project-root}      → Raw project root path\n" +
+            "  {project-root-norm} → Project root with slashes as underscores\n" +
+            "  {date}              → yyyy-MM-dd\n" +
+            "  {time}              → HHmmss\n" +
+            "  {datetime}          → yyyy-MM-dd_HHmmss\n" +
+            "  {script-defines}    → Enabled defines, comma-separated\n" +
+            "  {scene-set}         → Name of the associated scene set"
         )]
-        public string template = "{app-version}_{platform}_{date}";
+        public string template =
+            "{platform}-{project-name}-{app-version}@{app-bundle}-{profile-name}";
 
         public bool HasCustomTemplate =>
             !string.IsNullOrEmpty(template) &&
-            template != "{app-version}_{platform}_{date}";
+            template != "{platform}-{project-name}-{app-version}@{app-bundle}-{profile-name}";
     }
 
     /// <summary>
@@ -142,10 +162,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         [Tooltip(
             "Output folder for builds. Supports placeholders.\n" +
-            "e.g., '{project-root}/Builds/{platform}/{app-version}'")]
+            "e.g., '{project-root}/Build/{platform}/{app-version}'")]
         public BuildNameTemplate buildFolder = new()
         {
-            template = "{project-root}/Builds/{platform}"
+            template = "{project-root}/Build/{platform}"
         };
 
         // ══════════════════════════════════════════════════

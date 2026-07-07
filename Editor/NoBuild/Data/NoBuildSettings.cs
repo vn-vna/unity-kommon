@@ -26,16 +26,20 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         [Tooltip("All configured build profiles.")]
         public List<BuildProfile> buildProfiles = new();
 
+        [Header("Flags")]
+        [Tooltip(
+            "Conditional build-name fragments. Each flag checks a " +
+            "script define and emits trueFlag or falseFlag into " +
+            "the {flags} placeholder."
+        )]
+        public List<FlagDefinition> flagDefinitions = new();
+
         [Header("Active State")]
         [Tooltip("Index of the currently active scene set (-1 = none).")]
         public int activeSceneSetIndex = -1;
 
         [Tooltip("Index of the currently active script definition set (-1 = none).")]
         public int activeScriptDefinitionSetIndex = -1;
-
-        [Header("Shortcuts")]
-        [Tooltip("When disabled, all NoBuild keyboard shortcuts are suppressed.")]
-        public bool shortcutsEnabled = true;
 
         // ══════════════════════════════════════════════════
         // ── Properties

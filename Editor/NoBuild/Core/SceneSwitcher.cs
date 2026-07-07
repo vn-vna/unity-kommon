@@ -59,15 +59,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         }
 
         /// <summary>
-        /// Opens all scenes in the combination. First valid scene is opened as single
-        /// (closing others), remaining are loaded additively. The first scene is set active.
+        /// Opens all scenes in the combination, resolving <see cref="SceneReference"/>
+        /// indices against the given parent <see cref="SceneSet"/>.
+        /// First valid scene is opened as single (closing others),
+        /// remaining are loaded additively. The first scene is set active.
         /// </summary>
-        public static void SwitchToCombination(SceneCombination combination)
+        public static void SwitchToCombination(
+            SceneCombination combination,
+            SceneSet parentSet)
         {
             if (combination == null) { FireFailed("Combination is null."); return; }
-            var valid = combination.scenes
-                .Where(s => s != null && s.enabled && s.IsValid)
-                .ToList();
+            if (parentSet == null) { FireFailed("Parent SceneSet is null."); return; }
+
+            var valid = combination.ResolveScenes(parentSet);
 
             if (valid.Count == 0)
             {

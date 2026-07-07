@@ -190,63 +190,98 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
         }
 
-        /// <summary>
-        /// Builds and runs on an Android device. If multiple devices are connected,
-        /// shows a picker. Remembers the last-used device.
-        /// </summary>
-        public static void BuildAndRun(BuildProfile profile)
+        /// <summary>Device selection mode for Build &amp; Run.</summary>
+        public enum DeviceOption
         {
-            if (profile.buildConfiguration.platform != BuildTarget.Android)
+            FirstDevice,
+            AllDevices,
+            SpecificDevice
+        }
+
+        /// <summary>
+        /// Build, install, and run on one or more Android devices.
+        /// </summary>
+        public static void BuildAndRunWithOptions(
+            BuildProfile profile,
+            DeviceOption deviceOption,
+            string specificSerial = null)
+        {
+            if (profile.buildConfiguration.platform
+                != BuildTarget.Android)
             {
                 EditorUtility.DisplayDialog("NoBuild",
-                    "Build & Run currently only supports Android.", "OK");
+                    "Build & Run currently only supports Android.",
+                    "OK");
                 return;
             }
 
-            // Build first
-            Build(profile);
+            // 1 ── Build ─────────────────────
+            bool wasAab =
+                EditorUserBuildSettings.buildAppBundle;
+            try
+            {
+                // Force APK for install
+                EditorUserBuildSettings.buildAppBundle =
+                    false;
 
-            // Check for devices
+                Build(profile);
+            }
+            finally
+            {
+                EditorUserBuildSettings.buildAppBundle =
+                    wasAab;
+            }
+
+            // 2 ── Get devices ──────────────
             var devices = AdbUtility.GetDevices();
             if (devices.Count == 0)
             {
                 EditorUtility.DisplayDialog("NoBuild",
-                    "No Android device connected via ADB.", "OK");
+                    "No Android device connected via ADB.",
+                    "OK");
                 return;
             }
 
-            string serial;
-            if (devices.Count == 1)
+            // 3 ── Select target devices ────
+            List<AdbDeviceInfo> targets = new();
+            switch (deviceOption)
             {
-                serial = devices[0].Serial;
-            }
-            else
-            {
-                // Show device picker
-                var menu = new GenericMenu();
-                foreach (var d in devices)
-                {
-                    var s = d.Serial;
-                    menu.AddItem(new GUIContent(d.DisplayName), false,
-                        () => InstallAndLaunch(profile, s));
-                }
-                menu.ShowAsContext();
-                return;
+                case DeviceOption.FirstDevice:
+                    targets.Add(devices[0]);
+                    break;
+                case DeviceOption.AllDevices:
+                    targets.AddRange(devices);
+                    break;
+                case DeviceOption.SpecificDevice:
+                    var match = devices.Find(
+                        d => d.Serial == specificSerial);
+                    if (match.Serial == null)
+                    {
+                        EditorUtility.DisplayDialog(
+                            "NoBuild",
+                            $"Device '{specificSerial}' " +
+                            "not found.",
+                            "OK");
+                        return;
+                    }
+                    targets.Add(match);
+                    break;
             }
 
-            InstallAndLaunch(profile, serial);
-        }
-
-        private static void InstallAndLaunch(BuildProfile profile, string deviceSerial)
-        {
-            // Resolve the built APK path
-            NoBuildSettings s = NoBuildResourceUtility.GetSettings();
+            // 4 ── Resolve APK path ─────────
+            NoBuildSettings s =
+                NoBuildResourceUtility.GetSettings();
             string folder = BuildNameResolver.Resolve(
-                profile.buildFolder?.template ?? "{project-root}/Builds",
+                profile.buildFolder?.template
+                    ?? "{project-root}/Build",
                 profile, s);
             string name = BuildNameResolver.Resolve(
-                profile.buildNameTemplate?.template ?? "{app-version}", profile, s);
-            string apkPath = Path.Combine(folder, name + ".apk");
+                profile.buildNameTemplate?.template
+                    ?? "{app-version}", profile, s);
+            string apkPath = Path.Combine(
+                folder,
+                name + GetPlatformExtension(
+                    profile.buildConfiguration.platform));
 
             if (!File.Exists(apkPath))
             {
@@ -255,23 +290,72 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 return;
             }
 
-            EditorUtility.DisplayProgressBar("NoBuild", "Installing APK...", 0.5f);
-            bool ok = AdbUtility.InstallApk(apkPath, deviceSerial);
-            EditorUtility.ClearProgressBar();
+            string packageName = AdbUtility.GetPackageName();
 
-            if (!ok)
+            // 5 ── Install + Launch per device
+            int successCount = 0;
+            int failCount = 0;
+
+            foreach (var device in targets)
             {
-                EditorUtility.DisplayDialog("NoBuild",
-                    "Failed to install APK on device.", "OK");
-                return;
+                EditorUtility.DisplayProgressBar(
+                    "NoBuild",
+                    $"Installing to {device.DisplayName}...",
+                    (float)successCount / targets.Count);
+
+                bool installed = AdbUtility.InstallApk(
+                    apkPath, device.Serial);
+                if (!installed)
+                {
+                    failCount++;
+                    Debug.LogError(
+                        $"[NoBuild] Install failed on " +
+                        $"{device.DisplayName}");
+                    continue;
+                }
+
+                bool launched = AdbUtility.LaunchApp(
+                    device.Serial, packageName);
+                if (launched)
+                {
+                    successCount++;
+                    Debug.Log(
+                        $"[NoBuild] Launched on " +
+                        $"{device.DisplayName} " +
+                        $"({device.Serial})");
+                    EditorPrefs.SetString(
+                        "NoBuild_LastAdbDevice",
+                        device.Serial);
+                }
+                else
+                {
+                    failCount++;
+                    Debug.LogError(
+                        $"[NoBuild] Launch failed on " +
+                        $"{device.DisplayName}");
+                }
             }
 
-            string pkg = AdbUtility.GetPackageName();
-            AdbUtility.LaunchApp(deviceSerial, pkg);
-            Debug.Log($"[NoBuild] Launched on {deviceSerial} ({pkg})");
+            EditorUtility.ClearProgressBar();
 
-            // Remember device
-            EditorPrefs.SetString("NoBuild_LastAdbDevice", deviceSerial);
+            // 6 ── Summary ─────────────────
+            if (failCount > 0 && successCount == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "NoBuild",
+                    $"Failed to install/launch on all " +
+                    $"{targets.Count} device(s).",
+                    "OK");
+            }
+            else if (failCount > 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "NoBuild",
+                    $"{successCount} device(s) succeeded, " +
+                    $"{failCount} failed.",
+                    "OK");
+            }
+            // All succeeded — silent (log only)
         }
 
         // ══════════════════════════════════════════════════
@@ -378,6 +462,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     EditorUserBuildSettings.buildAppBundle,
                 androidSplitBinary =
                     PlayerSettings.Android.splitApplicationBinary,
+#if UNITY_ANDROID
+                debugSymbolLevel =
+                    UnityEditor.Android.UserBuildSettings
+                        .DebugSymbols.level,
+                debugSymbolFormat =
+                    UnityEditor.Android.UserBuildSettings
+                        .DebugSymbols.format,
+#endif
 #endif
 #if UNITY_IOS
                 iosSymlinkFramework =
@@ -414,6 +506,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorUserBuildSettings.exportAsGoogleAndroidProject = config.androidExportProject;
             EditorUserBuildSettings.buildAppBundle = config.androidBuildAppBundle;
             PlayerSettings.Android.splitApplicationBinary = config.androidSplitBinary;
+#if UNITY_ANDROID
+            UnityEditor.Android.UserBuildSettings.DebugSymbols.level =
+                config.debugSymbolLevel;
+            UnityEditor.Android.UserBuildSettings.DebugSymbols.format =
+                config.debugSymbolFormat;
+#endif
 #endif
 
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE
@@ -460,6 +558,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = snapshot.androidExportProject;
                 EditorUserBuildSettings.buildAppBundle = snapshot.androidBuildAppBundle;
                 PlayerSettings.Android.splitApplicationBinary = snapshot.androidSplitBinary;
+#if UNITY_ANDROID
+                UnityEditor.Android.UserBuildSettings.DebugSymbols.level =
+                    snapshot.debugSymbolLevel;
+                UnityEditor.Android.UserBuildSettings.DebugSymbols.format =
+                    snapshot.debugSymbolFormat;
+#endif
 #endif
 #if UNITY_IOS
                 PlayerSettings.iOS.symlinkUnityLibraries = snapshot.iosSymlinkFramework;
@@ -481,18 +585,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             switch (target)
             {
                 case BuildTarget.Android:
-                    return "app.apk";
+                    return ".apk";
                 case BuildTarget.StandaloneWindows:
                 case BuildTarget.StandaloneWindows64:
-                    return "app.exe";
+                    return ".exe";
                 case BuildTarget.StandaloneOSX:
-                    return "app.app";
+                    return ".app";
                 case BuildTarget.iOS:
                     return ""; // iOS builds to a folder
                 case BuildTarget.WebGL:
                     return ""; // WebGL builds to a folder
                 default:
-                    return "app";
+                    return "";
             }
         }
 
@@ -522,6 +626,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             public bool androidExportProject;
             public bool androidBuildAppBundle;
             public bool androidSplitBinary;
+#if UNITY_ANDROID
+            public Unity.Android.Types.DebugSymbolLevel
+                debugSymbolLevel;
+            public Unity.Android.Types.DebugSymbolFormat
+                debugSymbolFormat;
+#endif
             public bool iosSymlinkFramework;
             public string iosTeamId;
             public bool iosAutomaticSigning;
