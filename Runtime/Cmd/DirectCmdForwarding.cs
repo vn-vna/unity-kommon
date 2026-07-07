@@ -85,18 +85,30 @@ namespace Com.Hapiga.Scheherazade.Common
             if (Instance != this || !_filePathInitialized)
                 return;
 
-            if (_pollEveryFrame)
+            if (GetPollEveryFrame())
             {
                 PollFile();
                 return;
             }
 
             _lastPollTime += Time.unscaledDeltaTime;
-            if (_lastPollTime >= _pollInterval)
+            if (_lastPollTime >= GetPollInterval())
             {
                 _lastPollTime = 0f;
                 PollFile();
             }
+        }
+
+        private bool GetPollEveryFrame()
+        {
+            DirectCmdSettings settings = DirectCmdSettings.Instance;
+            return settings != null ? settings.PollEveryFrame : _pollEveryFrame;
+        }
+
+        private float GetPollInterval()
+        {
+            DirectCmdSettings settings = DirectCmdSettings.Instance;
+            return settings != null ? settings.PollInterval : _pollInterval;
         }
 
         private void OnValidate()
