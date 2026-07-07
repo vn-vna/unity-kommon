@@ -88,10 +88,6 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
 
         static DependenciesDownloaderWindow()
         {
-#if UNITY_2020_3_OR_NEWER
-            PlayerSettings.insecureHttpOption =
-                InsecureHttpOption.AlwaysAllowed;
-#endif
             AssemblyReloadEvents.afterAssemblyReload += TryAutoFetch;
         }
 
