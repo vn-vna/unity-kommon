@@ -1,4 +1,6 @@
+using System;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using UnityEditor;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common
@@ -21,47 +23,58 @@ namespace Com.Hapiga.Scheherazade.Common
             RegisterAdsCommands();
             RegisterIapCommands();
             RegisterTrackingCommands();
+            RegisterAdminCommands();
         }
         #endregion
 
         #region Private Methods — Ads
         private static void RegisterAdsCommands()
         {
-            DirectCmdForwarding.RegisterCommand("ads")
-                .WithSubcommand("show", show =>
-                {
-                    show.WithSubcommand("banner", banner =>
-                        {
-                            banner.OnExecute((DirectCmdContext _) => HandleAdsBanner());
-                        })
-                        .WithSubcommand("interstitial", interstitial =>
-                        {
-                            interstitial
-                                .WithParameter<string>(
-                                    "placement", "p",
-                                    defaultValue: DefaultPlacement)
-                                .OnExecute(ctx => HandleAdsInterstitial(ctx));
-                        })
-                        .WithSubcommand("reward", reward =>
-                        {
-                            reward
-                                .WithParameter<string>(
-                                    "placement", "p",
-                                    defaultValue: DefaultPlacement)
-                                .OnExecute(ctx => HandleAdsReward(ctx));
-                        })
-                        .WithSubcommand("appopen", appopen =>
-                        {
-                            appopen
-                                .WithParameter<string>(
-                                    "placement", "p",
-                                    defaultValue: DefaultPlacement)
-                                .OnExecute(ctx => HandleAdsAppOpen(ctx));
-                        });
-                });
+            DirectCmdForwarding .RegisterCommand("ads")
+                .WithSubcommand("show", ConfigureAdShowCommand)
+                .DisablePositional();
         }
 
-        private static void HandleAdsBanner()
+        private static void ConfigureAdShowCommand(
+            DirectCmdCommandBuilder show
+        ) => show.WithSubcommand("banner", ConfigureAdShowBannerCommand)
+                .WithSubcommand("interstitial", ConfigureAdShowInterstitialCommand)
+                .WithSubcommand("reward", ConfigureAdShowRewardCommand)
+                .WithSubcommand("appopen", ConfigureAdShowAppOpenCommand)
+                .DisablePositional();
+
+        private static void ConfigureAdShowAppOpenCommand(
+            DirectCmdCommandBuilder appopen
+        ) 
+            => appopen
+                .WithParameter<string>(
+                    "placement", "p",
+                    defaultValue: DefaultPlacement)
+                .OnExecute(HandleAdsAppOpen);
+
+        private static void ConfigureAdShowRewardCommand(
+            DirectCmdCommandBuilder reward
+        ) => reward
+                .WithParameter<string>(
+                    "placement", "p",
+                    defaultValue: DefaultPlacement
+                )
+                .OnExecute(HandleAdsReward);
+
+        private static void ConfigureAdShowInterstitialCommand(
+            DirectCmdCommandBuilder interstitial
+        ) => interstitial
+                .WithParameter<string>(
+                    "placement", "p",
+                    defaultValue: DefaultPlacement
+                )
+                .OnExecute(HandleAdsInterstitial);
+
+        private static void ConfigureAdShowBannerCommand(
+            DirectCmdCommandBuilder banner
+        ) => banner.OnExecute(HandleAdsBanner);
+
+        private static void HandleAdsBanner(DirectCmdContext ctx)
         {
             if (!CheckAdsEnabled("ads show banner"))
                 return;
@@ -87,7 +100,7 @@ namespace Com.Hapiga.Scheherazade.Common
             }
 
             string placement = ctx.GetParam("placement", DefaultPlacement);
-            IntegrationGlobal.AdsManager.ShowInterstitialAds(null, placement);
+            IntegrationGlobal.AdsManager.ShowInterstitialAds(null, placement, true);
         }
 
         private static void HandleAdsReward(DirectCmdContext ctx)
@@ -125,14 +138,16 @@ namespace Com.Hapiga.Scheherazade.Common
         private static void RegisterIapCommands()
         {
             DirectCmdForwarding.RegisterCommand("iap")
-                .WithSubcommand("buy", buy =>
-                {
-                    buy
-                        .WithParameter<string>("product", required: true)
-                        .DisablePositional()
-                        .OnExecute(ctx => HandleIapBuy(ctx));
-                });
+                .WithSubcommand("buy", ConfigureIapBuyCommand)
+                .DisablePositional();
         }
+
+        private static void ConfigureIapBuyCommand(
+            DirectCmdCommandBuilder buy
+        ) => buy
+                .WithParameter<string>("product", required: true)
+                .DisablePositional()
+                .OnExecute(HandleIapBuy);
 
         private static void HandleIapBuy(DirectCmdContext ctx)
         {
@@ -161,31 +176,53 @@ namespace Com.Hapiga.Scheherazade.Common
         private static void RegisterTrackingCommands()
         {
             DirectCmdForwarding.RegisterCommand("tracking")
-                .WithSubcommand("enabled", enabled =>
-                {
-                    enabled.WithSubcommand("on", on =>
-                        {
-                            on.OnExecute((DirectCmdContext _) => HandleTrackingEnabled(true));
-                        })
-                        .WithSubcommand("off", off =>
-                        {
-                            off.OnExecute((DirectCmdContext _) => HandleTrackingEnabled(false));
-                        });
-                })
-                .WithSubcommand("filtered", filtered =>
-                {
-                    filtered.WithSubcommand("on", on =>
-                        {
-                            on.OnExecute((DirectCmdContext _) => HandleTrackingFiltered(true));
-                        })
-                        .WithSubcommand("off", off =>
-                        {
-                            off.OnExecute((DirectCmdContext _) => HandleTrackingFiltered(false));
-                        });
-                });
+                .WithSubcommand("enabled", ConfigureTrackingEnabledCommand)
+                .WithSubcommand("filtered", ConfigureTrackingFilteredCommand)
+                .DisablePositional();
         }
 
-        private static void HandleTrackingEnabled(bool enable)
+        private static void ConfigureTrackingEnabledCommand(
+            DirectCmdCommandBuilder enabled
+        ) => enabled
+                .WithSubcommand("on", ConfigureTrackingEnabledOnCommand)
+                .WithSubcommand("off", ConfigureTrackingEnabledOffCommand)
+                .DisablePositional();
+
+        private static void ConfigureTrackingEnabledOnCommand(
+            DirectCmdCommandBuilder on
+        ) => on.OnExecute(HandleTrackingEnabledOn);
+
+        private static void HandleTrackingEnabledOn(DirectCmdContext context)
+            => SetTrackingEnabledStatus(true);
+
+        private static void ConfigureTrackingEnabledOffCommand(
+            DirectCmdCommandBuilder off
+        ) => off.OnExecute(HandleTrackingEnabledOff);
+
+        private static void HandleTrackingEnabledOff(DirectCmdContext context)
+            => SetTrackingEnabledStatus(false);
+
+        private static void ConfigureTrackingFilteredCommand(
+            DirectCmdCommandBuilder filtered
+        ) => filtered
+                .WithSubcommand("on", ConfigureTrackingFilteredOnCommand)
+                .WithSubcommand("off", ConfigureTrackingFilteredOffCommand)
+                .DisablePositional();
+
+        private static void ConfigureTrackingFilteredOnCommand(
+            DirectCmdCommandBuilder on
+        ) => on.OnExecute(HandleConfigureTrackingFilteredOn);
+
+        private static void ConfigureTrackingFilteredOffCommand(
+            DirectCmdCommandBuilder off
+        ) => off.OnExecute(HandleConfigureTrackingFilteredOff);
+
+        private static void HandleConfigureTrackingFilteredOn(DirectCmdContext context)
+            => SetTrackingFilteredStatus(true);
+
+        private static void HandleConfigureTrackingFilteredOff(DirectCmdContext context)
+            => SetTrackingFilteredStatus(false);
+        private static void SetTrackingEnabledStatus(bool enable)
         {
             string label = enable ? "tracking enabled on" : "tracking enabled off";
 
@@ -204,7 +241,7 @@ namespace Com.Hapiga.Scheherazade.Common
                 enable ? "enabled" : "disabled");
         }
 
-        private static void HandleTrackingFiltered(bool enable)
+        private static void SetTrackingFilteredStatus(bool enable)
         {
             string label = enable ? "tracking filtered on" : "tracking filtered off";
 
@@ -239,6 +276,109 @@ namespace Com.Hapiga.Scheherazade.Common
                 QuickLog.Info<DirectCmdDefaultCommands>(
                     "Tracking filter disabled.");
             }
+        }
+        #endregion
+
+        #region Private Methods — Admin
+        private static void RegisterAdminCommands()
+        {
+            DirectCmdForwarding.RegisterCommand("admin")
+                .WithSubcommand("execute", ConfigureAdminExecuteCommand)
+                .DisablePositional();
+        }
+
+        private static void ConfigureAdminExecuteCommand(
+            DirectCmdCommandBuilder execute
+        ) => execute.OnExecute(HandleAdminExecute);
+
+        private static void HandleAdminExecute(DirectCmdContext ctx)
+        {
+            string methodPath = ctx.GetPositional(0);
+            if (string.IsNullOrWhiteSpace(methodPath))
+            {
+                QuickLog.Error<DirectCmdDefaultCommands>(
+                    "Missing method path. Usage: admin execute <Namespace.Class.Method>");
+                return;
+            }
+
+            int lastDot = methodPath.LastIndexOf('.');
+            if (lastDot <= 0 || lastDot >= methodPath.Length - 1)
+            {
+                QuickLog.Error<DirectCmdDefaultCommands>(
+                    "Invalid method path '{0}'. Expected: Namespace.Class.Method",
+                    methodPath);
+                return;
+            }
+
+            string typeName = methodPath.Substring(0, lastDot);
+            string methodName = methodPath.Substring(lastDot + 1);
+
+            try
+            {
+                System.Type type = ResolveType(typeName);
+                if (type == null)
+                {
+                    QuickLog.Error<DirectCmdDefaultCommands>(
+                        "Type '{0}' not found.", typeName);
+                    return;
+                }
+
+                System.Reflection.MethodInfo method = type.GetMethod(
+                    methodName,
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Static,
+                    null,
+                    System.Type.EmptyTypes,
+                    null);
+
+                if (method == null)
+                {
+                    QuickLog.Error<DirectCmdDefaultCommands>(
+                        "Static parameterless method '{0}' not found on '{1}'.",
+                        methodName,
+                        typeName);
+                    return;
+                }
+
+                method.Invoke(null, null);
+                QuickLog.Info<DirectCmdDefaultCommands>(
+                    "Executed '{0}.{1}'.",
+                    typeName,
+                    methodName);
+            }
+            catch (System.Reflection.TargetInvocationException ex)
+            {
+                QuickLog.Error<DirectCmdDefaultCommands>(
+                    "Exception in '{0}.{1}': {2}",
+                    typeName,
+                    methodName,
+                    ex.InnerException?.Message ?? ex.Message);
+            }
+            catch (System.Exception ex)
+            {
+                QuickLog.Error<DirectCmdDefaultCommands>(
+                    "Failed to execute '{0}.{1}': {2}",
+                    typeName,
+                    methodName,
+                    ex.Message);
+            }
+        }
+
+        private static System.Type ResolveType(string typeName)
+        {
+            System.Type type = System.Type.GetType(typeName);
+            if (type != null)
+                return type;
+
+            foreach (System.Reflection.Assembly asm in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = asm.GetType(typeName);
+                if (type != null)
+                    return type;
+            }
+
+            return null;
         }
         #endregion
 

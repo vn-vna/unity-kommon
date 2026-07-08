@@ -28,6 +28,8 @@ namespace Com.Hapiga.Scheherazade.Common
         private readonly Dictionary<string, DirectCmdRegistration> _registrations =
             new(StringComparer.OrdinalIgnoreCase);
 
+        private static readonly List<DirectCmdCommandBuilder> _pendingRoots = new();
+
         public static event Action FileFound;
         public static event Action FileProcessed;
 
@@ -37,7 +39,10 @@ namespace Com.Hapiga.Scheherazade.Common
                 throw new ArgumentException("Command name cannot be empty.", nameof(commandName));
 
             EnsureInstance();
-            return new DirectCmdCommandBuilder(commandName);
+
+            var builder = new DirectCmdCommandBuilder(commandName);
+            _pendingRoots.Add(builder);
+            return builder;
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -142,6 +147,24 @@ namespace Com.Hapiga.Scheherazade.Common
                 builder.CommandName,
                 builder.Parameters.Count,
                 builder.Subcommands.Count);
+
+            LogRegistrationTree(registration);
+        }
+
+        private static void LogRegistrationTree(DirectCmdRegistration reg, int depth = 0)
+        {
+            string indent = new string(' ', depth * 2);
+            QuickLog.Debug<DirectCmdForwarding>(
+                "{0}[{1}] subs={2}, callback={3}",
+                indent,
+                reg.CommandName,
+                reg.Subcommands.Count,
+                reg.Callback != null);
+
+            foreach (KeyValuePair<string, DirectCmdRegistration> kvp in reg.Subcommands)
+            {
+                LogRegistrationTree(kvp.Value, depth + 1);
+            }
         }
 
         private static DirectCmdRegistration ConvertToRegistration(DirectCmdCommandBuilder builder)
@@ -174,8 +197,23 @@ namespace Com.Hapiga.Scheherazade.Common
             go.AddComponent<DirectCmdForwarding>();
         }
 
+        private void FlushPendingRegistrations()
+        {
+            if (_pendingRoots.Count == 0)
+                return;
+
+            foreach (DirectCmdCommandBuilder root in _pendingRoots)
+            {
+                Register(root);
+            }
+
+            _pendingRoots.Clear();
+        }
+
         private void PollFile()
         {
+            FlushPendingRegistrations();
+
             if (!File.Exists(_filePath))
                 return;
 

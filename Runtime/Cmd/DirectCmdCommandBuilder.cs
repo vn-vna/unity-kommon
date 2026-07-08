@@ -123,7 +123,6 @@ namespace Com.Hapiga.Scheherazade.Common
                 throw new ArgumentNullException(nameof(callback));
 
             _callback = callback;
-            DirectCmdForwarding.Register(this);
         }
 
         private sealed class DirectCmdParameterImpl<T> : DirectCmdParameter<T>, IDirectCmdParameter
