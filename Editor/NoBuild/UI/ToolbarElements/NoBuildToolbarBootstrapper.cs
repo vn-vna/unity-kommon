@@ -171,7 +171,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.EndScrollView();
             GUILayout.Space(FootSpace);
             if (GUILayout.Button("Manage..."))
-            { SettingsService.OpenProjectSettings("Project/NoBuild"); editorWindow.Close(); }
+            { SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path); editorWindow.Close(); }
         }
 
         private void DrawSceneSets()

@@ -228,7 +228,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUILayout.Space(4);
                 if (GUILayout.Button("Manage..."))
                 {
-                    SettingsService.OpenProjectSettings("Project/NoBuild");
+                    SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
                     editorWindow.Close();
                 }
             }
@@ -306,7 +306,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUILayout.Space(4);
                 if (GUILayout.Button("Manage..."))
                 {
-                    SettingsService.OpenProjectSettings("Project/NoBuild");
+                    SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
                     editorWindow.Close();
                 }
             }
@@ -401,7 +401,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUILayout.Space(4);
                 if (GUILayout.Button("Manage..."))
                 {
-                    SettingsService.OpenProjectSettings("Project/NoBuild");
+                    SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
                     editorWindow.Close();
                 }
             }

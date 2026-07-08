@@ -13,7 +13,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 {
     public sealed class NoBuildSettingsProvider : SettingsProvider
     {
-        private const string Path = "Project/Tools/No Build";
+        public const string Path = "Project/Tools/No Build";
         private const float SidebarW = 190f;
         private const float LabelW = 130f;
         private const float EntryH = 26f;
