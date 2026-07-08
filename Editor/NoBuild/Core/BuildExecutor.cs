@@ -216,21 +216,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
 
             // 1 ── Build ─────────────────────
-            bool wasAab =
-                EditorUserBuildSettings.buildAppBundle;
-            try
-            {
-                // Force APK for install
-                EditorUserBuildSettings.buildAppBundle =
-                    false;
-
-                Build(profile);
-            }
-            finally
-            {
-                EditorUserBuildSettings.buildAppBundle =
-                    wasAab;
-            }
+            Build(profile);
 
             // 2 ── Get devices ──────────────
             var devices = AdbUtility.GetDevices();
@@ -268,7 +254,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     break;
             }
 
-            // 4 ── Resolve APK path ─────────
+            // 4 ── Resolve output path ──────
             NoBuildSettings s =
                 NoBuildResourceUtility.GetSettings();
             string folder = BuildNameResolver.Resolve(
@@ -278,16 +264,49 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             string name = BuildNameResolver.Resolve(
                 profile.buildNameTemplate?.template
                     ?? "{app-version}", profile, s);
-            string apkPath = Path.Combine(
-                folder,
-                name + GetPlatformExtension(
-                    profile.buildConfiguration.platform));
+            string extension = GetPlatformExtension(
+                profile.buildConfiguration.platform);
+            string outputPath = Path.Combine(
+                folder, name + extension);
 
-            if (!File.Exists(apkPath))
+            if (!File.Exists(outputPath))
             {
                 EditorUtility.DisplayDialog("NoBuild",
-                    $"APK not found at:\n{apkPath}", "OK");
+                    $"Build output not found at:\n"
+                    + $"{outputPath}", "OK");
                 return;
+            }
+
+            bool isAab = extension.Equals(
+                ".aab", StringComparison.OrdinalIgnoreCase);
+
+            string installPath = outputPath;
+            string tempApksPath = null;
+
+            // If AAB, convert to APKS for installation
+            if (isAab)
+            {
+                try
+                {
+                    EditorUtility.DisplayProgressBar(
+                        "NoBuild — AAB Conversion",
+                        "Converting AAB to APKS...", 0f);
+                    tempApksPath =
+                        AabUtility.BuildApks(outputPath);
+                }
+                catch (Exception ex)
+                {
+                    EditorUtility.DisplayDialog(
+                        "NoBuild — AAB Conversion Failed",
+                        ex.Message, "OK");
+                    return;
+                }
+                finally
+                {
+                    EditorUtility.ClearProgressBar();
+                }
+
+                installPath = tempApksPath;
             }
 
             string packageName = AdbUtility.GetPackageName();
@@ -303,8 +322,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     $"Installing to {device.DisplayName}...",
                     (float)successCount / targets.Count);
 
-                bool installed = AdbUtility.InstallApk(
-                    apkPath, device.Serial);
+                bool installed;
+                if (isAab)
+                {
+                    installed = AabUtility.InstallApks(
+                        tempApksPath, device.Serial);
+                }
+                else
+                {
+                    installed = AdbUtility.InstallApk(
+                        installPath, device.Serial);
+                }
+
                 if (!installed)
                 {
                     failCount++;
@@ -335,6 +364,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         $"{device.DisplayName}");
                 }
             }
+
+            // Cleanup temp APKS
+            if (isAab && tempApksPath != null)
+                AabUtility.Cleanup(tempApksPath);
 
             EditorUtility.ClearProgressBar();
 
@@ -585,7 +618,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             switch (target)
             {
                 case BuildTarget.Android:
-                    return ".apk";
+                    return EditorUserBuildSettings.buildAppBundle
+                        ? ".aab" : ".apk";
                 case BuildTarget.StandaloneWindows:
                 case BuildTarget.StandaloneWindows64:
                     return ".exe";
