@@ -13,24 +13,70 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 {
     public sealed class DirectCmdForwardingWindow : EditorWindow
     {
-        private enum TargetMode
-        {
-            EditorPlayMode,
-            AndroidAdb
-        }
-
+        #region Constants
         private const string FileName = "__dcf__";
         private const string PrefTargetMode = "Scheherazade.DCF.TargetMode";
         private const string PrefPackageId = "Scheherazade.DCF.PackageId";
         private const string PrefLastCommands = "Scheherazade.DCF.LastCommands";
         private const string PrefSelectedDevice = "Scheherazade.DCF.SelectedDevice";
         private const string PrefHistory = "Scheherazade.DCF.History";
+        private const string PrefExternalStorageCache = "Scheherazade.DCF.ExternalStorageCache";
         private const int MaxHistory = 50;
         private const int DefaultAdbTimeoutMs = 15000;
+        private const int MaxDetectedApps = 200;
+        #endregion
 
+        #region Enums & Nested Types
+        private enum TargetMode
+        {
+            EditorPlayMode,
+            AndroidAdb
+        }
+
+        private enum AppDetectionState
+        {
+            Idle,
+            Detecting,
+            Detected,
+            Error
+        }
+
+        [Serializable]
+        private sealed class DetectedAppInfo
+        {
+            public string packageId;
+            public string dataPath;
+            public bool dataPathExists;
+            public string displayLabel;
+        }
+
+        [Serializable]
+        private sealed class DetectionCacheData
+        {
+            public string deviceSerial;
+            public string externalStoragePath;
+            public List<string> detectedPackageIds = new();
+        }
+
+        [Serializable]
+        private sealed class HistoryData
+        {
+            public List<string> entries = new();
+        }
+
+        private sealed class AdbResult
+        {
+            public int ExitCode { get; set; }
+            public string StandardOutput { get; set; }
+            public string StandardError { get; set; }
+        }
+        #endregion
+
+        #region Serialized & Private Fields
         private TargetMode _targetMode;
         private string _commands = string.Empty;
         private Vector2 _commandsScrollPos;
+        private Vector2 _historyScrollPos;
 
         private List<RoapDeviceInfo> _devices = new();
         private int _selectedDeviceIndex = -1;
@@ -46,13 +92,24 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
         private string _adbPath;
 
+        // Auto-detection fields
+        private AppDetectionState _detectionState = AppDetectionState.Idle;
+        private List<DetectedAppInfo> _detectedApps = new();
+        private string _detectedExternalStoragePath;
+        private bool _showHistoryPanel;
+
+        // Per-session external storage cache (device serial -> path)
+        private static readonly Dictionary<string, string> s_externalStorageCache = new();
+        #endregion
+
+        #region Unity Callbacks
         [MenuItem("Dev Menu/Tools/Direct Cmd Forwarding")]
         public static void ShowWindow()
         {
             GetWindow<DirectCmdForwardingWindow>("Direct Cmd Forwarding");
         }
 
-        private void OnEnable()
+private void OnEnable()
         {
             _targetMode = (TargetMode)EditorPrefs.GetInt(PrefTargetMode, (int)TargetMode.EditorPlayMode);
             _packageId = EditorPrefs.GetString(PrefPackageId, PlayerSettings.GetApplicationIdentifier(BuildTargetGroup.Android));
@@ -60,12 +117,13 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             _selectedDeviceIndex = EditorPrefs.GetInt(PrefSelectedDevice, -1);
 
             LoadHistory();
+            LoadDetectionCache();
 
             ResolveAdbPath();
             RefreshDevicesAsync();
         }
 
-        private void OnDisable()
+private void OnDisable()
         {
             EditorPrefs.SetInt(PrefTargetMode, (int)_targetMode);
             EditorPrefs.SetString(PrefPackageId, _packageId);
@@ -74,92 +132,203 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
             if (_historyDirty)
                 SaveHistory();
+
+            PersistDetectionCache();
         }
 
         private void OnGUI()
         {
-            EditorGUILayout.Space(8f);
+            GuiStyles.EnsureInitialized();
 
-            DrawHeader();
+            DrawModernHeader();
             EditorGUILayout.Space(4f);
-            DrawTargetSection();
-            EditorGUILayout.Space(4f);
+            DrawTargetSelector();
+            EditorGUILayout.Space(6f);
 
             if (_targetMode == TargetMode.AndroidAdb)
             {
-                DrawAndroidSection();
-                EditorGUILayout.Space(4f);
+                DrawAndroidDevicePanel();
+                EditorGUILayout.Space(6f);
             }
 
-            DrawCommandsSection();
-            EditorGUILayout.Space(8f);
-            DrawSendSection();
-            EditorGUILayout.Space(4f);
-            DrawStatusBox();
-        }
+            DrawCommandEditor();
 
-        private void DrawHeader()
-        {
-            EditorGUILayout.LabelField("Direct Cmd Forwarding", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(
-                $"Sends debug commands via {FileName} file. One command per line.",
-                EditorStyles.miniLabel);
-        }
-
-        private void DrawTargetSection()
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Target", EditorStyles.boldLabel);
-
-            TargetMode newMode = (TargetMode)EditorGUILayout.EnumPopup("Target", _targetMode);
-            if (newMode != _targetMode)
+            if (_showHistoryPanel && _history.Count > 0)
             {
-                _targetMode = newMode;
+                EditorGUILayout.Space(4f);
+                DrawHistoryPanel();
+            }
+
+            EditorGUILayout.Space(8f);
+            DrawActionBar();
+        }
+        #endregion
+
+        #region Public Methods
+        #endregion
+
+        #region UI - Header & Target
+        private void DrawModernHeader()
+        {
+            EditorGUILayout.BeginHorizontal(GUILayout.ExpandHeight(true));
+
+            GUIContent icon = EditorGUIUtility.IconContent("d_UnityEditor.ConsoleWindow");
+            GUILayout.Label(icon, GUILayout.Width(22f), GUILayout.Height(22f));
+
+            EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField("Direct Cmd Forwarding", GuiStyles.HeaderTitle);
+            EditorGUILayout.LabelField("Scheherazade debugging tool", GuiStyles.HeaderSubtitle);
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndVertical();
+
+            GUILayout.FlexibleSpace();
+
+            string badgeText = _targetMode == TargetMode.EditorPlayMode
+                ? "\u25CF  Editor"
+                : "\u25CF  Android ADB";
+            Color badgeColor = _targetMode == TargetMode.EditorPlayMode
+                ? new Color(0.3f, 0.7f, 0.3f)
+                : new Color(0.3f, 0.5f, 0.9f);
+
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = badgeColor;
+            EditorGUILayout.LabelField(badgeText, GuiStyles.Badge, GUILayout.Width(90f));
+            GUI.backgroundColor = oldBg;
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+private void DrawTargetSelector()
+        {
+            EditorGUILayout.BeginVertical(GuiStyles.Card);
+            EditorGUILayout.LabelField("Target Mode", GuiStyles.SectionHeader);
+
+            EditorGUILayout.BeginHorizontal();
+
+            bool isEditor = _targetMode == TargetMode.EditorPlayMode;
+            Color oldBg = GUI.backgroundColor;
+            if (isEditor)
+                GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f, 0.7f);
+
+            if (GUILayout.Toggle(
+                    isEditor,
+                    "  \u25B6  Editor Play Mode",
+                    isEditor ? GuiStyles.ModeButtonActive : GuiStyles.ModeButtonInactive,
+                    GUILayout.Height(28f))
+                && !isEditor)
+            {
+                _targetMode = TargetMode.EditorPlayMode;
                 _statusMessage = string.Empty;
             }
 
+            GUI.backgroundColor = oldBg;
+
+            bool isAdb = _targetMode == TargetMode.AndroidAdb;
+            oldBg = GUI.backgroundColor;
+            if (isAdb)
+                GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f, 0.7f);
+
+            if (GUILayout.Toggle(
+                    isAdb,
+                    "  \u25C9  Android ADB",
+                    isAdb ? GuiStyles.ModeButtonActive : GuiStyles.ModeButtonInactive,
+                    GUILayout.Height(28f))
+                && !isAdb)
+            {
+                _targetMode = TargetMode.AndroidAdb;
+                _statusMessage = string.Empty;
+            }
+
+            GUI.backgroundColor = oldBg;
+
+            EditorGUILayout.EndHorizontal();
+
             if (_targetMode == TargetMode.EditorPlayMode)
             {
-                EditorGUI.BeginDisabledGroup(true);
-                EditorGUILayout.TextField("Persistent Path", GetEditorPersistentPath());
-                EditorGUI.EndDisabledGroup();
+                EditorGUILayout.Space(4f);
+                DrawInlinePathField("Persistent Path", GetEditorPersistentPath());
 
                 if (!Application.isPlaying)
                 {
                     EditorGUILayout.HelpBox(
-                        "Editor is not in Play Mode. Commands sent will be consumed when Play Mode starts.",
+                        "\u26A0  Editor is not in Play Mode. Commands will be consumed on next Play.",
+                        MessageType.Warning);
+                }
+                else
+                {
+                    DrawInlineStatusIcon(true, "Play Mode active \u2014 commands consumed in real-time.");
+                }
+            }
+            else if (_targetMode == TargetMode.AndroidAdb
+                && !string.IsNullOrEmpty(_packageId)
+                && _selectedDeviceIndex >= 0)
+            {
+                EditorGUILayout.Space(4f);
+                string deviceSerial = _devices[_selectedDeviceIndex].Serial;
+                string storage = GetExternalStorageForDevice(deviceSerial);
+                string resolvedPath = BuildAppDataPath(storage, _packageId);
+                DrawInlinePathField("Persistent Path", resolvedPath);
+
+                if (_selectedDeviceIndex < 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "\u26A0  No device selected. Commands cannot be sent.",
                         MessageType.Warning);
                 }
             }
 
             EditorGUILayout.EndVertical();
         }
+        #endregion
 
-        private void DrawAndroidSection()
+        #region UI - Android Device Panel
+private void DrawAndroidDevicePanel()
         {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Android ADB", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical(GuiStyles.Card);
 
-            EditorGUILayout.LabelField("ADB Path", string.IsNullOrEmpty(_adbPath) ? "Not found" : _adbPath, EditorStyles.miniLabel);
+            DrawAndroidPanelHeader();
+            DrawDeviceSelector();
+            DrawPackageIdRow();
+            DrawResolvedPath();
 
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawAndroidPanelHeader()
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Android Device", GuiStyles.SectionHeader);
+            GUILayout.FlexibleSpace();
+
+            bool adbAvailable = !string.IsNullOrEmpty(_adbPath);
+            DrawInlineStatusIcon(adbAvailable,
+                adbAvailable ? "ADB ready" : "ADB not found");
+
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
+            EditorGUI.BeginDisabledGroup(_isSending);
+            if (GUILayout.Button(
+                    "\u21BB  Refresh",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(80f)))
+            {
+                RefreshDevicesAsync();
+            }
+            EditorGUI.EndDisabledGroup();
+            GUI.backgroundColor = oldBg;
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+private void DrawDeviceSelector()
+        {
             EditorGUILayout.BeginHorizontal();
 
-            string[] deviceNames = new string[_devices.Count];
-            for (int i = 0; i < _devices.Count; i++)
-                deviceNames[i] = _devices[i].DisplayName;
-
-            if (_devices.Count == 0)
-                deviceNames = new[] { "No devices found" };
-
-            int displayIndex = _devices.Count > 0 ? _selectedDeviceIndex + 1 : 0;
-            if (_selectedDeviceIndex < 0 || _selectedDeviceIndex >= _devices.Count)
-                displayIndex = 0;
-
-            int newDisplayIndex;
             if (_devices.Count == 0)
             {
                 EditorGUI.BeginDisabledGroup(true);
-                newDisplayIndex = EditorGUILayout.Popup("Device", 0, deviceNames);
+                EditorGUILayout.Popup(0, new[] { "No devices found" });
                 EditorGUI.EndDisabledGroup();
             }
             else
@@ -169,133 +338,359 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 for (int i = 0; i < _devices.Count; i++)
                     options[i + 1] = _devices[i].DisplayName;
 
-                newDisplayIndex = EditorGUILayout.Popup("Device", displayIndex, options);
+                int displayIndex = Mathf.Clamp(_selectedDeviceIndex + 1, 0, options.Length - 1);
+                int newDisplay = EditorGUILayout.Popup(displayIndex, options);
 
-                if (newDisplayIndex != displayIndex)
-                    _selectedDeviceIndex = newDisplayIndex - 1;
+                if (newDisplay != displayIndex)
+                {
+                    _selectedDeviceIndex = newDisplay - 1;
+                    _detectionState = AppDetectionState.Idle;
+                }
             }
 
-            EditorGUI.BeginDisabledGroup(_isSending);
-            if (GUILayout.Button("Refresh", GUILayout.Width(64f)))
-                RefreshDevicesAsync();
-            EditorGUI.EndDisabledGroup();
-
-            EditorGUILayout.EndHorizontal();
-
-            string newPackageId = EditorGUILayout.TextField("Package ID", _packageId);
-            if (newPackageId != _packageId)
+            if (_devices.Count > 0)
             {
-                _packageId = newPackageId;
-                _selectedDeviceIndex = -1;
-            }
-
-            if (string.IsNullOrEmpty(_packageId))
-            {
-                EditorGUILayout.HelpBox("Package ID is required for Android target.", MessageType.Warning);
+                Color oldBg = GUI.backgroundColor;
+                GUI.backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.6f);
+                EditorGUILayout.LabelField(
+                    _devices.Count.ToString(),
+                    GuiStyles.Badge,
+                    GUILayout.Width(22f));
+                GUI.backgroundColor = oldBg;
             }
 
             bool canExport = !string.IsNullOrEmpty(_packageId) && _selectedDeviceIndex >= 0;
             EditorGUI.BeginDisabledGroup(!canExport);
-            if (GUILayout.Button("Export ADB Command...", GUILayout.Height(22f)))
+            Color oldBg2 = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.4f, 0.4f, 0.4f);
+            if (GUILayout.Button(
+                    "Export...",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(60f)))
             {
                 RoapDeviceInfo device = _devices[_selectedDeviceIndex];
-                AdbCommandExportWindow.Show(device.Serial, _packageId, _commands);
+                string storage = GetExternalStorageForDevice(device.Serial);
+                string remoteDir = BuildAppDataPath(storage, _packageId);
+                AdbCommandExportWindow.Show(device.Serial, _packageId, _commands, remoteDir);
             }
+            GUI.backgroundColor = oldBg2;
             EditorGUI.EndDisabledGroup();
 
-            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawCommandsSection()
+private void DrawPackageIdRow()
         {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
+            EditorGUILayout.Space(4f);
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Commands", EditorStyles.boldLabel);
-            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField("Package ID", GUILayout.Width(80f));
 
-            EditorGUI.BeginDisabledGroup(_history.Count == 0);
-            if (GUILayout.Button("Clear History", EditorStyles.miniButton, GUILayout.Width(90f)))
-                ClearHistory();
+            string newPkg = EditorGUILayout.TextField(_packageId);
+            if (newPkg != _packageId)
+            {
+                _packageId = newPkg;
+                _detectionState = AppDetectionState.Idle;
+            }
+
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
+            bool canDetect = _detectionState != AppDetectionState.Detecting
+                && _selectedDeviceIndex >= 0
+                && !string.IsNullOrEmpty(_packageId);
+            EditorGUI.BeginDisabledGroup(!canDetect);
+            if (GUILayout.Button(
+                    _detectionState == AppDetectionState.Detecting
+                        ? "\u23F3 Detecting..."
+                        : "\uD83D\uDD0D Auto Detect",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(110f)))
+            {
+                DetectAppsAsync();
+            }
             EditorGUI.EndDisabledGroup();
+            GUI.backgroundColor = oldBg;
+
             EditorGUILayout.EndHorizontal();
+        }
 
+
+
+
+
+        private void DrawResolvedPath()
+        {
+            if (string.IsNullOrEmpty(_packageId) || _selectedDeviceIndex < 0)
+                return;
+
+            EditorGUILayout.Space(4f);
+            string deviceSerial = _devices[_selectedDeviceIndex].Serial;
+            string storage = GetExternalStorageForDevice(deviceSerial);
+            string resolvedPath = BuildAppDataPath(storage, _packageId);
+
+            DrawInlinePathField("Remote Path", resolvedPath);
+        }
+        #endregion
+
+        #region UI - Command Editor
+        private void DrawCommandEditor()
+        {
+            EditorGUILayout.BeginVertical(GuiStyles.Card);
+
+            DrawCommandEditorHeader();
             EditorGUILayout.LabelField(
-                "Syntax: command_name --param value -p value positional_arg",
-                EditorStyles.miniLabel);
+                "Format:  command_name --param value -p value positional_arg  (one per line)",
+                GuiStyles.InlineStatus);
 
-            DrawHistorySelector();
+
 
             _commandsScrollPos = EditorGUILayout.BeginScrollView(
                 _commandsScrollPos,
-                GUILayout.MinHeight(120f),
-                GUILayout.MaxHeight(240f));
+                GUILayout.MinHeight(140f),
+                GUILayout.MaxHeight(260f));
 
             _commands = EditorGUILayout.TextArea(
                 _commands,
+                GuiStyles.CommandArea,
                 GUILayout.ExpandHeight(true));
 
             EditorGUILayout.EndScrollView();
+
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawHistorySelector()
+        private void DrawCommandEditorHeader()
         {
-            if (_history.Count == 0)
-                return;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Commands", GuiStyles.SectionHeader);
+            GUILayout.FlexibleSpace();
+
+            int lineCount = string.IsNullOrEmpty(_commands)
+                ? 0
+                : _commands.Split(new[] { '\n' }, StringSplitOptions.None).Length;
+
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.35f, 0.35f, 0.35f);
+            EditorGUILayout.LabelField(
+                $"{lineCount} line{(lineCount != 1 ? "s" : "")}",
+                GuiStyles.Badge,
+                GUILayout.Width(56f));
+            GUI.backgroundColor = oldBg;
+
+            EditorGUI.BeginDisabledGroup(_history.Count == 0);
+            oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = _showHistoryPanel
+                ? new Color(0.3f, 0.55f, 0.9f)
+                : new Color(0.4f, 0.4f, 0.4f);
+            if (GUILayout.Button(
+                    "\u2630 History",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(70f)))
+            {
+                _showHistoryPanel = !_showHistoryPanel;
+            }
+            GUI.backgroundColor = oldBg;
+
+            oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.7f, 0.3f, 0.3f);
+            if (GUILayout.Button(
+                    "\u2715 Clear",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(60f)))
+            {
+                ClearHistory();
+            }
+            GUI.backgroundColor = oldBg;
+            EditorGUI.EndDisabledGroup();
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawHistoryPanel()
+        {
+            EditorGUILayout.BeginVertical(GuiStyles.Card);
 
             EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("History", GuiStyles.SectionHeader);
 
-            string[] historyOptions = new string[_history.Count + 1];
-            historyOptions[0] = "-- History --";
+            Color bg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.4f, 0.4f, 0.4f);
+            if (GUILayout.Button("Hide", EditorStyles.miniButton, GUILayout.Width(50f)))
+                _showHistoryPanel = false;
+            GUI.backgroundColor = bg;
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(2f);
+
+            _historyScrollPos = EditorGUILayout.BeginScrollView(
+                _historyScrollPos,
+                GUILayout.MinHeight(80f),
+                GUILayout.MaxHeight(300f));
+
             for (int i = 0; i < _history.Count; i++)
+                DrawHistoryEntry(i, _history[i]);
+
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawHistoryEntry(int index, string entry)
+        {
+            string preview = TruncateToLines(entry, 3, 72);
+
+            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField(
+                preview,
+                GuiStyles.HistoryEntry,
+                GUILayout.ExpandWidth(true));
+            EditorGUILayout.EndVertical();
+
+            if (GUILayout.Button(
+                    "\u21A9",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(26f),
+                    GUILayout.Height(26f)))
             {
-                string entry = _history[i];
-                string preview = entry.Length > 72
-                    ? entry.Substring(0, 72) + "..."
-                    : entry;
-                historyOptions[i + 1] = preview;
+                _commands = entry;
+                GUI.FocusControl(null);
             }
 
-            int displayedIndex = _selectedHistoryIndex + 1;
-            int newDisplayedIndex = EditorGUILayout.Popup("History", displayedIndex, historyOptions);
-
-            if (newDisplayedIndex != displayedIndex)
+            if (GUILayout.Button(
+                    "+",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(22f),
+                    GUILayout.Height(26f)))
             {
-                _selectedHistoryIndex = newDisplayedIndex - 1;
-                if (_selectedHistoryIndex >= 0 && _selectedHistoryIndex < _history.Count)
-                {
-                    _commands = _history[_selectedHistoryIndex];
-                    GUI.FocusControl(null);
-                }
+                if (string.IsNullOrEmpty(_commands))
+                    _commands = entry;
+                else
+                    _commands = _commands.TrimEnd() + "\n" + entry;
+                GUI.FocusControl(null);
             }
 
             EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawSendSection()
+        private static string TruncateToLines(string text, int maxLines, int maxLineWidth)
+        {
+            if (string.IsNullOrEmpty(text))
+                return string.Empty;
+
+            string[] lines = text.Split(
+                new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+
+            foreach (string line in lines)
+            {
+                if (count >= maxLines)
+                {
+                    sb.Append("...");
+                    break;
+                }
+
+                string trimmed = line.TrimEnd();
+                if (count > 0)
+                    sb.AppendLine();
+
+                if (trimmed.Length > maxLineWidth)
+                    sb.Append(trimmed.Substring(0, maxLineWidth - 3) + "...");
+                else
+                    sb.Append(trimmed);
+
+                count++;
+            }
+
+            return sb.ToString();
+        }
+        #endregion
+
+        #region UI - Action Bar & Helpers
+        private void DrawActionBar()
         {
             bool canSend = !_isSending;
             if (_targetMode == TargetMode.AndroidAdb)
-                canSend = canSend && !string.IsNullOrEmpty(_packageId) && _selectedDeviceIndex >= 0;
+            {
+                canSend = canSend
+                    && !string.IsNullOrEmpty(_packageId)
+                    && _selectedDeviceIndex >= 0;
+            }
+
+            EditorGUILayout.BeginVertical(GuiStyles.Card);
 
             EditorGUI.BeginDisabledGroup(!canSend);
+            Color oldBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(0.25f, 0.65f, 0.25f);
 
-            string buttonLabel = _isSending ? "Sending..." : "Send Commands";
-            if (GUILayout.Button(buttonLabel, GUILayout.Height(32f)))
+            string buttonLabel = _isSending
+                ? "\u23F3 Sending..."
+                : "\u25B6  Send Commands";
+            if (GUILayout.Button(buttonLabel, GUILayout.Height(40f)))
                 SendCommands();
 
+            GUI.backgroundColor = oldBg;
             EditorGUI.EndDisabledGroup();
+
+            if (!string.IsNullOrEmpty(_statusMessage))
+            {
+                Color statusColor = _statusType switch
+                {
+                    MessageType.Error => new Color(0.95f, 0.4f, 0.4f),
+                    MessageType.Warning => new Color(0.95f, 0.85f, 0.3f),
+                    _ => new Color(0.5f, 0.85f, 0.5f)
+                };
+
+                GUIStyle statusStyle = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    normal = { textColor = statusColor },
+                    alignment = TextAnchor.MiddleCenter,
+                    wordWrap = true,
+                    padding = new RectOffset(8, 8, 4, 4)
+                };
+                EditorGUILayout.LabelField(_statusMessage, statusStyle);
+            }
+
+            EditorGUILayout.EndVertical();
         }
 
-        private void DrawStatusBox()
+        private static void DrawInlinePathField(string label, string path)
         {
-            if (string.IsNullOrEmpty(_statusMessage))
-                return;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(80f));
+            EditorGUI.BeginDisabledGroup(true);
+            EditorGUILayout.TextField(path);
+            EditorGUI.EndDisabledGroup();
 
-            EditorGUILayout.HelpBox(_statusMessage, _statusType);
+            if (GUILayout.Button(
+                    "\uD83D\uDCCB",
+                    EditorStyles.miniButton,
+                    GUILayout.Width(26f)))
+            {
+                GUIUtility.systemCopyBuffer = path;
+            }
+            EditorGUILayout.EndHorizontal();
         }
 
+        private static void DrawInlineStatusIcon(bool isOk, string message)
+        {
+            string symbol = isOk ? "\u25CF" : "\u25CB";
+            Color color = isOk
+                ? new Color(0.3f, 0.8f, 0.3f)
+                : new Color(0.8f, 0.4f, 0.3f);
+
+            Color oldColor = GUI.color;
+            GUI.color = color;
+            EditorGUILayout.LabelField(
+                $"{symbol}  {message}",
+                GuiStyles.InlineStatus);
+            GUI.color = oldColor;
+        }
+        #endregion
+
+        #region Command Send Pipeline
         private async void SendCommands()
         {
             if (_isSending)
@@ -370,9 +765,9 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 return false;
             }
 
-            string tempFile = Path.GetTempFileName();
-            string remoteDir = $"/sdcard/Android/data/{_packageId}/files";
+            string remoteDir = ResolveRemoteDirectory(serial);
             string remotePath = $"{remoteDir}/{FileName}";
+            string tempFile = Path.GetTempFileName();
 
             try
             {
@@ -380,7 +775,9 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
                 await RunAdbAsync(serial, $"shell mkdir -p {remoteDir}");
 
-                AdbResult result = await RunAdbAsync(serial, $"push \"{tempFile}\" \"{remotePath}\"");
+                AdbResult result = await RunAdbAsync(
+                    serial,
+                    $"push \"{tempFile}\" \"{remotePath}\"");
 
                 if (result.ExitCode != 0)
                 {
@@ -413,6 +810,168 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             }
         }
 
+        /// <summary>
+        /// Resolves the remote data directory, preferring the auto-detected
+        /// external storage path. Falls back to /sdcard if unavailable.
+        /// </summary>
+        private string ResolveRemoteDirectory(string serial)
+        {
+            string storage = GetExternalStorageForDevice(serial);
+            return BuildAppDataPath(storage, _packageId);
+        }
+
+        private string GetExternalStorageForDevice(string serial)
+        {
+            if (s_externalStorageCache.TryGetValue(serial, out string cached))
+                return cached;
+
+            return _detectedExternalStoragePath ?? "/sdcard";
+        }
+        #endregion
+
+        #region Auto-Detection Pipeline
+private async void DetectAppsAsync()
+        {
+            if (_detectionState == AppDetectionState.Detecting)
+                return;
+
+            if (_selectedDeviceIndex < 0 || _selectedDeviceIndex >= _devices.Count)
+                return;
+
+            RoapDeviceInfo device = _devices[_selectedDeviceIndex];
+            _detectionState = AppDetectionState.Detecting;
+            _detectedApps.Clear();
+            _statusMessage = "Detecting...";
+            _statusType = MessageType.Info;
+            Repaint();
+
+            try
+            {
+                string externalStorage = await DetectExternalStorageAsync(device.Serial);
+                if (string.IsNullOrEmpty(externalStorage))
+                {
+                    _detectionState = AppDetectionState.Error;
+                    _statusMessage = "Failed to detect external storage path.";
+                    _statusType = MessageType.Error;
+                    Repaint();
+                    return;
+                }
+
+                string dataPath = BuildAppDataPath(externalStorage, _packageId);
+
+                _detectedApps.Add(new DetectedAppInfo
+                {
+                    packageId = _packageId,
+                    dataPath = dataPath,
+                    dataPathExists = false,
+                    displayLabel = $"{_packageId}  \u279C  {dataPath}"
+                });
+
+                _detectionState = AppDetectionState.Detected;
+                _statusMessage = $"Resolved: {dataPath}";
+                _statusType = MessageType.Info;
+
+                PersistDetectionCache();
+            }
+            catch (TimeoutException)
+            {
+                _detectionState = AppDetectionState.Error;
+                _statusMessage = "ADB command timed out. Check device connection.";
+                _statusType = MessageType.Error;
+            }
+            catch (Exception ex)
+            {
+                _detectionState = AppDetectionState.Error;
+                _statusMessage = $"Detection failed: {ex.Message}";
+                _statusType = MessageType.Error;
+            }
+            finally
+            {
+                Repaint();
+            }
+        }
+
+        private async Task<string> DetectExternalStorageAsync(string serial)
+        {
+            if (s_externalStorageCache.TryGetValue(serial, out string cached))
+                return cached;
+
+            AdbResult result = await RunAdbAsync(
+                serial,
+                "shell \"echo $EXTERNAL_STORAGE\"");
+
+            if (result.ExitCode != 0)
+                return string.Empty;
+
+            string path = result.StandardOutput?.Trim();
+            if (!string.IsNullOrEmpty(path))
+            {
+                s_externalStorageCache[serial] = path;
+                _detectedExternalStoragePath = path;
+            }
+            return path ?? string.Empty;
+        }
+
+        private static string BuildAppDataPath(string externalStorage, string packageId)
+        {
+            string root = (externalStorage ?? "/sdcard").TrimEnd('/');
+            return $"{root}/Android/data/{packageId}/files";
+        }
+        #endregion
+
+        #region Detection Persistence
+        private void PersistDetectionCache()
+        {
+            if (_selectedDeviceIndex < 0 || _selectedDeviceIndex >= _devices.Count)
+                return;
+
+            string serial = _devices[_selectedDeviceIndex].Serial;
+            if (!s_externalStorageCache.TryGetValue(serial, out string storage))
+                return;
+
+            try
+            {
+                DetectionCacheData cache = new DetectionCacheData
+                {
+                    deviceSerial = serial,
+                    externalStoragePath = storage,
+                    detectedPackageIds = new List<string>()
+                };
+
+                foreach (DetectedAppInfo app in _detectedApps)
+                    cache.detectedPackageIds.Add(app.packageId);
+
+                EditorPrefs.SetString(PrefExternalStorageCache, JsonUtility.ToJson(cache));
+            }
+            catch
+            {
+                // Non-critical persistence; suppress errors.
+            }
+        }
+
+        private void LoadDetectionCache()
+        {
+            try
+            {
+                string json = EditorPrefs.GetString(PrefExternalStorageCache, string.Empty);
+                if (string.IsNullOrEmpty(json))
+                    return;
+
+                DetectionCacheData cache = JsonUtility.FromJson<DetectionCacheData>(json);
+                if (cache == null || string.IsNullOrEmpty(cache.externalStoragePath))
+                    return;
+
+                s_externalStorageCache[cache.deviceSerial] = cache.externalStoragePath;
+                _detectedExternalStoragePath = cache.externalStoragePath;
+            }
+            catch
+            {
+                // Non-critical load; use defaults.
+            }
+        }
+        #endregion
+
+        #region Device & ADB
         private async void RefreshDevicesAsync()
         {
             _isSending = true;
@@ -465,7 +1024,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             string sdkRoot = GetUnityAndroidSdkRoot();
             if (!string.IsNullOrWhiteSpace(sdkRoot))
             {
-                string sdkCandidate = Path.Combine(sdkRoot, "platform-tools", executableName);
+                string sdkCandidate = Path.Combine(
+                    sdkRoot, "platform-tools", executableName);
                 if (File.Exists(sdkCandidate))
                 {
                     _adbPath = sdkCandidate;
@@ -553,7 +1113,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
         {
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                Type settingsType = assembly.GetType("UnityEditor.Android.AndroidExternalToolsSettings");
+                Type settingsType = assembly.GetType(
+                    "UnityEditor.Android.AndroidExternalToolsSettings");
                 if (settingsType == null)
                     continue;
 
@@ -588,7 +1149,9 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             path = null;
             return false;
         }
+        #endregion
 
+        #region History Management
         private void LoadHistory()
         {
             try
@@ -627,7 +1190,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             if (string.IsNullOrEmpty(commands))
                 return;
 
-            _history.RemoveAll(e => string.Equals(e, commands, StringComparison.Ordinal));
+            _history.RemoveAll(
+                e => string.Equals(e, commands, StringComparison.Ordinal));
             _history.Insert(0, commands);
 
             if (_history.Count > MaxHistory)
@@ -646,39 +1210,121 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
             _historyDirty = true;
             EditorPrefs.DeleteKey(PrefHistory);
         }
+        #endregion
 
-        [Serializable]
-        private sealed class HistoryData
+        #region Nested Types - GuiStyles
+        private static class GuiStyles
         {
-            public List<string> entries = new();
-        }
+            public static GUIStyle HeaderTitle { get; private set; }
+            public static GUIStyle HeaderSubtitle { get; private set; }
+            public static GUIStyle SectionHeader { get; private set; }
+            public static GUIStyle Card { get; private set; }
+            public static GUIStyle Badge { get; private set; }
+            public static GUIStyle InlineStatus { get; private set; }
+            public static GUIStyle ModeButtonActive { get; private set; }
+            public static GUIStyle ModeButtonInactive { get; private set; }
+            public static GUIStyle CommandArea { get; private set; }
+            public static GUIStyle HistoryEntry { get; private set; }
 
-        private sealed class AdbResult
-        {
-            public int ExitCode { get; set; }
-            public string StandardOutput { get; set; }
-            public string StandardError { get; set; }
-        }
 
+            private static bool _initialized;
+
+            public static void EnsureInitialized()
+            {
+                if (_initialized)
+                    return;
+                _initialized = true;
+
+                HeaderTitle = new GUIStyle(EditorStyles.boldLabel)
+                {
+                    fontSize = 14,
+                    padding = new RectOffset(6, 6, 4, 2),
+                    normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
+                };
+
+                HeaderSubtitle = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    padding = new RectOffset(8, 8, 0, 4),
+                    normal = { textColor = new Color(0.55f, 0.55f, 0.55f) }
+                };
+
+                SectionHeader = new GUIStyle(EditorStyles.boldLabel)
+                {
+                    fontSize = 12,
+                    padding = new RectOffset(0, 0, 4, 4),
+                    normal = { textColor = new Color(0.8f, 0.85f, 0.9f) }
+                };
+
+                Card = new GUIStyle(EditorStyles.helpBox)
+                {
+                    padding = new RectOffset(10, 10, 8, 8),
+                    margin = new RectOffset(4, 4, 2, 2)
+                };
+
+                Badge = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    padding = new RectOffset(6, 6, 2, 2),
+                    fontSize = 10
+                };
+
+                InlineStatus = new GUIStyle(EditorStyles.miniLabel)
+                {
+                    richText = true,
+                    padding = new RectOffset(4, 4, 2, 2)
+                };
+
+                ModeButtonActive = new GUIStyle(EditorStyles.miniButton)
+                {
+                    normal = { textColor = Color.white },
+                    fontStyle = FontStyle.Bold
+                };
+
+                ModeButtonInactive = new GUIStyle(EditorStyles.miniButton)
+                {
+                    normal = { textColor = new Color(0.55f, 0.55f, 0.55f) }
+                };
+
+                CommandArea = new GUIStyle(EditorStyles.textArea)
+                {
+                    font = EditorStyles.standardFont,
+                    fontSize = 12,
+                    padding = new RectOffset(8, 8, 6, 6),
+                    wordWrap = false
+                };
+
+                HistoryEntry = new GUIStyle(EditorStyles.label)
+                {
+                    fontSize = 11,
+                    wordWrap = true,
+                    padding = new RectOffset(4, 4, 2, 2),
+                    normal = { textColor = new Color(0.75f, 0.75f, 0.75f) }
+                };
+
+            }
+        }
+        #endregion
+
+        #region Nested Types - AdbCommandExportWindow
         private sealed class AdbCommandExportWindow : EditorWindow
         {
             private string _fullContent = string.Empty;
-            private string _tempFileFullContent = string.Empty;
-            private string _oneLinerFullContent = string.Empty;
             private string _rawCommand = string.Empty;
             private string _fileContent = string.Empty;
             private Vector2 _scrollPos;
             private string _copyStatus = string.Empty;
-            private bool _isOneLiner;
 
-            public static void Show(string deviceSerial, string packageId, string commands)
+            public static void Show(
+                string deviceSerial,
+                string packageId,
+                string commands,
+                string remoteDir)
             {
                 AdbCommandExportWindow window = GetWindow<AdbCommandExportWindow>(
                     true, "Export ADB Command");
                 window.minSize = new Vector2(420f, 320f);
                 window.maxSize = new Vector2(700f, 600f);
 
-                string remoteDir = $"/sdcard/Android/data/{packageId}/files";
                 string remotePath = $"{remoteDir}/{FileName}";
 
                 string fileContent = string.IsNullOrWhiteSpace(commands)
@@ -691,34 +1337,36 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 window._rawCommand =
                     $"adb -s {deviceSerial} shell \"mkdir -p {remoteDir} && echo '{base64Content}' | base64 -d > {remotePath}\"";
 
-                StringBuilder oneLinerSb = new();
-                oneLinerSb.AppendLine("=== Executable Command ===");
-                oneLinerSb.Append(window._rawCommand);
-                oneLinerSb.AppendLine();
-                oneLinerSb.AppendLine();
-                oneLinerSb.AppendLine("=== Embedded File Content ===");
-                oneLinerSb.Append(fileContent);
+                StringBuilder fullContentSb = new();
+                fullContentSb.AppendLine("=== Executable Command ===");
+                fullContentSb.Append(window._rawCommand);
+                fullContentSb.AppendLine();
+                fullContentSb.AppendLine();
+                fullContentSb.AppendLine("=== Embedded File Content ===");
+                fullContentSb.Append(fileContent);
 
-                window._oneLinerFullContent = oneLinerSb.ToString();
+                window._fullContent = fullContentSb.ToString();
                 window._fileContent = fileContent;
-                window._fullContent = oneLinerSb.ToString();
-                window._isOneLiner = true;
             }
 
             private void OnGUI()
             {
                 EditorGUILayout.Space(4f);
-                EditorGUILayout.LabelField("ADB Command Export", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    "ADB Command Export",
+                    EditorStyles.boldLabel);
 
                 EditorGUILayout.Space(2f);
 
                 EditorGUILayout.LabelField(
-                    "Copy and paste the command below into your terminal — it executes immediately.",
+                    "Copy and paste the command below into your terminal \u2014 it executes immediately.",
                     EditorStyles.miniLabel);
 
                 EditorGUILayout.Space(4f);
 
-                _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos, GUILayout.ExpandHeight(true));
+                _scrollPos = EditorGUILayout.BeginScrollView(
+                    _scrollPos,
+                    GUILayout.ExpandHeight(true));
                 EditorGUI.BeginDisabledGroup(true);
                 EditorGUILayout.TextArea(
                     _fullContent,
@@ -731,12 +1379,14 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 if (GUILayout.Button("Copy Command", GUILayout.Height(32f)))
                 {
                     GUIUtility.systemCopyBuffer = _rawCommand;
-                    _copyStatus = "Command copied — paste in terminal and press Enter.";
+                    _copyStatus = "Command copied \u2014 paste in terminal and press Enter.";
                 }
 
                 EditorGUILayout.Space(2f);
 
-                if (GUILayout.Button("Copy File Content", EditorStyles.miniButton))
+                if (GUILayout.Button(
+                        "Copy File Content",
+                        EditorStyles.miniButton))
                 {
                     GUIUtility.systemCopyBuffer = _fileContent;
                     _copyStatus = "File content copied to clipboard.";
@@ -749,5 +1399,6 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
                 }
             }
         }
+        #endregion
     }
 }
