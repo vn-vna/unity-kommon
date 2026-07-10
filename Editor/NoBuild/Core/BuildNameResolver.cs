@@ -191,6 +191,20 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     return match.Value;
                 }
 
+                // ── {git-commit:<submodule>} dynamic ──
+                if (TryParseGitCommit(key, out string submoduleName))
+                {
+                    return GitUtility.GetSubmoduleCommit(
+                        submoduleName);
+                }
+
+                // ── {git-commit-full:<submodule>} dynamic ──
+                if (TryParseGitCommitFull(key, out submoduleName))
+                {
+                    return GitUtility.GetSubmoduleFullCommit(
+                        submoduleName);
+                }
+
                 if (Resolvers.TryGetValue(
                         key,
                         out Func<BuildProfile, NoBuildSettings, string> resolver))
@@ -322,6 +336,49 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             if (string.IsNullOrEmpty(path)) return path;
             return path.Replace('\\', '/');
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Git Submodule Helpers
+        // ══════════════════════════════════════════════════
+
+        private const string GitCommitPrefix =
+            "git-commit:";
+        private const string GitCommitFullPrefix =
+            "git-commit-full:";
+
+        private static bool TryParseGitCommit(
+            string key, out string submoduleName)
+        {
+            if (key.StartsWith(
+                    GitCommitPrefix,
+                    StringComparison.OrdinalIgnoreCase)
+                && key.Length > GitCommitPrefix.Length)
+            {
+                submoduleName = key.Substring(
+                    GitCommitPrefix.Length).Trim();
+                return true;
+            }
+
+            submoduleName = null;
+            return false;
+        }
+
+        private static bool TryParseGitCommitFull(
+            string key, out string submoduleName)
+        {
+            if (key.StartsWith(
+                    GitCommitFullPrefix,
+                    StringComparison.OrdinalIgnoreCase)
+                && key.Length > GitCommitFullPrefix.Length)
+            {
+                submoduleName = key.Substring(
+                    GitCommitFullPrefix.Length).Trim();
+                return true;
+            }
+
+            submoduleName = null;
+            return false;
         }
     }
 }

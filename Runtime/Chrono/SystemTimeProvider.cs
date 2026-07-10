@@ -1,12 +1,17 @@
 using System;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Chrono
 {
-    public class SystemTimeProvider : ITimeProvider
+    [CreateAssetMenu(fileName = "SystemTimeProvider", menuName = "Scheherazade/Chrono/System Time Provider")]
+    public class SystemTimeProvider : TimeProviderBase
     {
-        public DateTime Now => DateTime.Now;
-        public DateTime Today => DateTime.Today;
-        public DateTime UtcNow => DateTime.UtcNow;
-        public DateTime Epoch => DateTime.UnixEpoch;
+        public override DateTime Now => DateTime.Now;
+
+        public override DateTime Today => DateTime.Today;
+
+        public override DateTime UtcNow => DateTime.UtcNow;
+
+        public override DateTime Epoch => DateTime.UnixEpoch;
     }
 }

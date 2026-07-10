@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Singleton;
 using UnityEngine;
@@ -10,173 +9,242 @@ namespace Com.Hapiga.Scheherazade.Common.Chrono
     public class ChronoDirector : SingletonBehavior<ChronoDirector>
     {
         #region Constants
-        public static string DK_LastOnlineKey => "last_online";
-        #endregion
-
-        #region Interfaces
-        public DateTime? LastOnlineTime
-        {
-            get
-            {
-                string storedData = PlayerPrefs.GetString(DK_LastOnlineKey, null);
-                if (DateTime.TryParse(storedData, out var lastOnline))
-                {
-                    return lastOnline;
-                }
-                return null;
-            }
-            set
-            {
-                if (value.HasValue)
-                {
-                    PlayerPrefs.SetString(DK_LastOnlineKey, value.Value.ToString("o"));
-                }
-                else
-                {
-                    PlayerPrefs.DeleteKey(DK_LastOnlineKey);
-                }
-            }
-        }
-
-        public DateTime? LastSessionEndTime { get; private set; }
-
-        public ITimeProvider TimeProvider => _timeProvider;
-        public long CurrentUnixTimepoint => ((DateTimeOffset)TimeProvider.UtcNow).ToUnixTimeMilliseconds();
+        private const string DK_LastOnlineKey = "last_online";
         #endregion
 
         #region Serialized Fields
-        [SerializeField]
-        private float onlineMarkerTickDuration = 3000.0f; // 3 seconds
+        [SerializeField] private ChronoConfiguration _config;
         #endregion
 
         #region Private Fields
         private ITimeProvider _timeProvider;
-        private HashSet<IChronoManagedAction> _actions;
-        private Queue<IChronoManagedAction> _removalAction;
+
+        private IChronoPersister _persister;
+
+        private List<TimerEntry> _timers;
+
         private float _onlineMarkerTimer;
         #endregion
 
-        #region Unity Events
+        #region Unity Callbacks
         protected override void Awake()
         {
             base.Awake();
-            _actions = new HashSet<IChronoManagedAction>();
-            _removalAction = new Queue<IChronoManagedAction>();
-            LastSessionEndTime = LastOnlineTime;
+            _timers = new List<TimerEntry>();
+            InitializeProviders();
         }
 
-        void Update()
+        private void Update()
         {
-            UpdateOnlineTimeMarker();
+            float deltaTime = Time.deltaTime;
 
-            if (_timeProvider is IArtificialTimeProvider atp)
+            if (_timeProvider is ISettableTimeProvider settable)
             {
-                atp.AdvanceTime(TimeSpan.FromSeconds(Time.deltaTime));
+                settable.AdvanceTime(TimeSpan.FromSeconds(deltaTime));
             }
 
-            foreach (var action in _actions)
+            if (_timeProvider is ITickableTimeProvider tickable)
             {
-                action.Tick();
+                tickable.Tick(deltaTime);
             }
 
-            while (_removalAction.Count > 0)
-            {
-                var action = _removalAction.Dequeue();
-                if (action == null) continue;
-
-                if (!_actions.Contains(action)) continue;
-
-                _actions.Remove(action);
-            }
+            UpdateOnlineTimeMarker(deltaTime);
+            TickTimers(deltaTime);
         }
         #endregion
 
-        #region Methods
-        public void UseTimeProvider(ITimeProvider timeProvider)
+        #region Public Methods (instance)
+        public ITimeProvider TimeProvider => _timeProvider ?? new SystemTimeProvider();
+
+        public void SetTimeProvider(ITimeProvider provider)
         {
-            _timeProvider = timeProvider;
+            _timeProvider = provider ?? new SystemTimeProvider();
+        }
+        #endregion
+
+        #region Public Methods (static)
+        public static DateTime Now =>
+            Instance != null && Instance._timeProvider != null
+                ? Instance._timeProvider.Now
+                : DateTime.Now;
+
+        public static DateTime UtcNow =>
+            Instance != null && Instance._timeProvider != null
+                ? Instance._timeProvider.UtcNow
+                : DateTime.UtcNow;
+
+        public static long UnixMilliseconds =>
+            Instance != null && Instance._timeProvider != null
+                ? Instance._timeProvider.UnixTimeMilliseconds
+                : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        public static long UnixSeconds =>
+            Instance != null && Instance._timeProvider != null
+                ? Instance._timeProvider.UnixTimeSeconds
+                : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        public static DateTime? LastOnlineTime => Instance?.GetLastOnlineTimeFromPersister();
+
+        public static ITimerHandle StartTimer(
+            Action<long> callback,
+            float intervalSeconds,
+            int limit = -1
+        )
+        {
+            return Instance?.CreateTimer(callback, intervalSeconds, limit);
         }
 
-        public void ManageCoroutine(IEnumerator coroutine)
+        public static ITimerHandle StartTimer(
+            Action callback,
+            float intervalSeconds,
+            int limit = -1
+        )
         {
-            if (coroutine == null)
-            {
-                Debug.LogWarning("Coroutine is null, cannot manage.");
-                return;
-            }
-
-            StartCoroutine(coroutine);
+            return StartTimer(_ => callback?.Invoke(), intervalSeconds, limit);
         }
 
-        public void RemoveAction(IChronoManagedAction action)
+        public static ITimerHandle StartTimeout(Action callback, float delaySeconds)
         {
-            if (action == null)
+            return StartTimer(_ => callback?.Invoke(), delaySeconds, 1);
+        }
+        #endregion
+
+        #region Private Methods
+        private void InitializeProviders()
+        {
+            if (!_config)
             {
-                Debug.LogWarning("Action is null, cannot remove.");
-                return;
+                _config = Resources.Load<ChronoConfiguration>("ChronoConfiguration");
             }
 
-            if (!_actions.Contains(action))
+            if (_config != null)
             {
-                return;
+                _timeProvider = _config.TimeProvider ?? new SystemTimeProvider();
+                _persister = _config.Persister;
             }
-
-            _removalAction.Enqueue(action);
+            else
+            {
+                _timeProvider = new SystemTimeProvider();
+                _persister = null;
+            }
         }
 
-        public void ManageAction(IChronoManagedAction action)
+        private ITimerHandle CreateTimer(
+            Action<long> callback,
+            float intervalSeconds,
+            int limit
+        )
         {
-            if (action == null)
+            if (callback == null)
             {
-                Debug.LogWarning("Action is null, cannot manage.");
-                return;
+                return null;
             }
 
-            if (_actions.Contains(action))
+            if (intervalSeconds <= 0f)
             {
-                return;
+                intervalSeconds = 1f;
             }
 
-            _actions.Add(action);
+            var entry = new TimerEntry
+            {
+                Callback = callback,
+                Interval = intervalSeconds,
+                Limit = limit,
+                IsActive = true
+            };
+
+            _timers.Add(entry);
+            return entry;
         }
 
-        public void RemoveActions(object idFilters)
+        private void TickTimers(float deltaTime)
         {
-            if (idFilters == null)
+            for (int i = _timers.Count - 1; i >= 0; i--)
             {
-                Debug.LogWarning("Id filters are null, cannot remove actions.");
+                _timers[i].Tick(deltaTime);
+            }
+        }
+
+        private void UpdateOnlineTimeMarker(float deltaTime)
+        {
+            _onlineMarkerTimer -= deltaTime;
+            if (_onlineMarkerTimer > 0f)
+            {
                 return;
             }
 
-            var actionsToRemove = new List<IChronoManagedAction>();
-            foreach (var action in _actions)
+            _onlineMarkerTimer = (_config != null
+                ? _config.OnlineMarkerIntervalMs
+                : 3000f) / 1000f;
+            DateTime utcNow = _timeProvider.UtcNow;
+
+            if (_persister != null)
             {
-                if (action.Id != null && action.Id.Equals(idFilters))
+                _persister.Save(DK_LastOnlineKey, utcNow);
+            }
+        }
+
+        private DateTime? GetLastOnlineTimeFromPersister()
+        {
+            if (_persister == null)
+            {
+                return null;
+            }
+
+            return _persister.Load(DK_LastOnlineKey);
+        }
+        #endregion
+
+        #region Bootstrap
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Bootstrap()
+        {
+            var go = new GameObject("[Scheherazade Chrono Director]");
+            go.hideFlags = HideFlags.HideInHierarchy;
+            go.AddComponent<KeepAliveComponent>();
+            go.AddComponent<ChronoDirector>();
+        }
+        #endregion
+
+        #region Nested Types
+        internal sealed class TimerEntry : ITimerHandle
+        {
+            public long Counter { get; internal set; }
+
+            public bool IsActive { get; internal set; }
+
+            public float Interval { get; internal set; }
+
+            public float Accumulator { get; internal set; }
+
+            public int Limit { get; internal set; }
+
+            public Action<long> Callback { get; internal set; }
+
+            long ITimerHandle.Counter => Counter;
+
+            bool ITimerHandle.IsActive => IsActive;
+
+            void ITimerHandle.Cancel()
+            {
+                IsActive = false;
+            }
+
+            public void Tick(float deltaTime)
+            {
+                if (!IsActive)
                 {
-                    actionsToRemove.Add(action);
+                    return;
                 }
-            }
 
-            foreach (var action in actionsToRemove)
-            {
-                RemoveAction(action);
-            }
-        }
-        #endregion
+                Accumulator += deltaTime;
 
-        #region Private Fields
-        private void UpdateOnlineTimeMarker()
-        {
-            if (_onlineMarkerTimer <= 0)
-            {
-                LastOnlineTime = TimeProvider.UtcNow;
-                _onlineMarkerTimer = onlineMarkerTickDuration / 1000.0f;
-            }
-
-            if (_onlineMarkerTimer > 0)
-            {
-                _onlineMarkerTimer -= Time.deltaTime;
-                return;
+                while (Accumulator >= Interval && (Limit < 0 || Counter < Limit))
+                {
+                    Accumulator -= Interval;
+                    Counter++;
+                    Callback?.Invoke(Counter);
+                }
             }
         }
         #endregion

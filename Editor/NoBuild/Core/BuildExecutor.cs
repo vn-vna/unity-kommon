@@ -264,8 +264,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             string name = BuildNameResolver.Resolve(
                 profile.buildNameTemplate?.template
                     ?? "{app-version}", profile, s);
+            bool isAab =
+                profile.buildConfiguration
+                    .androidBuildAppBundle;
+
             string extension = GetPlatformExtension(
-                profile.buildConfiguration.platform);
+                profile.buildConfiguration.platform,
+                profile.buildConfiguration);
             string outputPath = Path.Combine(
                 folder, name + extension);
 
@@ -276,9 +281,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     + $"{outputPath}", "OK");
                 return;
             }
-
-            bool isAab = extension.Equals(
-                ".aab", StringComparison.OrdinalIgnoreCase);
 
             string installPath = outputPath;
             string tempApksPath = null;
@@ -615,9 +617,23 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private static string GetPlatformExtension(BuildTarget target)
         {
+            return GetPlatformExtension(target, null);
+        }
+
+        /// <summary>
+        /// Returns the platform file extension. When <paramref name="config"/>
+        /// is provided, uses the profile's AAB flag instead of the (possibly
+        /// restored) global EditorUserBuildSettings value.
+        /// </summary>
+        private static string GetPlatformExtension(
+            BuildTarget target, BuildConfiguration config)
+        {
             switch (target)
             {
                 case BuildTarget.Android:
+                    if (config != null)
+                        return config.androidBuildAppBundle
+                            ? ".aab" : ".apk";
                     return EditorUserBuildSettings.buildAppBundle
                         ? ".aab" : ".apk";
                 case BuildTarget.StandaloneWindows:

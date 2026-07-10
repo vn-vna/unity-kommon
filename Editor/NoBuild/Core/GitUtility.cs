@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -33,6 +34,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static string _cachedBranch;
         private static DateTime _lastFetchTime = DateTime.MinValue;
         private static bool _gitAvailable = true;
+
+        private static readonly Dictionary<string, SubmoduleGitInfo>
+            _submoduleCache = new(StringComparer.OrdinalIgnoreCase);
+
         private static readonly object _lock = new();
 
         // ══════════════════════════════════════════════════
@@ -64,6 +69,31 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 RefreshCacheIfNeeded();
                 return _cachedBranch;
             }
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Submodule Methods
+        // ══════════════════════════════════════════════════
+
+        /// <summary>
+        /// Returns the short commit hash of a git submodule.
+        /// </summary>
+        public static string GetSubmoduleCommit(string submoduleName)
+        {
+            SubmoduleGitInfo info =
+                ResolveSubmoduleInfo(submoduleName);
+            return info?.shortHash ?? FallbackValue;
+        }
+
+        /// <summary>
+        /// Returns the full commit hash of a git submodule.
+        /// </summary>
+        public static string GetSubmoduleFullCommit(
+            string submoduleName)
+        {
+            SubmoduleGitInfo info =
+                ResolveSubmoduleInfo(submoduleName);
+            return info?.fullHash ?? FallbackValue;
         }
 
         // ══════════════════════════════════════════════════
@@ -157,6 +187,82 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
 
             return string.IsNullOrEmpty(output) ? FallbackValue : output;
+        }
+
+        private static SubmoduleGitInfo ResolveSubmoduleInfo(
+            string submoduleName)
+        {
+            if (string.IsNullOrEmpty(submoduleName))
+                return null;
+
+            lock (_lock)
+            {
+                if (_submoduleCache.TryGetValue(
+                        submoduleName,
+                        out SubmoduleGitInfo cached)
+                    && (DateTime.UtcNow - cached.fetchTime)
+                        .TotalMilliseconds < CacheTtlMs)
+                {
+                    return cached;
+                }
+            }
+
+            // Find the submodule path via .gitmodules
+            string projectRoot =
+                System.IO.Path.GetDirectoryName(
+                    Application.dataPath);
+            if (string.IsNullOrEmpty(projectRoot))
+                return null;
+
+            string subPath = RunGitCommand(
+                projectRoot,
+                "config --file .gitmodules --get "
+                + $"submodule.{submoduleName}.path");
+            if (subPath == FallbackValue)
+                return null;
+
+            string fullPath = System.IO.Path.GetFullPath(
+                System.IO.Path.Combine(
+                    projectRoot, NormalizePath(subPath)));
+
+            if (!System.IO.Directory.Exists(fullPath))
+                return null;
+
+            string shortHash = RunGitCommand(
+                fullPath, "rev-parse --short HEAD");
+            string fullHash = RunGitCommand(
+                fullPath, "rev-parse HEAD");
+
+            SubmoduleGitInfo info = new()
+            {
+                shortHash = shortHash,
+                fullHash  = fullHash,
+                fetchTime = DateTime.UtcNow
+            };
+
+            lock (_lock)
+            {
+                _submoduleCache[submoduleName] = info;
+            }
+
+            return info;
+        }
+
+        private static string NormalizePath(string path)
+        {
+            return (path ?? "").Replace(
+                '/', System.IO.Path.DirectorySeparatorChar);
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Nested Types
+        // ══════════════════════════════════════════════════
+
+        private sealed class SubmoduleGitInfo
+        {
+            public string shortHash;
+            public string fullHash;
+            public DateTime fetchTime;
         }
     }
 }

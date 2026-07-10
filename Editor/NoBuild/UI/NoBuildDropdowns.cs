@@ -18,7 +18,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private const float FooterH = 30f;
         private const float Pad = 10f;
         private const float MaxH = 420f;
-        private const float MinW = 280f;
+        private const float MinW = 400f;
 
         private static float ClampH(float h) => Mathf.Min(MaxH, Mathf.Max(130f, h));
 
@@ -159,8 +159,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         }
 
                         int valid = set.scenes.Count(sl => sl.enabled && sl.IsValid);
-                        GUILayout.Label(valid + " scenes",
-                            EditorStyles.miniLabel, GUILayout.Width(70));
 
                         EditorGUILayout.EndHorizontal();
                     }
@@ -199,7 +197,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         GUILayout.Label(
                             num.Length == 1 ? " " + num : num,
                             EditorStyles.boldLabel,
-                            GUILayout.Width(20));
+                            GUILayout.Width(20)
+                        );
                         GUI.color = Color.white;
                         GUI.enabled = true;
 
@@ -208,8 +207,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                         if (valid)
                         {
-                            if (GUILayout.Button(Trunc(label, 38),
-                                    PopupRowStyle))
+                            if (GUILayout.Button(Trunc(label, 38), PopupRowStyle))
                             {
                                 _onCombo?.Invoke(c);
                                 editorWindow.Close();
@@ -217,8 +215,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         }
                         else
                         {
-                            GUILayout.Label(Trunc(label, 38),
-                                EditorStyles.label);
+                            GUILayout.Label(Trunc(label, 38), EditorStyles.label);
                         }
 
                         EditorGUILayout.EndHorizontal();
@@ -264,13 +261,11 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawHdr("Script Defines",
-                    "Toggle scripting define symbols per set.");
+                DrawHdr("Script Defines", "Toggle scripting define symbols per set.");
 
                 if (_s.scriptDefinitionSets.Count == 0)
                 {
-                    DrawEmpty("No define sets.",
-                        "Create one in Project Settings \u2192 NoBuild.");
+                    DrawEmpty("No define sets.", "Create one in Project Settings \u2192 NoBuild.");
                     return;
                 }
 
@@ -296,8 +291,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     }
 
                     int n = set.slots?.Count(sl => sl.enabled) ?? 0;
-                    GUILayout.Label(n + " on", EditorStyles.miniLabel,
-                        GUILayout.Width(45));
                     EditorGUILayout.EndHorizontal();
                 }
 
@@ -557,72 +550,45 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawHdr("Build & Run",
-                    "Select target device(s).");
+                DrawHdr("Build & Run", "Select target device(s).");
 
                 if (_devices.Count == 0)
                 {
-                    DrawEmpty("No devices connected.",
-                        "Connect via USB or start an emulator.");
+                    DrawEmpty("No devices connected.", "Connect via USB or start an emulator.");
                     return;
                 }
 
                 // ── First Device ──
                 EditorGUILayout.BeginHorizontal(
                     EditorStyles.helpBox);
-                if (GUILayout.Button(
-                        "\u25B6 First Device",
-                        PopupRowStyle))
+                if (GUILayout.Button("First Device", PopupRowStyle))
                 {
-                    _onSelected?.Invoke(
-                        BuildExecutor.DeviceOption
-                            .FirstDevice, null);
+                    _onSelected?.Invoke(BuildExecutor.DeviceOption.FirstDevice, null);
                     editorWindow.Close();
                 }
-                GUILayout.Label(_devices[0].DisplayName,
-                    EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
 
                 // ── All Devices ──
-                EditorGUILayout.BeginHorizontal(
-                    EditorStyles.helpBox);
-                if (GUILayout.Button(
-                        "All Devices",
-                        PopupRowStyle))
+                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                if (GUILayout.Button($"All Devices [{_devices.Count} device(s)]", PopupRowStyle))
                 {
-                    _onSelected?.Invoke(
-                        BuildExecutor.DeviceOption
-                            .AllDevices, null);
+                    _onSelected?.Invoke(BuildExecutor.DeviceOption.AllDevices, null);
                     editorWindow.Close();
                 }
-                GUILayout.Label(
-                    $"{_devices.Count} device(s)",
-                    EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
                 GUILayout.Space(2);
 
                 // ── Individual Devices ──
-                EditorGUILayout.LabelField(
-                    "Specific Device",
-                    EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Specific Device", EditorStyles.miniLabel);
                 for (int i = 0; i < _devices.Count; i++)
                 {
                     var d = _devices[i];
-                    EditorGUILayout.BeginHorizontal(
-                        EditorStyles.helpBox);
-                    if (GUILayout.Button(
-                            Trunc(d.DisplayName, 30),
-                            PopupRowStyle))
+                    EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                    if (GUILayout.Button(Trunc(d.DisplayName, 40), PopupRowStyle))
                     {
-                        _onSelected?.Invoke(
-                            BuildExecutor.DeviceOption
-                                .SpecificDevice,
-                            d.Serial);
+                        _onSelected?.Invoke(BuildExecutor.DeviceOption.SpecificDevice, d.Serial);
                         editorWindow.Close();
                     }
-                    GUILayout.Label(d.Serial,
-                        EditorStyles.miniLabel,
-                        GUILayout.Width(120));
                     EditorGUILayout.EndHorizontal();
                 }
             }

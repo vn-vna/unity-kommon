@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
-using UnityEditorInternal;
+using UnityEditor.Build;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
@@ -26,10 +26,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private int _tab;
         private int _selSet = -1, _selDef = -1, _selBuild = -1, _selFlag = -1;
         private Vector2 _sbScroll, _pvScroll;
-
-        // ── Reorderable List State ──────────────────
-        private ReorderableList _sceneReorderableList;
-        private SerializedProperty _lastSceneListProperty;
 
         // ── Device Tab State ───────────────────────
         private List<AdbDeviceInfo> _cachedDevices;
@@ -124,7 +120,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (_tab == 4 && (_selFlag < 0 || _selFlag >= s.flagDefinitions.Count) && s.flagDefinitions.Count > 0)
                 _selFlag = 0;
 
-            DrawHeader();
             DrawCustomTabBar(ref _tab, Tabs);
             GUILayout.Space(4);
 
@@ -142,21 +137,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
 
             _so.ApplyModifiedProperties();
-        }
-
-        // ══════════════════════════════════════════════════
-        // ── Header
-        // ══════════════════════════════════════════════════
-
-        private void DrawHeader()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("NoBuild", EditorStyles.boldLabel, GUILayout.Width(100));
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Open Window", GUILayout.Width(110))) NoBuildWindow.ShowWindow();
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.LabelField("Scene sets, defines, and build profiles.", EditorStyles.miniLabel);
-            GUILayout.Space(4);
         }
 
         // ══════════════════════════════════════════════════
@@ -570,7 +550,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var sp = _sceneSets.GetArrayElementAtIndex(_selSet);
             var nameP = sp.FindPropertyRelative("setName");
             var scenesP = sp.FindPropertyRelative("scenes");
-            var buildP = sp.FindPropertyRelative("buildOrderOverride");
             var combosP = sp.FindPropertyRelative("combinations");
             bool active = s.activeSceneSetIndex == _selSet;
 
@@ -597,63 +576,17 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             nameP.stringValue = LblTxt("Name", nameP.stringValue);
             GUILayout.Space(6);
 
-            // ── Scenes + Build Order (reorderable with drag handles) ──
+            // ── Scenes (reorderable with drag handles) ──
             EditorGUILayout.LabelField("Scenes", EditorStyles.boldLabel);
-            bool hasCustomOrder = buildP.arraySize > 0;
+            DrawSceneReorderableList(scenesP);
 
-            if (!hasCustomOrder)
-            {
-                DrawSceneReorderableList(scenesP);
-            }
-            else
-            {
-                // Custom order mode: show reorderable list on buildP
-                DrawSceneReorderableList(buildP);
-            }
-
-            // Add scene & order toggle
-            GUILayout.BeginHorizontal();
             if (GUILayout.Button("+ Add Scene", GUILayout.Height(22),
                     GUILayout.Width(100)))
             {
-                var target = hasCustomOrder ? buildP : scenesP;
-                target.arraySize++;
-                target.GetArrayElementAtIndex(target.arraySize - 1)
+                scenesP.arraySize++;
+                scenesP.GetArrayElementAtIndex(scenesP.arraySize - 1)
                     .FindPropertyRelative("enabled").boolValue = true;
-                _sceneReorderableList = null;
             }
-
-            GUILayout.FlexibleSpace();
-            if (hasCustomOrder)
-            {
-                if (GUILayout.Button("Reset Order", GUILayout.Width(100)))
-                {
-                    buildP.ClearArray();
-                    _so.ApplyModifiedProperties();
-                    _sceneReorderableList = null;
-                }
-            }
-            else
-            {
-                GUI.color = new Color(0.7f, 0.7f, 1f);
-                if (GUILayout.Button("Customize Order", GUILayout.Width(120)))
-                {
-                    buildP.arraySize = scenesP.arraySize;
-                    for (int i = 0; i < scenesP.arraySize; i++)
-                    {
-                        var src = scenesP.GetArrayElementAtIndex(i);
-                        var dst = buildP.GetArrayElementAtIndex(i);
-                        dst.FindPropertyRelative("scene").objectReferenceValue =
-                            src.FindPropertyRelative("scene").objectReferenceValue;
-                        dst.FindPropertyRelative("enabled").boolValue =
-                            src.FindPropertyRelative("enabled").boolValue;
-                    }
-                    _sceneReorderableList = null;
-                }
-                GUI.color = Color.white;
-            }
-
-            GUILayout.EndHorizontal();
             GUILayout.Space(8);
 
             // ── Combinations ──
@@ -696,79 +629,67 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private void DrawSceneReorderableList(SerializedProperty scenesP)
         {
-            if (_sceneReorderableList == null
-                || _sceneReorderableList.serializedProperty != scenesP)
+            if (scenesP.arraySize == 0)
             {
-                _sceneReorderableList = new ReorderableList(
-                    scenesP.serializedObject, scenesP,
-                    draggable: true, displayHeader: false,
-                    displayAddButton: false,
-                    displayRemoveButton: false);
-
-                _sceneReorderableList.drawElementCallback =
-                    (rect, index, isActive, isFocused) =>
-                {
-                    var slot = scenesP.GetArrayElementAtIndex(index);
-                    var en = slot.FindPropertyRelative("enabled");
-                    var sc = slot.FindPropertyRelative("scene");
-
-                    // Layout: [≡ drag handle] [toggle] [object field]
-                    float handleW = 14f;
-                    Rect handleRect = new(rect.x, rect.y + 2,
-                        handleW, rect.height - 4);
-                    Rect toggleRect = new(
-                        rect.x + handleW, rect.y, 16f,
-                        rect.height);
-                    float fieldX = toggleRect.xMax + 4f;
-                    Rect fieldRect = new(fieldX, rect.y + 1,
-                        rect.width - fieldX + rect.x,
-                        rect.height - 2);
-
-                    // Drag handle icon
-                    EditorGUI.LabelField(handleRect, "\u2630",
-                        EditorStyles.centeredGreyMiniLabel);
-
-                    en.boolValue = EditorGUI.Toggle(
-                        toggleRect, en.boolValue);
-                    sc.objectReferenceValue =
-                        EditorGUI.ObjectField(
-                            fieldRect,
-                            sc.objectReferenceValue,
-                            typeof(SceneAsset), false);
-                };
-
-                _sceneReorderableList.onAddCallback = list =>
-                {
-                    int idx = list.serializedProperty.arraySize;
-                    list.serializedProperty.arraySize++;
-                    list.serializedProperty
-                        .GetArrayElementAtIndex(idx)
-                        .FindPropertyRelative("enabled")
-                        .boolValue = true;
-                };
-
-                _sceneReorderableList.onRemoveCallback = list =>
-                {
-                    if (list.index >= 0
-                        && list.index < list.serializedProperty
-                            .arraySize)
-                    {
-                        list.serializedProperty
-                            .DeleteArrayElementAtIndex(
-                                list.index);
-                    }
-                };
-
-                _sceneReorderableList.elementHeight =
-                    EditorGUIUtility.singleLineHeight + 4f;
-            }
-
-            if (_sceneReorderableList.serializedProperty.arraySize
-                == 0)
                 EditorGUILayout.LabelField("  (no scenes)",
                     EditorStyles.miniLabel);
-            else
-                _sceneReorderableList.DoLayoutList();
+                return;
+            }
+
+            for (int i = 0; i < scenesP.arraySize; i++)
+            {
+                var slot = scenesP.GetArrayElementAtIndex(i);
+                var en = slot.FindPropertyRelative("enabled");
+                var sc = slot.FindPropertyRelative("scene");
+
+                EditorGUILayout.BeginHorizontal();
+
+                // Toggle + object field
+                en.boolValue = EditorGUILayout.Toggle(
+                    en.boolValue, GUILayout.Width(16));
+                sc.objectReferenceValue =
+                    EditorGUI.ObjectField(
+                        GUILayoutUtility.GetRect(
+                            GUIContent.none, GUI.skin.textField,
+                            GUILayout.ExpandWidth(true)),
+                        sc.objectReferenceValue,
+                        typeof(SceneAsset), false);
+
+                // Up button
+                GUI.enabled = i > 0;
+                if (GUILayout.Button("\u25B2",
+                        GUILayout.Width(24), GUILayout.Height(18)))
+                {
+                    scenesP.MoveArrayElement(i, i - 1);
+                    _so.ApplyModifiedProperties();
+                }
+                GUI.enabled = true;
+
+                // Down button
+                GUI.enabled = i < scenesP.arraySize - 1;
+                if (GUILayout.Button("\u25BC",
+                        GUILayout.Width(24), GUILayout.Height(18)))
+                {
+                    scenesP.MoveArrayElement(i, i + 1);
+                    _so.ApplyModifiedProperties();
+                }
+                GUI.enabled = true;
+
+                // Remove button
+                GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
+                if (GUILayout.Button("\u00D7",
+                        GUILayout.Width(22), GUILayout.Height(18)))
+                {
+                    scenesP.DeleteArrayElementAtIndex(i);
+                    _so.ApplyModifiedProperties();
+                    GUI.backgroundColor = Color.white;
+                    EditorGUILayout.EndHorizontal();
+                    break;
+                }
+                GUI.backgroundColor = Color.white;
+
+                EditorGUILayout.EndHorizontal();
+            }
         }
 
         private void DrawComboSceneReferences(
@@ -987,13 +908,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             // General
             EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
-            LblChk("Development Build", cfgP.FindPropertyRelative("developmentBuild"));
+            var devBuildP = cfgP.FindPropertyRelative("developmentBuild");
+            LblChk("Development Build", devBuildP);
+            bool isDev = devBuildP.boolValue;
+            GUI.enabled = isDev;
             LblChk("Script Debugging", cfgP.FindPropertyRelative("allowDebugging"));
             LblChk("Connect Profiler", cfgP.FindPropertyRelative("connectWithProfiler"));
-            LblProp("Scripting Backend", cfgP.FindPropertyRelative("scriptingBackend"));
-            LblProp("IL2CPP Code Gen", cfgP.FindPropertyRelative("il2CppCodeGeneration"));
-            LblProp("Stripping Level", cfgP.FindPropertyRelative("strippingLevel"));
+            GUI.enabled = true;
+
+            var sbeP = cfgP.FindPropertyRelative("scriptingBackend");
+            LblBtnGroup("Scripting Backend", sbeP,
+                new[] { "Mono", "IL2CPP" },
+                new[] { (int)ScriptingImplementation.Mono2x, (int)ScriptingImplementation.IL2CPP });
+            bool isIL2CPP = sbeP.enumValueIndex == (int)ScriptingImplementation.IL2CPP;
+            GUI.enabled = isIL2CPP;
+            LblBtnGroup("IL2CPP Code Gen", cfgP.FindPropertyRelative("il2CppCodeGeneration"),
+                new[] { "Opt Size", "Opt Speed" },
+                new[] { (int)Il2CppCodeGeneration.OptimizeSize, (int)Il2CppCodeGeneration.OptimizeSpeed });
             LblChk("Strip Engine Code", cfgP.FindPropertyRelative("stripEngineCode"));
+            GUI.enabled = true;
+
+            LblProp("Stripping Level", cfgP.FindPropertyRelative("strippingLevel"));
             LblTxt("Bundle Identifier", cfgP.FindPropertyRelative("bundleIdentifierOverride"));
             LblTxt("Product Name", cfgP.FindPropertyRelative("productNameOverride"));
 
@@ -1104,10 +1039,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 idP.stringValue);
             GUILayout.Space(4);
 
-            // Type dropdown
-            FlagDefinitionType currentType =
-                (FlagDefinitionType)typeP.enumValueIndex;
-            LblProp("Type", typeP);
+            // Type button group
+            LblBtnGroup("Type", typeP,
+                new[] { "Template", "Custom" },
+                new[] { (int)FlagDefinitionType.Template, (int)FlagDefinitionType.Custom });
             GUILayout.Space(4);
 
             // Conditional: Template → set index popup,
@@ -1689,6 +1624,32 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
             EditorGUILayout.PropertyField(prop, GUIContent.none);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void LblBtnGroup(string label, SerializedProperty prop,
+            string[] names, int[] values)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+
+            int currentIdx = System.Array.IndexOf(values, prop.enumValueIndex);
+            if (currentIdx < 0) currentIdx = 0;
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                bool isActive = currentIdx == i;
+                Color oldBg = GUI.backgroundColor;
+                GUI.backgroundColor = isActive
+                    ? new Color(0.25f, 0.45f, 0.75f)
+                    : new Color(0.35f, 0.35f, 0.35f);
+
+                if (GUILayout.Button(names[i], GUILayout.Height(20)))
+                    prop.enumValueIndex = values[i];
+
+                GUI.backgroundColor = oldBg;
+            }
+
             EditorGUILayout.EndHorizontal();
         }
 

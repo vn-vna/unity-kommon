@@ -1,64 +1,43 @@
 using System;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Chrono
 {
-
-    public class MockTimeProvider :
-        ITimeProvider,
-        IArtificialTimeProvider
+    [CreateAssetMenu(fileName = "MockTimeProvider", menuName = "Scheherazade/Chrono/Mock Time Provider")]
+    public class MockTimeProvider : TimeProviderBase, ISettableTimeProvider
     {
-        private DateTime _mockDateTime;
+        [SerializeField] private SerializableDateTime _initialTime = new SerializableDateTime(DateTime.Now);
 
-        public MockTimeProvider()
+        [NonSerialized] private DateTime _mockTime;
+        [NonSerialized] private DateTime _originalTime;
+
+        private void OnEnable()
         {
-            _mockDateTime = DateTime.Now;
+            _mockTime = _initialTime.Value;
+            _originalTime = _mockTime;
         }
 
-        public MockTimeProvider(DateTime mockDateTime)
-        {
-            _mockDateTime = mockDateTime.ToLocalTime();
-        }
+        public override DateTime Now => _mockTime;
 
-        public DateTime Now => _mockDateTime;
+        public override DateTime Today => _mockTime.Date;
 
-        public DateTime Today => _mockDateTime.Date;
+        public override DateTime UtcNow => _mockTime.ToUniversalTime();
 
-        public DateTime UtcNow => _mockDateTime.ToUniversalTime();
-
-        public DateTime Epoch => DateTime.UnixEpoch;
-
-        public void SetMockDateTime(DateTime mockDateTime)
-        {
-            _mockDateTime = mockDateTime;
-        }
+        public override DateTime Epoch => DateTime.UnixEpoch;
 
         public void AdvanceTime(TimeSpan timeSpan)
         {
-            _mockDateTime = _mockDateTime.Add(timeSpan);
+            _mockTime = _mockTime.Add(timeSpan);
         }
 
-        public void AdvanceTime(int days, int hours, int minutes, int seconds)
+        public void SetTime(DateTime dateTime)
         {
-            _mockDateTime = _mockDateTime
-                .AddDays(days)
-                .AddHours(hours)
-                .AddMinutes(minutes)
-                .AddSeconds(seconds);
+            _mockTime = dateTime;
         }
 
         public void Reset()
         {
-            _mockDateTime = DateTime.Now;
-        }
-
-        public void SetMockDateTime(int year, int month, int day, int hour, int minute, int second)
-        {
-            _mockDateTime = new DateTime(year, month, day, hour, minute, second);
-        }
-
-        public void SetMockDateTime(int year = 2000, int month = 1, int day = 1)
-        {
-            _mockDateTime = new DateTime(year, month, day);
+            _mockTime = _originalTime;
         }
     }
 }
