@@ -1104,7 +1104,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             ProviderDescriptor descriptor
         )
         {
-            GUILayout.Space(6);
+            GUILayout.Space(4);
 
             SerializedObject serializedManager = new SerializedObject(manager);
             var fieldProp = serializedManager.FindProperty(descriptor.ManagerFieldName);
@@ -1119,144 +1119,242 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             var providerType = ResolveType(descriptor.ProviderTypeName);
             var currentProvider = GetAssignedProvider(fieldProp, descriptor, providerType);
-            var designatedProvider = LoadProviderAssetFromResources(descriptor, providerType);
+            bool isEnabled = currentProvider != null;
 
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField(descriptor.DisplayName, EditorStyles.boldLabel);
-                DrawProviderActionButtons(
-                    manager,
-                    descriptor,
-                    providerType,
-                    ref currentProvider,
-                    ref designatedProvider
-                );
-            }
+            bool dependenciesSatisfied = AreDependenciesSatisfied(descriptor);
+            string[] missingDefines = GetMissingDefines(descriptor.RequiredDefines);
 
-            if (providerType != null)
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                if (!typeof(ScriptableObject).IsAssignableFrom(providerType))
+                // Header row
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.HelpBox(
-                        $"{descriptor.DisplayName} provider type is not a ScriptableObject and cannot be assigned inline.",
-                        MessageType.Error
+                    EditorGUILayout.LabelField(
+                        descriptor.DisplayName,
+                        EditorStyles.boldLabel
                     );
-                    return;
+
+                    GUILayout.FlexibleSpace();
+
+                    if (isEnabled && currentProvider != null)
+                    {
+                        if (GUILayout.Button("Disable", GUILayout.Width(70)))
+                        {
+                            SetProviderAssignment(
+                                fieldProp,
+                                descriptor,
+                                providerType,
+                                null
+                            );
+
+                            serializedManager.ApplyModifiedProperties();
+                            EditorUtility.SetDirty(manager);
+                            AssetDatabase.SaveAssets();
+                            isEnabled = false;
+                            currentProvider = null;
+                        }
+                    }
+                    else if (dependenciesSatisfied
+                        && providerType != null
+                        && missingDefines.Length == 0)
+                    {
+                        if (GUILayout.Button("Enable", GUILayout.Width(70)))
+                        {
+                            EnableProvider(
+                                manager,
+                                descriptor,
+                                providerType,
+                                fieldProp,
+                                serializedManager
+                            );
+
+                            currentProvider = GetAssignedProvider(
+                                fieldProp,
+                                descriptor,
+                                providerType
+                            );
+
+                            isEnabled = currentProvider != null;
+                        }
+                    }
                 }
 
-                EditorGUI.BeginChangeCheck();
-                ScriptableObject updatedProvider = EditorGUILayout.ObjectField(
-                    "Asset",
-                    currentProvider,
-                    providerType,
-                    false
-                ) as ScriptableObject;
-
-                if (EditorGUI.EndChangeCheck())
+                // Locked state message
+                if (!isEnabled && missingDefines.Length > 0)
                 {
-                    SetProviderAssignment(fieldProp, descriptor, providerType, updatedProvider);
-                    serializedManager.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(manager);
-                    AssetDatabase.SaveAssets();
-                    currentProvider = updatedProvider;
+                    EditorGUILayout.LabelField(
+                        $"Missing defines: {string.Join(", ", missingDefines)}. "
+                        + "Enable the required scripting define to unlock this provider.",
+                        EditorStyles.miniLabel
+                    );
+
+                    Color oldColor = GUI.backgroundColor;
+                    GUI.backgroundColor = new Color(0.9f, 0.7f, 0.3f);
+
+                    if (GUILayout.Button(
+                            "Enable " + string.Join(", ", missingDefines)))
+                    {
+                        EnsureScriptingDefines(descriptor.RequiredDefines);
+                    }
+
+                    GUI.backgroundColor = oldColor;
+                }
+                else if (!isEnabled && !dependenciesSatisfied)
+                {
+                    EditorGUILayout.LabelField(
+                        "Dependencies not satisfied. "
+                        + "Install the required packages to unlock this provider.",
+                        EditorStyles.miniLabel
+                    );
+                }
+
+                // Configuration (when enabled)
+                if (isEnabled && currentProvider != null)
+                {
+                    GUILayout.Space(4);
+
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField(
+                            "Configuration of " + descriptor.DisplayName,
+                            EditorStyles.miniBoldLabel
+                        );
+
+                        GUILayout.FlexibleSpace();
+
+                        if (DrawDeleteButton())
+                        {
+                            DeleteProviderAsset(
+                                manager,
+                                descriptor,
+                                providerType,
+                                currentProvider
+                            );
+                        }
+                    }
+
+                    GUILayout.Space(2);
+                    DrawInlineInspector(
+                        currentProvider,
+                        $"{descriptor.DisplayName.ToUpperInvariant()} PROVIDER"
+                    );
                 }
             }
-
-            if (currentProvider != null)
-            {
-                DrawInlineInspector(
-                    currentProvider,
-                    $"{descriptor.DisplayName.ToUpperInvariant()} PROVIDER"
-                );
-                return;
-            }
-
-            DrawMissingProviderBox(manager, descriptor, providerType, designatedProvider);
         }
 
-        private static void DrawMissingProviderBox(
+        private static void EnableProvider(
             ScriptableObject manager,
             ProviderDescriptor descriptor,
             Type providerType,
-            ScriptableObject designatedProvider
+            SerializedProperty fieldProp,
+            SerializedObject serializedManager
         )
         {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            ScriptableObject asset = FindOrCreateProviderAsset(
+                providerType,
+                descriptor.ProviderTypeName
+            );
+
+            if (asset == null)
             {
-                var dependencyStates = descriptor.DependencyTypeNames
-                    .Select(typeName => new DependencyStatus(typeName, ResolveType(typeName) != null))
-                    .ToArray();
-                bool dependenciesSatisfied = dependencyStates.All(status => status.IsAvailable);
-                bool providerTypeAvailable = providerType != null;
-                string[] missingDefines = GetMissingDefines(descriptor.RequiredDefines);
+                return;
+            }
 
-                string dependencySummary = dependencyStates.Length == 0
-                    ? "No external dependencies are required."
-                    : string.Join(
-                        "\n",
-                        dependencyStates.Select(status => $"{(status.IsAvailable ? "[OK]" : "[Missing]")} {status.DisplayName}")
-                    );
+            SetProviderAssignment(
+                fieldProp,
+                descriptor,
+                providerType,
+                asset
+            );
 
-                MessageType messageType = dependenciesSatisfied
-                    ? MessageType.Info
-                    : MessageType.Warning;
-                string message =
-                    $"{descriptor.DisplayName} provider is not assigned.\n\n" +
-                    $"{dependencySummary}";
+            serializedManager.ApplyModifiedProperties();
+            EditorUtility.SetDirty(manager);
+            AssetDatabase.SaveAssets();
+            EditorGUIUtility.PingObject(asset);
+        }
 
-                if (designatedProvider != null)
+        private static ScriptableObject FindOrCreateProviderAsset(
+            Type providerType,
+            string defaultName)
+        {
+            // Search existing
+            string[] guids = AssetDatabase.FindAssets(
+                "t:" + providerType.Name
+            );
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                ScriptableObject asset = AssetDatabase.LoadAssetAtPath(
+                    path,
+                    providerType
+                ) as ScriptableObject;
+
+                if (asset != null)
                 {
-                    message +=
-                        $"\n\nDesignated provider asset found at '{AssetDatabase.GetAssetPath(designatedProvider)}'. " +
-                        "Use the attach button to connect it to this module.";
-                }
-
-                if (dependenciesSatisfied && missingDefines.Length > 0)
-                {
-                    message += $"\n\nMissing scripting defines: {string.Join(", ", missingDefines)}";
-                }
-                else if (dependenciesSatisfied && !providerTypeAvailable)
-                {
-                    message += "\n\nThe dependency is available, but the provider type is still not compiled. If you just enabled the define, wait for Unity to finish recompiling.";
-                    messageType = MessageType.Warning;
-                }
-
-                EditorGUILayout.HelpBox(message, messageType);
-
-                if (!dependenciesSatisfied)
-                {
-                    return;
-                }
-
-                if (designatedProvider != null)
-                {
-                    return;
-                }
-
-                if (providerTypeAvailable)
-                {
-                    string buttonLabel = missingDefines.Length > 0
-                        ? $"Enable {descriptor.DisplayName} and Create Provider Asset"
-                        : $"Create {descriptor.DisplayName} Provider Asset";
-                    if (GUILayout.Button(buttonLabel))
-                    {
-                        EnsureScriptingDefines(descriptor.RequiredDefines);
-                        CreateAndAssignProviderAsset(manager, descriptor, providerType);
-                    }
-                    return;
-                }
-
-                if (missingDefines.Length == 0)
-                {
-                    return;
-                }
-
-                if (GUILayout.Button($"Enable {descriptor.DisplayName} and Create Provider Asset"))
-                {
-                    EnqueuePendingProviderCreation(manager, descriptor);
-                    EnsureScriptingDefines(descriptor.RequiredDefines);
+                    return asset;
                 }
             }
+
+            // Create new
+            EnsureDirectoryExists(IntegrationProviderAssetsFolder);
+
+            string shortName = defaultName.Contains('.')
+                ? defaultName.Substring(defaultName.LastIndexOf('.') + 1)
+                : defaultName;
+
+            string assetPath = IntegrationProviderAssetsFolder
+                + "/"
+                + shortName
+                + ".asset";
+
+            assetPath = AssetDatabase.GenerateUniqueAssetPath(assetPath);
+
+            ScriptableObject newAsset = ScriptableObject
+                .CreateInstance(providerType);
+
+            newAsset.name = System.IO.Path.GetFileNameWithoutExtension(assetPath);
+            AssetDatabase.CreateAsset(newAsset, assetPath);
+            AssetDatabase.SaveAssets();
+
+            return newAsset;
+        }
+
+        private static bool AreDependenciesSatisfied(
+            ProviderDescriptor descriptor)
+        {
+            if (descriptor.DependencyTypeNames == null
+                || descriptor.DependencyTypeNames.Length == 0)
+            {
+                return true;
+            }
+
+            return descriptor.DependencyTypeNames.All(
+                typeName => ResolveType(typeName) != null
+            );
+        }
+
+        private static bool DrawDeleteButton()
+        {
+            var content = EditorGUIUtility.IconContent("TreeEditor.Trash");
+            if (content == null || content.image == null)
+            {
+                content = new GUIContent(
+                    "\u2717",
+                    "Delete the provider asset from disk."
+                );
+            }
+            else
+            {
+                content.tooltip = "Delete the provider asset from disk.";
+            }
+
+            return GUILayout.Button(
+                content,
+                EditorStyles.miniButton,
+                GUILayout.Width(24),
+                GUILayout.Height(18)
+            );
         }
 
         private static ScriptableObject GetAssignedProvider(
@@ -1392,110 +1490,6 @@ namespace Com.Hapiga.Scheherazade.Integration
                 arrayProp.GetArrayElementAtIndex(index).objectReferenceValue == null)
             {
                 arrayProp.DeleteArrayElementAtIndex(index);
-            }
-        }
-
-        private static void DrawProviderActionButtons(
-            ScriptableObject manager,
-            ProviderDescriptor descriptor,
-            Type providerType,
-            ref ScriptableObject currentProvider,
-            ref ScriptableObject designatedProvider
-        )
-        {
-            var enabledDefines = GetEnabledDefines(descriptor.RequiredDefines);
-            var providerToDelete = currentProvider != null ? currentProvider : designatedProvider;
-
-            if (DrawIconButton(
-                "Toolbar Plus",
-                "+",
-                "Attach the designated provider asset to this module.",
-                currentProvider == null && designatedProvider != null
-            ))
-            {
-                if (AssignProvider(manager, descriptor, providerType, designatedProvider))
-                {
-                    currentProvider = designatedProvider;
-                }
-            }
-
-            if (DrawIconButton(
-                "Toolbar Minus",
-                "-",
-                "Detach the current provider from this module.",
-                currentProvider != null
-            ))
-            {
-                if (AssignProvider(manager, descriptor, providerType, null))
-                {
-                    currentProvider = null;
-                }
-            }
-
-            if (DrawIconButton(
-                "TreeEditor.Trash",
-                "X",
-                "Delete the provider asset used by this view.",
-                providerToDelete != null
-            ))
-            {
-                if (DeleteProviderAsset(manager, descriptor, providerType, providerToDelete))
-                {
-                    if (currentProvider == providerToDelete)
-                    {
-                        currentProvider = null;
-                    }
-
-                    if (designatedProvider == providerToDelete)
-                    {
-                        designatedProvider = null;
-                    }
-                }
-            }
-
-            if (DrawIconButton(
-                "AssemblyLock",
-                "#",
-                "Turn off the scripting define symbols required by this provider.",
-                enabledDefines.Length > 0
-            ))
-            {
-                if (currentProvider != null)
-                {
-                    AssignProvider(manager, descriptor, providerType, null);
-                    currentProvider = null;
-                }
-
-                RemovePendingProviderCreation(descriptor.ProviderTypeName);
-                RemoveScriptingDefines(descriptor.RequiredDefines);
-            }
-        }
-
-        private static bool DrawIconButton(
-            string iconName,
-            string fallbackText,
-            string tooltip,
-            bool enabled
-        )
-        {
-            using (new EditorGUI.DisabledScope(!enabled))
-            {
-                var content = EditorGUIUtility.IconContent(iconName);
-                if (content == null || content.image == null)
-                {
-                    content = new GUIContent(fallbackText, tooltip);
-                }
-                else
-                {
-                    content.tooltip = tooltip;
-                }
-
-                return GUILayout.Button(
-                    content,
-                    EditorStyles.miniButton,
-                    GUILayout.Width(24),
-                    GUILayout.Height(18)
-                );
             }
         }
 
