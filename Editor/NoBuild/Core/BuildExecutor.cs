@@ -507,8 +507,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 #endif
 #endif
 #if UNITY_IOS
-                iosSymlinkFramework =
-                    PlayerSettings.iOS.symlinkUnityLibraries,
                 iosTeamId =
                     PlayerSettings.iOS.appleDeveloperTeamID,
                 iosAutomaticSigning =
@@ -555,7 +553,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 #endif
 
 #if UNITY_IOS
-            PlayerSettings.iOS.symlinkUnityLibraries = config.iosSymlinkFramework;
             if (!string.IsNullOrEmpty(config.iosTeamId))
                 PlayerSettings.iOS.appleDeveloperTeamID = config.iosTeamId;
             PlayerSettings.iOS.appleEnableAutomaticSigning = config.iosAutomaticSigning;
@@ -601,7 +598,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 #endif
 #endif
 #if UNITY_IOS
-                PlayerSettings.iOS.symlinkUnityLibraries = snapshot.iosSymlinkFramework;
                 if (!string.IsNullOrEmpty(snapshot.iosTeamId))
                     PlayerSettings.iOS.appleDeveloperTeamID = snapshot.iosTeamId;
                 PlayerSettings.iOS.appleEnableAutomaticSigning = snapshot.iosAutomaticSigning;
