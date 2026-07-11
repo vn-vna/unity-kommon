@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using Com.Hapiga.Scheherazade.Common.ROAP.Editor;
 using UnityEditor;
 using UnityEngine;
@@ -15,12 +16,6 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
     {
         #region Constants
         private const string FileName = "__dcf__";
-        private const string PrefTargetMode = "Scheherazade.DCF.TargetMode";
-        private const string PrefPackageId = "Scheherazade.DCF.PackageId";
-        private const string PrefLastCommands = "Scheherazade.DCF.LastCommands";
-        private const string PrefSelectedDevice = "Scheherazade.DCF.SelectedDevice";
-        private const string PrefHistory = "Scheherazade.DCF.History";
-        private const string PrefExternalStorageCache = "Scheherazade.DCF.ExternalStorageCache";
         private const int MaxHistory = 50;
         private const int DefaultAdbTimeoutMs = 15000;
         private const int MaxDetectedApps = 200;
@@ -73,6 +68,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
         #endregion
 
         #region Serialized & Private Fields
+        private static readonly EditorPrefsStore Prefs = new EditorPrefsStore("Scheherazade.DCF");
+
         private TargetMode _targetMode;
         private string _commands = string.Empty;
         private Vector2 _commandsScrollPos;
@@ -111,10 +108,10 @@ namespace Com.Hapiga.Scheherazade.Common.Editor
 
 private void OnEnable()
         {
-            _targetMode = (TargetMode)EditorPrefs.GetInt(PrefTargetMode, (int)TargetMode.EditorPlayMode);
-            _packageId = EditorPrefs.GetString(PrefPackageId, PlayerSettings.GetApplicationIdentifier(BuildTargetGroup.Android));
-            _commands = EditorPrefs.GetString(PrefLastCommands, string.Empty);
-            _selectedDeviceIndex = EditorPrefs.GetInt(PrefSelectedDevice, -1);
+            _targetMode = (TargetMode)Prefs.GetInt("TargetMode", (int)TargetMode.EditorPlayMode);
+            _packageId = Prefs.Get("PackageId", PlayerSettings.GetApplicationIdentifier(BuildTargetGroup.Android));
+            _commands = Prefs.Get("LastCommands", string.Empty);
+            _selectedDeviceIndex = Prefs.GetInt("SelectedDevice", -1);
 
             LoadHistory();
             LoadDetectionCache();
@@ -125,10 +122,10 @@ private void OnEnable()
 
 private void OnDisable()
         {
-            EditorPrefs.SetInt(PrefTargetMode, (int)_targetMode);
-            EditorPrefs.SetString(PrefPackageId, _packageId);
-            EditorPrefs.SetString(PrefLastCommands, _commands);
-            EditorPrefs.SetInt(PrefSelectedDevice, _selectedDeviceIndex);
+            Prefs.SetInt("TargetMode", (int)_targetMode);
+            Prefs.Set("PackageId", _packageId);
+            Prefs.Set("LastCommands", _commands);
+            Prefs.SetInt("SelectedDevice", _selectedDeviceIndex);
 
             if (_historyDirty)
                 SaveHistory();
@@ -138,8 +135,6 @@ private void OnDisable()
 
         private void OnGUI()
         {
-            GuiStyles.EnsureInitialized();
-
             DrawModernHeader();
             EditorGUILayout.Space(4f);
             DrawTargetSelector();
@@ -170,15 +165,15 @@ private void OnDisable()
         #region UI - Header & Target
         private void DrawModernHeader()
         {
-            EditorGUILayout.BeginHorizontal(GUILayout.ExpandHeight(true));
+            EditorGUILayout.BeginHorizontal(GUILayout.Height(24f));
 
             GUIContent icon = EditorGUIUtility.IconContent("d_UnityEditor.ConsoleWindow");
             GUILayout.Label(icon, GUILayout.Width(22f), GUILayout.Height(22f));
 
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             GUILayout.FlexibleSpace();
-            EditorGUILayout.LabelField("Direct Cmd Forwarding", GuiStyles.HeaderTitle);
-            EditorGUILayout.LabelField("Scheherazade debugging tool", GuiStyles.HeaderSubtitle);
+            EditorGUILayout.LabelField("Direct Cmd Forwarding", EditorGuiStyles.HeaderTitle);
+            EditorGUILayout.LabelField("Scheherazade debugging tool", EditorGuiStyles.HeaderSubtitle);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndVertical();
 
@@ -193,7 +188,7 @@ private void OnDisable()
 
             Color oldBg = GUI.backgroundColor;
             GUI.backgroundColor = badgeColor;
-            EditorGUILayout.LabelField(badgeText, GuiStyles.Badge, GUILayout.Width(90f));
+            EditorGUILayout.LabelField(badgeText, EditorGuiStyles.Badge, GUILayout.Width(90f));
             GUI.backgroundColor = oldBg;
 
             EditorGUILayout.EndHorizontal();
@@ -201,8 +196,8 @@ private void OnDisable()
 
 private void DrawTargetSelector()
         {
-            EditorGUILayout.BeginVertical(GuiStyles.Card);
-            EditorGUILayout.LabelField("Target Mode", GuiStyles.SectionHeader);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.LabelField("Target Mode", EditorGuiStyles.SectionHeader);
 
             EditorGUILayout.BeginHorizontal();
 
@@ -214,7 +209,7 @@ private void DrawTargetSelector()
             if (GUILayout.Toggle(
                     isEditor,
                     "  \u25B6  Editor Play Mode",
-                    isEditor ? GuiStyles.ModeButtonActive : GuiStyles.ModeButtonInactive,
+                    isEditor ? EditorGuiStyles.ModeButtonActive : EditorGuiStyles.ModeButtonInactive,
                     GUILayout.Height(28f))
                 && !isEditor)
             {
@@ -232,7 +227,7 @@ private void DrawTargetSelector()
             if (GUILayout.Toggle(
                     isAdb,
                     "  \u25C9  Android ADB",
-                    isAdb ? GuiStyles.ModeButtonActive : GuiStyles.ModeButtonInactive,
+                    isAdb ? EditorGuiStyles.ModeButtonActive : EditorGuiStyles.ModeButtonInactive,
                     GUILayout.Height(28f))
                 && !isAdb)
             {
@@ -285,7 +280,7 @@ private void DrawTargetSelector()
         #region UI - Android Device Panel
 private void DrawAndroidDevicePanel()
         {
-            EditorGUILayout.BeginVertical(GuiStyles.Card);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
 
             DrawAndroidPanelHeader();
             DrawDeviceSelector();
@@ -298,7 +293,7 @@ private void DrawAndroidDevicePanel()
         private void DrawAndroidPanelHeader()
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Android Device", GuiStyles.SectionHeader);
+            EditorGUILayout.LabelField("Android Device", EditorGuiStyles.SectionHeader);
             GUILayout.FlexibleSpace();
 
             bool adbAvailable = !string.IsNullOrEmpty(_adbPath);
@@ -354,7 +349,7 @@ private void DrawDeviceSelector()
                 GUI.backgroundColor = new Color(0.3f, 0.5f, 0.8f, 0.6f);
                 EditorGUILayout.LabelField(
                     _devices.Count.ToString(),
-                    GuiStyles.Badge,
+                    EditorGuiStyles.Badge,
                     GUILayout.Width(22f));
                 GUI.backgroundColor = oldBg;
             }
@@ -434,12 +429,12 @@ private void DrawPackageIdRow()
         #region UI - Command Editor
         private void DrawCommandEditor()
         {
-            EditorGUILayout.BeginVertical(GuiStyles.Card);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
 
             DrawCommandEditorHeader();
             EditorGUILayout.LabelField(
                 "Format:  command_name --param value -p value positional_arg  (one per line)",
-                GuiStyles.InlineStatus);
+                EditorGuiStyles.InlineStatus);
 
 
 
@@ -450,7 +445,7 @@ private void DrawPackageIdRow()
 
             _commands = EditorGUILayout.TextArea(
                 _commands,
-                GuiStyles.CommandArea,
+                EditorGuiStyles.CommandArea,
                 GUILayout.ExpandHeight(true));
 
             EditorGUILayout.EndScrollView();
@@ -461,7 +456,7 @@ private void DrawPackageIdRow()
         private void DrawCommandEditorHeader()
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Commands", GuiStyles.SectionHeader);
+            EditorGUILayout.LabelField("Commands", EditorGuiStyles.SectionHeader);
             GUILayout.FlexibleSpace();
 
             int lineCount = string.IsNullOrEmpty(_commands)
@@ -472,7 +467,7 @@ private void DrawPackageIdRow()
             GUI.backgroundColor = new Color(0.35f, 0.35f, 0.35f);
             EditorGUILayout.LabelField(
                 $"{lineCount} line{(lineCount != 1 ? "s" : "")}",
-                GuiStyles.Badge,
+                EditorGuiStyles.Badge,
                 GUILayout.Width(56f));
             GUI.backgroundColor = oldBg;
 
@@ -507,10 +502,10 @@ private void DrawPackageIdRow()
 
         private void DrawHistoryPanel()
         {
-            EditorGUILayout.BeginVertical(GuiStyles.Card);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("History", GuiStyles.SectionHeader);
+            EditorGUILayout.LabelField("History", EditorGuiStyles.SectionHeader);
 
             Color bg = GUI.backgroundColor;
             GUI.backgroundColor = new Color(0.4f, 0.4f, 0.4f);
@@ -544,7 +539,7 @@ private void DrawPackageIdRow()
             EditorGUILayout.BeginVertical();
             EditorGUILayout.LabelField(
                 preview,
-                GuiStyles.HistoryEntry,
+                EditorGuiStyles.HistoryEntry,
                 GUILayout.ExpandWidth(true));
             EditorGUILayout.EndVertical();
 
@@ -619,7 +614,7 @@ private void DrawPackageIdRow()
                     && _selectedDeviceIndex >= 0;
             }
 
-            EditorGUILayout.BeginVertical(GuiStyles.Card);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
 
             EditorGUI.BeginDisabledGroup(!canSend);
             Color oldBg = GUI.backgroundColor;
@@ -685,7 +680,7 @@ private void DrawPackageIdRow()
             GUI.color = color;
             EditorGUILayout.LabelField(
                 $"{symbol}  {message}",
-                GuiStyles.InlineStatus);
+                EditorGuiStyles.InlineStatus);
             GUI.color = oldColor;
         }
         #endregion
@@ -719,7 +714,7 @@ private void DrawPackageIdRow()
                 {
                     _statusMessage = $"Commands sent successfully at {DateTime.Now:T}.";
                     _statusType = MessageType.Info;
-                    EditorPrefs.SetString(PrefLastCommands, _commands);
+                    Prefs.Set("LastCommands", _commands);
                     AddToHistory(commands);
                 }
             }
@@ -941,7 +936,7 @@ private async void DetectAppsAsync()
                 foreach (DetectedAppInfo app in _detectedApps)
                     cache.detectedPackageIds.Add(app.packageId);
 
-                EditorPrefs.SetString(PrefExternalStorageCache, JsonUtility.ToJson(cache));
+                Prefs.SetJson("ExternalStorageCache", cache);
             }
             catch
             {
@@ -953,11 +948,7 @@ private async void DetectAppsAsync()
         {
             try
             {
-                string json = EditorPrefs.GetString(PrefExternalStorageCache, string.Empty);
-                if (string.IsNullOrEmpty(json))
-                    return;
-
-                DetectionCacheData cache = JsonUtility.FromJson<DetectionCacheData>(json);
+                DetectionCacheData cache = Prefs.GetJson<DetectionCacheData>("ExternalStorageCache");
                 if (cache == null || string.IsNullOrEmpty(cache.externalStoragePath))
                     return;
 
@@ -1156,12 +1147,8 @@ private async void DetectAppsAsync()
         {
             try
             {
-                string json = EditorPrefs.GetString(PrefHistory, string.Empty);
-                if (!string.IsNullOrEmpty(json))
-                {
-                    HistoryData data = JsonUtility.FromJson<HistoryData>(json);
-                    _history = data?.entries ?? new List<string>();
-                }
+                HistoryData data = Prefs.GetJson<HistoryData>("History");
+                _history = data?.entries ?? new List<string>();
             }
             catch
             {
@@ -1176,7 +1163,7 @@ private async void DetectAppsAsync()
             try
             {
                 HistoryData data = new HistoryData { entries = _history };
-                EditorPrefs.SetString(PrefHistory, JsonUtility.ToJson(data));
+                Prefs.SetJson("History", data);
                 _historyDirty = false;
             }
             catch
@@ -1208,100 +1195,7 @@ private async void DetectAppsAsync()
             _history.Clear();
             _selectedHistoryIndex = -1;
             _historyDirty = true;
-            EditorPrefs.DeleteKey(PrefHistory);
-        }
-        #endregion
-
-        #region Nested Types - GuiStyles
-        private static class GuiStyles
-        {
-            public static GUIStyle HeaderTitle { get; private set; }
-            public static GUIStyle HeaderSubtitle { get; private set; }
-            public static GUIStyle SectionHeader { get; private set; }
-            public static GUIStyle Card { get; private set; }
-            public static GUIStyle Badge { get; private set; }
-            public static GUIStyle InlineStatus { get; private set; }
-            public static GUIStyle ModeButtonActive { get; private set; }
-            public static GUIStyle ModeButtonInactive { get; private set; }
-            public static GUIStyle CommandArea { get; private set; }
-            public static GUIStyle HistoryEntry { get; private set; }
-
-
-            private static bool _initialized;
-
-            public static void EnsureInitialized()
-            {
-                if (_initialized)
-                    return;
-                _initialized = true;
-
-                HeaderTitle = new GUIStyle(EditorStyles.boldLabel)
-                {
-                    fontSize = 14,
-                    padding = new RectOffset(6, 6, 4, 2),
-                    normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
-                };
-
-                HeaderSubtitle = new GUIStyle(EditorStyles.miniLabel)
-                {
-                    padding = new RectOffset(8, 8, 0, 4),
-                    normal = { textColor = new Color(0.55f, 0.55f, 0.55f) }
-                };
-
-                SectionHeader = new GUIStyle(EditorStyles.boldLabel)
-                {
-                    fontSize = 12,
-                    padding = new RectOffset(0, 0, 4, 4),
-                    normal = { textColor = new Color(0.8f, 0.85f, 0.9f) }
-                };
-
-                Card = new GUIStyle(EditorStyles.helpBox)
-                {
-                    padding = new RectOffset(10, 10, 8, 8),
-                    margin = new RectOffset(4, 4, 2, 2)
-                };
-
-                Badge = new GUIStyle(EditorStyles.miniLabel)
-                {
-                    alignment = TextAnchor.MiddleCenter,
-                    padding = new RectOffset(6, 6, 2, 2),
-                    fontSize = 10
-                };
-
-                InlineStatus = new GUIStyle(EditorStyles.miniLabel)
-                {
-                    richText = true,
-                    padding = new RectOffset(4, 4, 2, 2)
-                };
-
-                ModeButtonActive = new GUIStyle(EditorStyles.miniButton)
-                {
-                    normal = { textColor = Color.white },
-                    fontStyle = FontStyle.Bold
-                };
-
-                ModeButtonInactive = new GUIStyle(EditorStyles.miniButton)
-                {
-                    normal = { textColor = new Color(0.55f, 0.55f, 0.55f) }
-                };
-
-                CommandArea = new GUIStyle(EditorStyles.textArea)
-                {
-                    font = EditorStyles.standardFont,
-                    fontSize = 12,
-                    padding = new RectOffset(8, 8, 6, 6),
-                    wordWrap = false
-                };
-
-                HistoryEntry = new GUIStyle(EditorStyles.label)
-                {
-                    fontSize = 11,
-                    wordWrap = true,
-                    padding = new RectOffset(4, 4, 2, 2),
-                    normal = { textColor = new Color(0.75f, 0.75f, 0.75f) }
-                };
-
-            }
+            Prefs.Delete("History");
         }
         #endregion
 

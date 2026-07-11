@@ -4,6 +4,7 @@
 
 using System;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 
@@ -56,52 +57,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             public Action<string> OnPlaceholderClicked;
             private Vector2 _scroll;
             private string _filter = "";
-            private GUIStyle _hoverStyle;
-
-            private GUIStyle HoverButtonStyle
-            {
-                get
-                {
-                    if (_hoverStyle == null)
-                    {
-                        _hoverStyle = new GUIStyle(
-                            EditorStyles.boldLabel)
-                        {
-                            padding = new RectOffset(
-                                4, 4, 3, 3),
-                            hover = new GUIStyleState
-                            {
-                                textColor = Color.white,
-                                background = MakeTex(
-                                    1, 1,
-                                    new Color(0.25f, 0.5f,
-                                        0.85f, 0.5f))
-                            }
-                        };
-                    }
-                    return _hoverStyle;
-                }
-            }
-
-            private static Texture2D MakeTex(
-                int w, int h, Color col)
-            {
-                Color[] pix = new Color[w * h];
-                for (int i = 0; i < pix.Length; i++)
-                    pix[i] = col;
-                Texture2D tex = new(w, h);
-                tex.SetPixels(pix);
-                tex.Apply();
-                return tex;
-            }
 
             public override Vector2 GetWindowSize() => new(380, 360);
 
             public override void OnGUI(Rect rect)
             {
-                EditorGUILayout.LabelField("Build Name Placeholders", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField("Use these in build name and folder templates.", EditorStyles.miniLabel);
-                GUILayout.Space(4);
+                EditorGuiLayout.DrawSectionHeader(
+                    "Build Name Placeholders",
+                    "Use these in build name and folder templates.");
                 _filter = EditorGUILayout.TextField("Filter", _filter);
                 GUILayout.Space(4);
                 _scroll = EditorGUILayout.BeginScrollView(_scroll);
@@ -115,7 +78,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 foreach (var (key, desc) in filtered)
                 {
                     EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                    if (GUILayout.Button(key, HoverButtonStyle,
+                    if (GUILayout.Button(key, EditorGuiStyles.HoverBoldLabel,
                             GUILayout.Width(150)))
                     {
                         OnPlaceholderClicked?.Invoke(key);

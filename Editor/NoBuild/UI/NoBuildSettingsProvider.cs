@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
@@ -45,9 +46,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (_stylesBuilt) return;
             _stylesBuilt = true;
 
-            Texture2D blank = new Texture2D(1, 1);
-            blank.SetPixel(0, 0, Color.clear); blank.Apply();
-
             _entryStyle = new GUIStyle
             {
                 fixedHeight = EntryH,
@@ -56,8 +54,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 margin = new RectOffset(),
                 clipping = TextClipping.Clip,
                 fontSize = 11,
-                normal = { textColor = new Color(0.85f, 0.85f, 0.85f), background = blank },
-                hover = { textColor = Color.white, background = blank },
+                normal = { textColor = new Color(0.85f, 0.85f, 0.85f), background = EditorGuiTextures.ClearTex },
+                hover = { textColor = Color.white, background = EditorGuiTextures.ClearTex },
             };
             _entrySelStyle = new GUIStyle(_entryStyle)
             {
@@ -75,7 +73,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 padding = new RectOffset(), margin = new RectOffset(2, 4, 2, 2)
             };
 
-            // Tab bar styles
             _tabStyleInactive = new GUIStyle(GUI.skin.button)
             {
                 fixedHeight = 24f,
@@ -306,7 +303,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 // ── Label ──
                 var style = isSel ? _entrySelStyle : isAct ? _entryActStyle : _entryStyle;
-                string label = Trunc(names[i], 18);
+                string label = EditorGuiStrings.Truncate(names[i], 18);
 
                 Rect btnRect = rowRect;
                 if (platforms != null && i < platforms.Count
@@ -1627,6 +1624,31 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.EndHorizontal();
         }
 
+        private static int LPopup(string label, int val, string[] opts)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            int r = EditorGUILayout.Popup(val, opts);
+            EditorGUILayout.EndHorizontal();
+            return r;
+        }
+
+        private static void LblTxtHint(string label, SerializedProperty prop)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
+            if (GUILayout.Button("?", GUILayout.Width(22)))
+                PlaceholderGuide.Show(
+                    GUILayoutUtility.GetLastRect(),
+                    key =>
+                    {
+                        prop.stringValue += key;
+                        prop.serializedObject.ApplyModifiedProperties();
+                    });
+            EditorGUILayout.EndHorizontal();
+        }
+
         private static void LblBtnGroup(string label, SerializedProperty prop,
             string[] names, int[] values)
         {
@@ -1650,31 +1672,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.backgroundColor = oldBg;
             }
 
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private static int LPopup(string label, int val, string[] opts)
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
-            int r = EditorGUILayout.Popup(val, opts);
-            EditorGUILayout.EndHorizontal();
-            return r;
-        }
-
-        private static void LblTxtHint(string label, SerializedProperty prop)
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
-            prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
-            if (GUILayout.Button("?", GUILayout.Width(22)))
-                PlaceholderGuide.Show(
-                    GUILayoutUtility.GetLastRect(),
-                    key =>
-                    {
-                        prop.stringValue += key;
-                        prop.serializedObject.ApplyModifiedProperties();
-                    });
             EditorGUILayout.EndHorizontal();
         }
 
@@ -1750,10 +1747,5 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             _selFlag = Mathf.Min(_selFlag, s.flagDefinitions.Count - 1);
         }
 
-        private static string Trunc(string s, int max)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Length > max ? s.Substring(0, max - 1) + "\u2026" : s;
-        }
     }
 }

@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 
@@ -22,45 +23,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private static float ClampH(float h) => Mathf.Min(MaxH, Mathf.Max(130f, h));
 
-        // ── Shared Hover Style ──────────────────────
-        private static GUIStyle _hoverLabelStyle;
-        private static bool _hoverStyleBuilt;
 
-        private static GUIStyle PopupRowStyle
-        {
-            get
-            {
-                if (!_hoverStyleBuilt) BuildHoverStyle();
-                return _hoverLabelStyle;
-            }
-        }
-
-        private static void BuildHoverStyle()
-        {
-            _hoverStyleBuilt = true;
-            _hoverLabelStyle = new GUIStyle(EditorStyles.label)
-            {
-                padding = new RectOffset(4, 4, 3, 3),
-                hover = new GUIStyleState
-                {
-                    textColor = Color.white,
-                    background = MakeTex(1, 1,
-                        new Color(0.25f, 0.5f, 0.85f, 0.5f))
-                }
-            };
-        }
-
-        private static Texture2D MakeTex(
-            int w, int h, Color col)
-        {
-            Color[] pix = new Color[w * h];
-            for (int i = 0; i < pix.Length; i++)
-                pix[i] = col;
-            Texture2D tex = new(w, h);
-            tex.SetPixels(pix);
-            tex.Apply();
-            return tex;
-        }
 
         public static PopupWindowContent CreateSceneSetDropdown(
             NoBuildSettings s,
@@ -125,7 +88,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawSectionHeader("Scene Sets",
+                EditorGuiLayout.DrawSectionHeader("Scene Sets",
                     "Switch all scenes at once.");
 
                 if (_s.sceneSets.Count == 0)
@@ -149,8 +112,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             GUILayout.Width(20));
                         GUI.color = Color.white;
 
-                        if (GUILayout.Button(Trunc(set.setName, 32),
-                                PopupRowStyle))
+                        if (GUILayout.Button(EditorGuiStrings.Truncate(set.setName, 32),
+                                EditorGuiStyles.HoverLabel))
                         {
                             _s.activeSceneSetIndex = i;
                             EditorUtility.SetDirty(_s);
@@ -172,7 +135,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 SceneSet activeSet = _s.ActiveSceneSet;
                 List<SceneCombination> combos = activeSet?.combinations;
 
-                DrawSectionHeader("Open Scenes",
+                EditorGuiLayout.DrawSectionHeader("Open Scenes",
                     activeSet != null
                         ? $"Quick-switch for '{activeSet.setName}' [1]..[9]."
                         : "Quick-switch shortcuts [1]..[9].");
@@ -207,7 +170,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                         if (valid)
                         {
-                            if (GUILayout.Button(Trunc(label, 38), PopupRowStyle))
+                            if (GUILayout.Button(EditorGuiStrings.Truncate(label, 38), EditorGuiStyles.HoverLabel))
                             {
                                 _onCombo?.Invoke(c);
                                 editorWindow.Close();
@@ -215,7 +178,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         }
                         else
                         {
-                            GUILayout.Label(Trunc(label, 38), EditorStyles.label);
+                            GUILayout.Label(EditorGuiStrings.Truncate(label, 38), EditorStyles.label);
                         }
 
                         EditorGUILayout.EndHorizontal();
@@ -230,13 +193,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 }
             }
 
-            private static void DrawSectionHeader(string title, string sub)
-            {
-                GUILayout.Space(2);
-                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
-                EditorGUILayout.LabelField(sub, EditorStyles.miniLabel);
-                GUILayout.Space(2);
-            }
         }
 
         // ══════════════════════════════════════════════════
@@ -261,11 +217,11 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawHdr("Script Defines", "Toggle scripting define symbols per set.");
+                EditorGuiLayout.DrawHeaderBox("Script Defines", "Toggle scripting define symbols per set.");
 
                 if (_s.scriptDefinitionSets.Count == 0)
                 {
-                    DrawEmpty("No define sets.", "Create one in Project Settings \u2192 NoBuild.");
+                    EditorGuiLayout.DrawEmptyState("No define sets.", "Create one in Project Settings \u2192 NoBuild.");
                     return;
                 }
 
@@ -280,8 +236,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     GUILayout.Label(active ? "\u25C9" : "\u25CB",
                         GUILayout.Width(20));
                     GUI.color = Color.white;
-                    if (GUILayout.Button(Trunc(set.setName, 30),
-                            PopupRowStyle))
+                    if (GUILayout.Button(EditorGuiStrings.Truncate(set.setName, 30),
+                            EditorGuiStyles.HoverLabel))
                     {
                         _s.activeScriptDefinitionSetIndex = i;
                         EditorUtility.SetDirty(_s);
@@ -331,12 +287,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawHdr("Build Profiles",
+                EditorGuiLayout.DrawHeaderBox("Build Profiles",
                     "One-click builds with configured settings.");
 
                 if (_s.buildProfiles.Count == 0)
                 {
-                    DrawEmpty("No build profiles.",
+                    EditorGuiLayout.DrawEmptyState("No build profiles.",
                         "Create one in Project Settings \u2192 NoBuild.");
                     return;
                 }
@@ -364,12 +320,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             GUILayout.Label(icon, GUILayout.Width(22), GUILayout.Height(22));
 
                         EditorGUILayout.BeginVertical();
-                        GUILayout.Label(Trunc(p.profileName, 30),
+                        GUILayout.Label(EditorGuiStrings.Truncate(p.profileName, 30),
                             EditorStyles.boldLabel);
                         string prev = BuildNameResolver.Resolve(
                             p.buildNameTemplate?.template ?? "{app-version}",
                             p, _s);
-                        GUILayout.Label(Trunc(prev, 40),
+                        GUILayout.Label(EditorGuiStrings.Truncate(prev, 40),
                             EditorStyles.miniLabel);
                         EditorGUILayout.EndVertical();
                         GUILayout.FlexibleSpace();
@@ -550,18 +506,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                DrawHdr("Build & Run", "Select target device(s).");
+                EditorGuiLayout.DrawHeaderBox("Build & Run", "Select target device(s).");
 
                 if (_devices.Count == 0)
                 {
-                    DrawEmpty("No devices connected.", "Connect via USB or start an emulator.");
+                    EditorGuiLayout.DrawEmptyState("No devices connected.", "Connect via USB or start an emulator.");
                     return;
                 }
 
                 // ── First Device ──
                 EditorGUILayout.BeginHorizontal(
                     EditorStyles.helpBox);
-                if (GUILayout.Button("First Device", PopupRowStyle))
+                if (GUILayout.Button("First Device", EditorGuiStyles.HoverLabel))
                 {
                     _onSelected?.Invoke(BuildExecutor.DeviceOption.FirstDevice, null);
                     editorWindow.Close();
@@ -570,7 +526,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 // ── All Devices ──
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                if (GUILayout.Button($"All Devices [{_devices.Count} device(s)]", PopupRowStyle))
+                if (GUILayout.Button($"All Devices [{_devices.Count} device(s)]", EditorGuiStyles.HoverLabel))
                 {
                     _onSelected?.Invoke(BuildExecutor.DeviceOption.AllDevices, null);
                     editorWindow.Close();
@@ -584,7 +540,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 {
                     var d = _devices[i];
                     EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                    if (GUILayout.Button(Trunc(d.DisplayName, 40), PopupRowStyle))
+                    if (GUILayout.Button(EditorGuiStrings.Truncate(d.DisplayName, 40), EditorGuiStyles.HoverLabel))
                     {
                         _onSelected?.Invoke(BuildExecutor.DeviceOption.SpecificDevice, d.Serial);
                         editorWindow.Close();
@@ -594,37 +550,5 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
         }
 
-        // ══════════════════════════════════════════════════
-        // ── Helpers
-        // ══════════════════════════════════════════════════
-
-        private static void DrawHdr(string t, string s)
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(t, EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(s, EditorStyles.miniLabel);
-            EditorGUILayout.EndVertical();
-            GUILayout.Space(4);
-        }
-
-        private static void DrawEmpty(string m, string s)
-        {
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.BeginVertical();
-            GUILayout.Label(m, EditorStyles.centeredGreyMiniLabel);
-            GUILayout.Label(s, EditorStyles.centeredGreyMiniLabel);
-            EditorGUILayout.EndVertical();
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-            GUILayout.FlexibleSpace();
-        }
-
-        private static string Trunc(string s, int max)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Length > max ? s.Substring(0, max - 1) + "\u2026" : s;
-        }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -109,7 +110,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private const int PrevMax = 35;
         private const int Zero = 0;
         private const int One = 1;
-        private static readonly Color GreenBtn = new Color(0.3f, 0.7f, 0.3f);
         private static readonly string BulletOn = "\u25C9";
         private static readonly string BulletOff = "\u25CB";
 
@@ -119,43 +119,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private bool _foldC = true;
         private bool _foldD = true;
         private Vector2 _scroll;
-        private GUIStyle _hoverStyle;
-
-        private GUIStyle HoverLabelStyle
-        {
-            get
-            {
-                if (_hoverStyle == null)
-                {
-                    _hoverStyle = new GUIStyle(
-                        EditorStyles.label)
-                    {
-                        padding = new RectOffset(
-                            4, 4, 3, 3),
-                        hover = new GUIStyleState
-                        {
-                            textColor = Color.white,
-                            background = MakeTex(1, 1,
-                                new Color(0.25f, 0.5f,
-                                    0.85f, 0.5f))
-                        }
-                    };
-                }
-                return _hoverStyle;
-            }
-        }
-
-        private static Texture2D MakeTex(
-            int w, int h, Color col)
-        {
-            Color[] pix = new Color[w * h];
-            for (int i = 0; i < pix.Length; i++)
-                pix[i] = col;
-            Texture2D tex = new(w, h);
-            tex.SetPixels(pix);
-            tex.Apply();
-            return tex;
-        }
 
         public NoBuildCombinedPopup(NoBuildSettings s) { _settings = s; }
 
@@ -187,7 +150,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.color = a ? Color.green : Color.gray;
                 GUILayout.Label(a ? BulletOn : BulletOff, GUILayout.Width(BulletW));
                 GUI.color = Color.white;
-                if (GUILayout.Button(T(s.setName, LabelMax), HoverLabelStyle))
+                if (GUILayout.Button(EditorGuiStrings.Truncate(s.setName, LabelMax), EditorGuiStyles.HoverLabel))
                 {
                     _settings.activeSceneSetIndex = i;
                     EditorUtility.SetDirty(_settings);
@@ -213,7 +176,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.backgroundColor = Color.gray;
                 GUILayout.Label((i + One).ToString(), GUI.skin.box, GUILayout.Width(BadgeW), GUILayout.Height(BadgeH));
                 GUI.backgroundColor = Color.white;
-                if (GUILayout.Button(T(c.DisplayName, LabelMax), HoverLabelStyle))
+                if (GUILayout.Button(EditorGuiStrings.Truncate(c.DisplayName, LabelMax), EditorGuiStyles.HoverLabel))
                 { SceneSwitcher.SwitchToCombination(c, active); editorWindow.Close(); }
                 int sc = c.sceneReferences?.Count(r => r.enabled && r.IsValid) ?? Zero;
                 GUILayout.Label(sc + " sc", EditorStyles.miniLabel, GUILayout.Width(35));
@@ -234,7 +197,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.color = a ? Color.green : Color.gray;
                 GUILayout.Label(a ? BulletOn : BulletOff, GUILayout.Width(BulletW));
                 GUI.color = Color.white;
-                if (GUILayout.Button(T(s.setName, LabelMax), HoverLabelStyle))
+                if (GUILayout.Button(EditorGuiStrings.Truncate(s.setName, LabelMax), EditorGuiStyles.HoverLabel))
                 {
                     _settings.activeScriptDefinitionSetIndex = i;
                     EditorUtility.SetDirty(_settings);
@@ -263,13 +226,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         GUILayout.Height(20));
 
                 EditorGUILayout.BeginVertical();
-                GUILayout.Label(T(bp.profileName, LabelMax), EditorStyles.boldLabel);
+                GUILayout.Label(EditorGuiStrings.Truncate(bp.profileName, LabelMax), EditorStyles.boldLabel);
                 string prev = BuildNameResolver.Resolve(
                     bp.buildNameTemplate?.template ?? "{app-version}", bp, _settings);
-                GUILayout.Label(T(prev, PrevMax), EditorStyles.miniLabel);
+                GUILayout.Label(EditorGuiStrings.Truncate(prev, PrevMax), EditorStyles.miniLabel);
                 EditorGUILayout.EndVertical();
                 GUILayout.FlexibleSpace();
-                GUI.backgroundColor = GreenBtn;
+                GUI.backgroundColor = EditorGuiColors.BuildGreen;
                 if (GUILayout.Button("Build", GUILayout.Width(BtnW), GUILayout.Height(BtnH)))
                 { BuildExecutor.Build(bp); editorWindow.Close(); }
                 GUI.backgroundColor = Color.white;
@@ -298,8 +261,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
         }
 
-        private static string T(string s, int max) =>
-            string.IsNullOrEmpty(s) ? s : s.Length > max ? s.Substring(Zero, max - One) + "\u2026" : s;
     }
 }
 

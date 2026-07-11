@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using Com.Hapiga.Scheherazade.Common.Integration;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.IAR;
@@ -24,8 +25,10 @@ namespace Com.Hapiga.Scheherazade.Integration
         private readonly string _sectionName;
         private readonly string _managerLabel;
         private readonly IReadOnlyList<SettingsTab> _tabs;
+        private readonly Type _filterFlagsEnumType;
 
         private int _selectedTabIndex;
+        private int _featureFilter;
 
         internal BaseIntegrationSettingsProvider(
             string path,
@@ -33,12 +36,14 @@ namespace Com.Hapiga.Scheherazade.Integration
             string sectionName,
             string managerLabel,
             IReadOnlyList<SettingsTab> tabs = null,
-            IEnumerable<string> keywords = null
+            IEnumerable<string> keywords = null,
+            Type filterFlagsEnumType = null
         ) : base(path, scopes, keywords)
         {
             _sectionName = sectionName;
             _managerLabel = managerLabel;
             _tabs = tabs;
+            _filterFlagsEnumType = filterFlagsEnumType;
         }
 
         public override void OnGUI(string searchContext)
@@ -61,7 +66,9 @@ namespace Com.Hapiga.Scheherazade.Integration
                 ref manager,
                 centre,
                 _tabs,
-                ref _selectedTabIndex
+                ref _selectedTabIndex,
+                ref _featureFilter,
+                _filterFlagsEnumType
             );
 
             DrawExtraContent(manager);
@@ -154,7 +161,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
                         new[] { "FIREBASE_ANALYTICS" },
-                        new[] { "Firebase.Analytics.FirebaseAnalytics" }
+                        new[] { "Firebase.Analytics.FirebaseAnalytics" },
+                        featureFlags: (int)TrackingProviderFeatures.AllFeatures
                     ),
                     new ProviderDescriptor(
                         "Adjust",
@@ -162,7 +170,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
                         new[] { "TRACKING_ADJUST" },
-                        new[] { "AdjustSdk.Adjust" }
+                        new[] { "AdjustSdk.Adjust" },
+                        featureFlags: (int)TrackingProviderFeatures.Revenue
                     ),
                     new ProviderDescriptor(
                         "AppMetrica",
@@ -170,7 +179,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
                         new[] { "TRACKING_APPMETRICA" },
-                        new[] { "Io.AppMetrica.AppMetrica" }
+                        new[] { "Io.AppMetrica.AppMetrica" },
+                        featureFlags: (int)TrackingProviderFeatures.AllFeatures
                     )
                 }
             )
@@ -180,7 +190,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Tracking Manager Configuration", "Tracking Manager Asset",
-            Tabs, keywords)
+            Tabs, keywords, filterFlagsEnumType: typeof(TrackingProviderFeatures))
         { }
 
         [SettingsProvider]
@@ -785,6 +795,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         public string ProviderTypeName { get; }
         public string[] RequiredDefines { get; }
         public string[] DependencyTypeNames { get; }
+        public int FeatureFlags { get; }
 
         public ProviderDescriptor(
             string displayName,
@@ -792,7 +803,8 @@ namespace Com.Hapiga.Scheherazade.Integration
             ProviderBindingMode bindingMode,
             string providerTypeName,
             string[] requiredDefines = null,
-            string[] dependencyTypeNames = null
+            string[] dependencyTypeNames = null,
+            int featureFlags = 0
         )
         {
             DisplayName = displayName;
@@ -801,6 +813,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             ProviderTypeName = providerTypeName;
             RequiredDefines = requiredDefines ?? Array.Empty<string>();
             DependencyTypeNames = dependencyTypeNames ?? Array.Empty<string>();
+            FeatureFlags = featureFlags;
         }
     }
 
@@ -904,7 +917,9 @@ namespace Com.Hapiga.Scheherazade.Integration
             ref ScriptableObject currentManager,
             IntegrationCentre centre,
             IReadOnlyList<SettingsTab> tabs,
-            ref int selectedTabIndex
+            ref int selectedTabIndex,
+            ref int featureFilterValue,
+            Type filterFlagsEnumType = null
         ) where TInterface : class
         {
             if (concreteTypes.Length > 1)
@@ -1015,11 +1030,20 @@ namespace Com.Hapiga.Scheherazade.Integration
                 SettingsTab activeTab = tabs[selectedTabIndex - 1];
                 EditorGUILayout.LabelField(activeTab.Name, EditorStyles.boldLabel);
 
+                // Render feature filter bar if any descriptor has feature flags
+                if (filterFlagsEnumType != null &&
+                    activeTab.Descriptors != null &&
+                    activeTab.Descriptors.Any(d => d.FeatureFlags != 0))
+                {
+                    featureFilterValue = EditorGuiLayout.DrawFeatureFilterBar(
+                        filterFlagsEnumType, featureFilterValue);
+                }
+
                 if (activeTab.Descriptors != null && activeTab.Descriptors.Length > 0)
                 {
                     foreach (var descriptor in activeTab.Descriptors)
                     {
-                        DrawProviderSection(currentManager, descriptor);
+                        DrawProviderSection(currentManager, descriptor, featureFilterValue);
                     }
                 }
             }
@@ -1101,9 +1125,14 @@ namespace Com.Hapiga.Scheherazade.Integration
 
         internal static void DrawProviderSection(
             ScriptableObject manager,
-            ProviderDescriptor descriptor
+            ProviderDescriptor descriptor,
+            int featureFilter = -1
         )
         {
+            // Feature filter guard: skip providers that don't support the selected feature
+            if (featureFilter > 0 && (descriptor.FeatureFlags & featureFilter) == 0)
+                return;
+
             GUILayout.Space(4);
 
             SerializedObject serializedManager = new SerializedObject(manager);
