@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
 using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using Com.Hapiga.Scheherazade.Common.Integration;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
@@ -127,7 +128,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Single,
                         "Com.Hapiga.Scheherazade.Common.Integration.Ads.ApplovinMaxAdsServiceProvider",
                         new[] { "APPLOVIN_MAX" },
-                        new[] { "MaxSdk" }
+                        new[] { "MaxSdk" },
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Ads.IAdsServiceProvider"
                     )
                 }
             )
@@ -162,7 +164,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
                         new[] { "FIREBASE_ANALYTICS" },
                         new[] { "Firebase.Analytics.FirebaseAnalytics" },
-                        featureFlags: (int)TrackingProviderFeatures.AllFeatures
+                        featureFlags: (int)TrackingProviderFeatures.AllFeatures,
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     ),
                     new ProviderDescriptor(
                         "Adjust",
@@ -171,7 +174,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
                         new[] { "TRACKING_ADJUST" },
                         new[] { "AdjustSdk.Adjust" },
-                        featureFlags: (int)TrackingProviderFeatures.Revenue
+                        featureFlags: (int)TrackingProviderFeatures.Revenue,
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     ),
                     new ProviderDescriptor(
                         "AppMetrica",
@@ -180,7 +184,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
                         new[] { "TRACKING_APPMETRICA" },
                         new[] { "Io.AppMetrica.AppMetrica" },
-                        featureFlags: (int)TrackingProviderFeatures.AllFeatures
+                        featureFlags: (int)TrackingProviderFeatures.AllFeatures,
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     )
                 }
             )
@@ -214,13 +219,15 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Single,
                         "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.UnityInAppPurchaseProvider",
                         new[] { "UNITY_PURCHASING" },
-                        new[] { "UnityEngine.Purchasing.StandardPurchasingModule" }
+                        new[] { "UnityEngine.Purchasing.StandardPurchasingModule" },
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
                     ),
                     new ProviderDescriptor(
                         "Pseudo Provider",
                         "provider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider"
+                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider",
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
                     )
                 }
             )
@@ -256,7 +263,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
                         new[] { "FIREBASE_REMOTE" },
-                        new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" }
+                        new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" },
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.IRemoteConfigProvider"
                     )
                 }
             )
@@ -382,7 +390,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Open Store",
                         "reviewProvider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.IAR.OpenStoreInAppReviewModule"
+                        "Com.Hapiga.Scheherazade.Common.Integration.IAR.OpenStoreInAppReviewModule",
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.IAR.IInAppReviewModule"
                     )
                 }
             )
@@ -459,7 +468,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Cached",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.CachedSegmentationProvider"
+                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.CachedSegmentationProvider",
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
                     ),
                     new ProviderDescriptor(
                         "Adjust",
@@ -467,7 +477,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.AdjustSegmentationProvider",
                         new[] { "TRACKING_ADJUST" },
-                        new[] { "AdjustSdk.Adjust" }
+                        new[] { "AdjustSdk.Adjust" },
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
                     )
                 }
             ),
@@ -481,7 +492,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         ProviderBindingMode.Collection,
                         "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.FirebaseUserSegmentationTracker",
                         new[] { "FIREBASE_ANALYTICS" },
-                        new[] { "Firebase.Analytics.FirebaseAnalytics" }
+                        new[] { "Firebase.Analytics.FirebaseAnalytics" },
+                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationTracker"
                     )
                 }
             )
@@ -796,6 +808,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         public string[] RequiredDefines { get; }
         public string[] DependencyTypeNames { get; }
         public int FeatureFlags { get; }
+        public string CustomProviderBaseTypeName { get; }
 
         public ProviderDescriptor(
             string displayName,
@@ -804,7 +817,8 @@ namespace Com.Hapiga.Scheherazade.Integration
             string providerTypeName,
             string[] requiredDefines = null,
             string[] dependencyTypeNames = null,
-            int featureFlags = 0
+            int featureFlags = 0,
+            string customProviderBaseTypeName = null
         )
         {
             DisplayName = displayName;
@@ -814,6 +828,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             RequiredDefines = requiredDefines ?? Array.Empty<string>();
             DependencyTypeNames = dependencyTypeNames ?? Array.Empty<string>();
             FeatureFlags = featureFlags;
+            CustomProviderBaseTypeName = customProviderBaseTypeName;
         }
     }
 
@@ -945,6 +960,19 @@ namespace Com.Hapiga.Scheherazade.Integration
                     "(e.g., public sealed class MyManager : TrackingManagerBase<MyManager> {{ }}).",
                     MessageType.Warning
                 );
+
+                string defaultClassName = typeof(TInterface).Name.StartsWith("I")
+                    ? typeof(TInterface).Name.Substring(1)
+                    : typeof(TInterface).Name + "Manager";
+
+                if (GUILayout.Button("Enable Manager", GUILayout.Height(30)))
+                {
+                    ScriptTemplateGenerator.CreateManagerScript(
+                        defaultClassName,
+                        "Assets/",
+                        typeof(TInterface));
+                }
+
                 return;
             }
 
@@ -1045,6 +1073,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                     {
                         DrawProviderSection(currentManager, descriptor, featureFilterValue);
                     }
+
+                    DrawNewCustomProviderButton(activeTab.Descriptors);
                 }
             }
         }
@@ -2088,6 +2118,42 @@ namespace Com.Hapiga.Scheherazade.Integration
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);
+            }
+        }
+
+        private static void DrawNewCustomProviderButton(ProviderDescriptor[] descriptors)
+        {
+            string baseTypeName = descriptors
+                .Select(d => d.CustomProviderBaseTypeName)
+                .FirstOrDefault(n => !string.IsNullOrEmpty(n));
+
+            if (string.IsNullOrEmpty(baseTypeName))
+            {
+                return;
+            }
+
+            Type targetType = ScriptTemplateGenerator.ResolveType(baseTypeName);
+            if (targetType == null)
+            {
+                return;
+            }
+
+            GUILayout.Space(8);
+            Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(
+                dividerRect,
+                new Color(0.5f, 0.5f, 0.5f, 0.3f));
+            GUILayout.Space(4);
+
+            if (GUILayout.Button("New Custom Provider", GUILayout.Height(25)))
+            {
+                ScriptTemplateGenerator.CreatePluginScript(
+                    null,
+                    "Assets/",
+                    targetType,
+                    targetType.IsInterface
+                        ? ScriptTemplateGenerator.GenerationMode.InterfaceImplementation
+                        : ScriptTemplateGenerator.GenerationMode.AbstractClassInheritance);
             }
         }
 

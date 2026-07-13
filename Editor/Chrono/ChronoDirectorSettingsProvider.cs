@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Com.Hapiga.Scheherazade.Common.Chrono;
+using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
@@ -225,6 +226,11 @@ namespace Com.Hapiga.Scheherazade.Common.Chrono.Editor
 #else
             DrawNtpLockedRow(timeProviderProp);
 #endif
+
+            DrawCreateCustomButton(
+                "New Custom Time Provider",
+                typeof(TimeProviderBase),
+                ScriptTemplateGenerator.GenerationMode.AbstractClassInheritance);
         }
 
         private void DrawProviderRow(
@@ -511,6 +517,11 @@ namespace Com.Hapiga.Scheherazade.Common.Chrono.Editor
                 currentPersister,
                 persisterProp
             );
+
+            DrawCreateCustomButton(
+                "New Custom Persister",
+                typeof(IChronoPersister),
+                ScriptTemplateGenerator.GenerationMode.InterfaceImplementation);
         }
 
         private void DrawPersisterRow(
@@ -937,6 +948,30 @@ namespace Com.Hapiga.Scheherazade.Common.Chrono.Editor
                 GUILayout.Width(24),
                 GUILayout.Height(18)
             );
+        }
+
+        private static void DrawCreateCustomButton(
+            string label,
+            Type targetType,
+            ScriptTemplateGenerator.GenerationMode mode)
+        {
+            GUILayout.Space(8);
+
+            Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(
+                dividerRect,
+                new Color(0.5f, 0.5f, 0.5f, 0.3f));
+
+            GUILayout.Space(4);
+
+            if (GUILayout.Button(label, GUILayout.Height(25)))
+            {
+                ScriptTemplateGenerator.CreatePluginScript(
+                    null,
+                    "Assets/",
+                    targetType,
+                    mode);
+            }
         }
 
         private void DestroyTimeProviderEditor()

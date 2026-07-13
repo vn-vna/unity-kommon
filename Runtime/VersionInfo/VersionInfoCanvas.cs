@@ -1,5 +1,3 @@
-using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Singleton;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -7,32 +5,18 @@ namespace Com.Hapiga.Scheherazade.Common.VIC
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Canvas))]
-    public abstract class VersionInfoCanvas<T> :
-        SingletonBehavior<T>
-        where T : VersionInfoCanvas<T>
+    [AddComponentMenu("Scheherazade/Version Info/Version Info Canvas")]
+    public class VersionInfoCanvas : MonoBehaviour
     {
-        [SerializeField]
-        [HideInInspector]
-        private Canvas kanvas;
-
-        [SerializeField]
-        private VersionInfoDefinition versionInfoDefinition;
-
-#if UNITY_EDITOR
-        private void OnValidate()
+        #region Public Methods
+        public void SetVersionInfo(string version)
         {
-            kanvas = GetComponent<Canvas>();
-        }
-#endif
-
-        private void Start()
-        {
-            if (versionInfoDefinition != null)
+            Text[] texts = GetComponentsInChildren<Text>(true);
+            foreach (Text text in texts)
             {
-                SetVersionInfo(versionInfoDefinition.VersionTag);
+                text.text = version;
             }
         }
-
-        protected abstract void SetVersionInfo(string vi);
+        #endregion
     }
 }
