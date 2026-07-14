@@ -5,6 +5,10 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
 {
+    [ResourceProvider(
+        "Reference Table",
+        "Synchronous lookup from an IAsyncResourceReferenceTable asset. Override ReferenceTable property."
+    )]
     public abstract class ReferenceTableAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,

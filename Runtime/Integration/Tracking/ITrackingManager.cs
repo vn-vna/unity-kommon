@@ -40,5 +40,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 Parameters = TrackingActionInfo.CreateParametersDictionary(parameters)
             });
         }
+
+        void TrackTemplatedEvent(string eventName);
+
+        void TrackTemplatedEvent(string eventName, ProviderIdentity mask);
     }
 }

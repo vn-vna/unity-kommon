@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
 using Com.Hapiga.Scheherazade.Common.Threading;
@@ -44,6 +46,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private TrackingProviderFeatures enabledFeatures = TrackingProviderFeatures.AllFeatures;
 
         [SerializeField]
+        [HideInInspector]
         private ScriptableObject[] initialProviders;
 
         [SerializeField]
@@ -55,6 +58,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         [SerializeField]
         [Tooltip("Determines when the tracking manager reports as Ready.")]
         private ReadyThreshold readyThreshold = ReadyThreshold.AllProviders;
+
+        [SerializeField]
+        [HideInInspector]
+        [Tooltip("Parameter providers for templated tracking events")]
+        private ScriptableObject[] templatedParameterProviders;
+
+        [SerializeField]
+        [HideInInspector]
+        [Tooltip("Templated tracking event definitions")]
+        private TemplatedTrackingEvent[] templatedEvents;
         #endregion
 
         #region Private Fields
@@ -64,6 +77,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private Queue<Action> _pendingActions;
         private Dictionary<ITrackingProvider, Queue<Action>> _providerPendingBuffers;
         private float _timer;
+
+        private List<ITemplatedTrackingParametersProvider> _templatedProviders;
+        private Dictionary<ITemplatedTrackingParametersProvider, Dictionary<string, Func<object>>> _getterCache;
+        private Dictionary<ITemplatedTrackingParametersProvider, Dictionary<string, Func<object>>> _factoryCache;
         #endregion
 
         #region Lifecycle & Unity Callbacks
@@ -123,6 +140,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 RegisterAllInitialProviders();
             }
+
+            BuildTemplatedParameterCaches();
         }
 
         public void AssignFilteredTrackingDevices(params string[] ids)
@@ -516,6 +535,73 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             }
 #endif
         }
+
+        public void TrackTemplatedEvent(string eventName)
+        {
+            TrackTemplatedEvent(eventName, ProviderIdentity.None);
+        }
+
+        public void TrackTemplatedEvent(string eventName, ProviderIdentity mask)
+        {
+            if (!AllowTracking)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is disabled. Skipping templated event '{0}'.", eventName);
+                return;
+            }
+
+            if (_filteredTrackingIds.Contains(DeviceTrackingIdentifier))
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Tracking is filtered by device identifier");
+                return;
+            }
+
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
+            {
+                _pendingActions.Enqueue(() => TrackTemplatedEvent(eventName, mask));
+                return;
+            }
+
+            if ((enabledFeatures & TrackingProviderFeatures.IngameAction) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Ingame action tracking is disabled in manager features. Skipping templated event '{0}'.",
+                    eventName);
+                return;
+            }
+
+            TemplatedTrackingEvent eventDef = null;
+            if (templatedEvents != null)
+            {
+                for (int i = 0; i < templatedEvents.Length; i++)
+                {
+                    if (templatedEvents[i] != null
+                        && templatedEvents[i].EventName == eventName)
+                    {
+                        eventDef = templatedEvents[i];
+                        break;
+                    }
+                }
+            }
+
+            if (eventDef == null)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Templated event '{0}' not found in configured events.", eventName);
+                return;
+            }
+
+            var resolvedParams = ResolveTemplatedParameters(eventDef);
+
+            TrackAction(new TrackingActionInfo
+            {
+                ActionId = eventName,
+                ProviderMask = mask,
+                Parameters = resolvedParams
+            });
+        }
         #endregion
 
         #region Private Methods
@@ -618,6 +704,192 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
                 RegisterProvider(provider);
             }
+        }
+
+        private void BuildTemplatedParameterCaches()
+        {
+            _templatedProviders = new List<ITemplatedTrackingParametersProvider>();
+            _getterCache =
+                new Dictionary<ITemplatedTrackingParametersProvider, Dictionary<string, Func<object>>>();
+            _factoryCache =
+                new Dictionary<ITemplatedTrackingParametersProvider, Dictionary<string, Func<object>>>();
+
+            if (templatedParameterProviders == null) return;
+
+            foreach (ScriptableObject asset in templatedParameterProviders)
+            {
+                if (asset is not ITemplatedTrackingParametersProvider provider) continue;
+                _templatedProviders.Add(provider);
+
+                Type type = provider.GetType();
+                var getters = new Dictionary<string, Func<object>>();
+                var factories = new Dictionary<string, Func<object>>();
+                var seenNames = new HashSet<string>();
+
+                foreach (MethodInfo method in type.GetMethods(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    TryCacheGetterMethod(provider, method, getters, seenNames);
+                    TryCacheFactoryMethod(provider, method, factories, seenNames);
+                }
+
+                _getterCache[provider] = getters;
+                _factoryCache[provider] = factories;
+            }
+        }
+
+        private static void TryCacheGetterMethod(
+            ITemplatedTrackingParametersProvider provider,
+            MethodInfo method,
+            Dictionary<string, Func<object>> cache,
+            HashSet<string> seenNames)
+        {
+            TrackingParamGetterAttribute attr =
+                method.GetCustomAttribute<TrackingParamGetterAttribute>();
+            if (attr == null) return;
+
+            if (!ValidateTemplatedMethod(method, attr.ParameterName, "getter", seenNames))
+            {
+                return;
+            }
+
+            CompileTemplatedDelegate(provider, method, attr.ParameterName, cache);
+        }
+
+        private static void TryCacheFactoryMethod(
+            ITemplatedTrackingParametersProvider provider,
+            MethodInfo method,
+            Dictionary<string, Func<object>> cache,
+            HashSet<string> seenNames)
+        {
+            TrackingParamDefaultFactoryAttribute attr =
+                method.GetCustomAttribute<TrackingParamDefaultFactoryAttribute>();
+            if (attr == null) return;
+
+            if (!ValidateTemplatedMethod(method, attr.ParameterName, "factory", seenNames))
+            {
+                return;
+            }
+
+            CompileTemplatedDelegate(provider, method, attr.ParameterName, cache);
+        }
+
+        private static bool ValidateTemplatedMethod(
+            MethodInfo method,
+            string paramName,
+            string kind,
+            HashSet<string> seenNames)
+        {
+            if (method.IsStatic)
+            {
+                QuickLog.Error<TrackingManagerBase<T>>(
+                    "TemplatedTracking: [{0}] '{1}' on {2} is static — must be instance method. Skipping.",
+                    kind, method.Name, method.DeclaringType?.Name);
+                return false;
+            }
+
+            if (method.GetParameters().Length > 0)
+            {
+                QuickLog.Error<TrackingManagerBase<T>>(
+                    "TemplatedTracking: [{0}] '{1}' on {2} has parameters — must have zero params. Skipping.",
+                    kind, method.Name, method.DeclaringType?.Name);
+                return false;
+            }
+
+            if (method.ReturnType == typeof(void))
+            {
+                QuickLog.Error<TrackingManagerBase<T>>(
+                    "TemplatedTracking: [{0}] '{1}' on {2} returns void — must return a value. Skipping.",
+                    kind, method.Name, method.DeclaringType?.Name);
+                return false;
+            }
+
+            if (!seenNames.Add(paramName))
+            {
+                QuickLog.Error<TrackingManagerBase<T>>(
+                    "TemplatedTracking: Duplicate param name '{0}' in {1} ({2} '{3}'). Skipping.",
+                    paramName, method.DeclaringType?.Name, kind, method.Name);
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void CompileTemplatedDelegate(
+            ITemplatedTrackingParametersProvider provider,
+            MethodInfo method,
+            string paramName,
+            Dictionary<string, Func<object>> cache)
+        {
+            try
+            {
+                ParameterExpression instanceParam =
+                    Expression.Parameter(typeof(ITemplatedTrackingParametersProvider), "p");
+                UnaryExpression castInstance =
+                    Expression.Convert(instanceParam, provider.GetType());
+                MethodCallExpression call =
+                    Expression.Call(castInstance, method);
+                UnaryExpression boxed =
+                    Expression.Convert(call, typeof(object));
+                Expression<Func<ITemplatedTrackingParametersProvider, object>> lambda =
+                    Expression.Lambda<Func<ITemplatedTrackingParametersProvider, object>>(
+                        boxed, instanceParam);
+                Func<ITemplatedTrackingParametersProvider, object> compiled = lambda.Compile();
+
+                cache[paramName] = () => compiled(provider);
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<TrackingManagerBase<T>>(
+                    "TemplatedTracking: Failed to compile delegate for '{0}': {1}",
+                    method.Name, ex.Message);
+            }
+        }
+
+        private Dictionary<string, object> ResolveTemplatedParameters(
+            TemplatedTrackingEvent eventDef)
+        {
+            var result = new Dictionary<string, object>();
+
+            foreach (TemplatedTrackingParameter param in eventDef.Parameters)
+            {
+                object value = null;
+                bool resolved = false;
+
+                foreach (ITemplatedTrackingParametersProvider provider in _templatedProviders)
+                {
+                    if (!provider.IsEnabled) continue;
+
+                    if (_getterCache.TryGetValue(provider, out var getters)
+                        && getters.TryGetValue(param.Name, out Func<object> getter))
+                    {
+                        value = getter();
+                        resolved = true;
+                        break;
+                    }
+
+                    if (_factoryCache.TryGetValue(provider, out var factories)
+                        && factories.TryGetValue(param.Name, out Func<object> factory))
+                    {
+                        value = factory();
+                        resolved = true;
+                        break;
+                    }
+                }
+
+                if (!resolved && !string.IsNullOrEmpty(param.DefaultValue))
+                {
+                    value = param.DefaultValue;
+                    resolved = true;
+                }
+
+                if (resolved && value != null)
+                {
+                    result[param.Name] = value;
+                }
+            }
+
+            return result;
         }
         #endregion
 

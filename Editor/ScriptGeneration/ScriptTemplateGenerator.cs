@@ -747,6 +747,9 @@ namespace Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration
                 return GetRootNamespace();
             }
 
+            // Normalize to forward slashes for cross-platform compatibility
+            relativePath = relativePath.Replace('\\', '/');
+
             // Remove "Assets/" and the file name
             string dirPath = Path.GetDirectoryName(relativePath);
             if (string.IsNullOrEmpty(dirPath) || dirPath == "Assets")
@@ -755,6 +758,8 @@ namespace Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration
             }
 
             string subPath = dirPath.Substring("Assets/".Length);
+            // Normalize again — Path.GetDirectoryName re-introduces platform separators
+            subPath = subPath.Replace('\\', '/');
             string[] parts = subPath.Split(
                 new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
 

@@ -10,6 +10,10 @@ using UnityEngine.Networking;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
 {
+    [ResourceProvider(
+        "Downloadable",
+        "Downloads via HTTP with in-memory + disk caching. Override ConvertResource(byte[])."
+    )]
     public abstract class DownloadableResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,

@@ -41,6 +41,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private AdsConfiguration overrideConfig;
 
         [SerializeField]
+        [HideInInspector]
         private ScriptableObject adServiceProvider;
         #endregion
 

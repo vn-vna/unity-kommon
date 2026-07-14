@@ -20,6 +20,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
         public ResourceManagerStatus Status { get; internal set; }
 
         [SerializeField]
+        [HideInInspector]
         private ScriptableObject[] initialProviders;
 
         private List<IAsyncResourceProvider<ResourceType>> _providers;

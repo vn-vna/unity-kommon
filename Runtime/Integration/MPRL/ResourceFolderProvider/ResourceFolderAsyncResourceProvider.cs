@@ -5,6 +5,10 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
 {
+    [ResourceProvider(
+        "Resources Folder",
+        "Loads from Unity Resources using Resources.LoadAsync."
+    )]
     public class ResourceFolderAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>, 

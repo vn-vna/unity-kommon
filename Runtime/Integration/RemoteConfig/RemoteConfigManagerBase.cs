@@ -26,6 +26,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         public RemoteConfigStatus Status { get; private set; } = RemoteConfigStatus.Uninitialized;
 
         [SerializeField]
+        [HideInInspector]
         private ScriptableObject[] initialProviders;
 
         private List<IRemoteConfigProvider> _providers;

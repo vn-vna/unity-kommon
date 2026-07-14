@@ -8,6 +8,11 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.MPRL
 {
+    [ResourceProvider(
+        "Addressable",
+        "Loads via Unity Addressables.",
+        RequiredDefines = new[] { "UNITY_ADDRESSABLES" }
+    )]
     public class AddressableAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
