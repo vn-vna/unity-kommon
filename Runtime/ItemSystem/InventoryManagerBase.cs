@@ -1,5 +1,8 @@
+using System;
 using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common.LocalSave;
+using Com.Hapiga.Scheherazade.Common;
+using Com.Hapiga.Scheherazade.Common.DataSync;
+using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
 using Com.Hapiga.Scheherazade.Common.Singleton;
 
 using UnityEngine;
@@ -55,33 +58,43 @@ namespace Com.Hapiga.Schehrazade.IS
             if (pause && _writePending) PerformWriteInventory();
         }
 
-        private void PerformWriteInventory()
+    private void PerformWriteInventory()
+    {
+        _writeTimer = writeDelay;
+        _writePending = false;
+        DS.Save(IngameInventoryKey, _ingameInventory);
+    }
+
+    public async void ReloadIngameInventory()
+    {
+        try
         {
-            _writeTimer = writeDelay;
-            _writePending = false;
-            LocalFileHandler.Save(_ingameInventory, IngameInventoryKey);
+            _ingameInventory = await DS.LoadAsync<InventoryT>(IngameInventoryKey);
+        }
+        catch (Exception)
+        {
+            _ingameInventory = new InventoryT();
+        }
+    }
+
+    protected override async void Awake()
+    {
+        base.Awake();
+
+        foreach (var itemData in itemDatabase.ItemMapping.Values)
+        {
+            itemData.ItemDefinition.ItemData = itemData;
         }
 
-        public void ReloadIngameInventory()
+        if (!await DS.ExistsAsync(IngameInventoryKey))
         {
-            _ingameInventory = LocalFileHandler.Load<InventoryT>(IngameInventoryKey);
+            _ingameInventory = new InventoryT();
+            DS.Save(IngameInventoryKey, _ingameInventory);
         }
 
-        protected override void Awake()
-        {
-            base.Awake();
-
-            foreach (var itemData in itemDatabase.ItemMapping.Values) itemData.ItemDefinition.ItemData = itemData;
-
-            if (!LocalFileHandler.Exists(IngameInventoryKey))
-            {
-                _ingameInventory = new InventoryT();
-                LocalFileHandler.Save(_ingameInventory, IngameInventoryKey);
-            }
-
-            ReloadIngameInventory();
-            _writePending = false;
-        }
+        ReloadIngameInventory();
+        _writePending = false;
+    }
 
         public void SaveIngameInventory()
         {

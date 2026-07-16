@@ -1,6 +1,6 @@
 using System;
 
-using Com.Hapiga.Scheherazade.Common.LocalSave;
+using Com.Hapiga.Scheherazade.Common.DataSync;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 {

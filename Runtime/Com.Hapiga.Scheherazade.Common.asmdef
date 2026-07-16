@@ -16,7 +16,9 @@
         "Unity.TextMeshPro",
         "Unity.Addressables",
         "Unity.Addressables.Android",
-        "Unity.ResourceManager"
+        "Unity.ResourceManager",
+        "Google.Play.Games",
+        "Unity.Services.CloudSave"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -65,6 +67,11 @@
             "name": "com.unity.nuget.newtonsoft-json",
             "expression": "0",
             "define": "NEWTONSOFT_JSON"
+        },
+        {
+            "name": "com.unity.services.cloudsave",
+            "expression": "0",
+            "define": "UNITY_CLOUDSAVE"
         }
     ],
     "noEngineReferences": false

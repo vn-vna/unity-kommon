@@ -1,5 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.LocalSave;
+using System.Threading.Tasks;
+using Com.Hapiga.Scheherazade.Common;
+using Com.Hapiga.Scheherazade.Common.DataSync;
+using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
@@ -28,59 +31,59 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
         private DateTime _lastSavedTime;
         private float _tickCountdown;
 
-        public void Initialize()
+    public async void Initialize()
+    {
+        if (!await DS.ExistsAsync(saveKey))
         {
-            if (!LocalFileHandler.Exists(saveKey))
-            {
-                QuickLog.Info<CachedSegmentationProvider>(
-                    "No cached segmentation data found."
-                );
-                IsInitialized = true;
-                return;
-            }
-
-            SegmentationInformation cachedData = LocalFileHandler.Load<SegmentationInformation>(saveKey);
-
-            if (cachedData == null)
-            {
-                QuickLog.Warning<CachedSegmentationProvider>(
-                    "Failed to load cached segmentation data."
-                );
-                IsInitialized = true;
-                return;
-            }
-
             QuickLog.Info<CachedSegmentationProvider>(
-                "Loaded cached segmentation data."
+                "No cached segmentation data found."
             );
-
-            _lastSavedTime = DateTime.UtcNow;
-            _tickCountdown = tickInterval;
             IsInitialized = true;
-            SegmentationDataAcquired?.Invoke(cachedData);
+            return;
         }
 
-        public void Tick(float deltaTime)
+        SegmentationInformation cachedData = await DS.LoadAsync<SegmentationInformation>(saveKey);
+
+        if (cachedData == null)
         {
-            if (Manager == null || !IsInitialized) return;
-
-            if (_tickCountdown > 0)
-            {
-                _tickCountdown -= deltaTime;
-                return;
-            }
-
-            if (Manager.SegmentInformation == null) return;
-            if (Manager.LastSegmentationUpdateTime == null) return;
-            if (Manager.LastSegmentationUpdateTime.Value <= _lastSavedTime) return;
-
-            QuickLog.Info<CachedSegmentationProvider>(
-                "Segmentation data changed. Saving to cache."
+            QuickLog.Warning<CachedSegmentationProvider>(
+                "Failed to load cached segmentation data."
             );
-
-            LocalFileHandler.Save(Manager.SegmentInformation, saveKey);
-            _lastSavedTime = Manager.LastSegmentationUpdateTime.Value;
+            IsInitialized = true;
+            return;
         }
+
+        QuickLog.Info<CachedSegmentationProvider>(
+            "Loaded cached segmentation data."
+        );
+
+        _lastSavedTime = DateTime.UtcNow;
+        _tickCountdown = tickInterval;
+        IsInitialized = true;
+        SegmentationDataAcquired?.Invoke(cachedData);
+    }
+
+    public void Tick(float deltaTime)
+    {
+        if (Manager == null || !IsInitialized) return;
+
+        if (_tickCountdown > 0)
+        {
+            _tickCountdown -= deltaTime;
+            return;
+        }
+
+        if (Manager.SegmentInformation == null) return;
+        if (Manager.LastSegmentationUpdateTime == null) return;
+        if (Manager.LastSegmentationUpdateTime.Value <= _lastSavedTime) return;
+
+        QuickLog.Info<CachedSegmentationProvider>(
+            "Segmentation data changed. Saving to cache."
+        );
+
+        DS.Save(saveKey, Manager.SegmentInformation);
+        _lastSavedTime = Manager.LastSegmentationUpdateTime.Value;
+    }
 
         public void CleanUp()
         {

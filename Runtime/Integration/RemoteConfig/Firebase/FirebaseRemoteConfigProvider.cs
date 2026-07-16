@@ -3,8 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.LocalSave;
+using Com.Hapiga.Scheherazade.Common;
+using Com.Hapiga.Scheherazade.Common.DataSync;
+using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using Firebase.RemoteConfig;
@@ -126,7 +129,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             }
 
             // Add Cached Config Key
-            if (LocalFileHandler.Exists(FirebaseCachedConfigKey))
+            if (await DS.ExistsAsync(FirebaseCachedConfigKey))
             {
                 try
                 {
@@ -146,42 +149,49 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
 
         private async Task TryApplyCachedDefaults(Dictionary<string, object> defaults)
         {
-            string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
-            string json = await File.ReadAllTextAsync(path);
-            JObject jObject = JObject.Parse(json);
-
-            JToken metadataToken = jObject["_metadata"];
-            if (metadataToken?["cachedAt"] != null)
+            using (Stream stream = await DS.OpenReadStreamAsync(FirebaseCachedConfigKey))
             {
-                DateTime cachedAt = metadataToken["cachedAt"].ToObject<DateTime>();
-                if ((DateTime.UtcNow - cachedAt).TotalSeconds > localCacheExpirationSeconds)
-                {
-                    QuickLog.Info<FirebaseRemoteConfigProvider>(
-                        "Local Firebase cache expired ({0}s old, max {1}s). Using hardcoded defaults.",
-                        (DateTime.UtcNow - cachedAt).TotalSeconds,
-                        localCacheExpirationSeconds
-                    );
-                    return;
-                }
-            }
+                if (stream == null) return;
 
-            List<string> keys = new List<string>(defaults.Keys);
-            foreach (string key in keys)
-            {
-                switch (defaults[key])
+                using (var reader = new StreamReader(stream))
                 {
-                    case string:
-                        defaults[key] = jObject[key]?.ToString() ?? defaults[key];
-                        break;
-                    case bool:
-                        defaults[key] = jObject[key]?.ToObject<bool>() ?? defaults[key];
-                        break;
-                    case int:
-                        defaults[key] = jObject[key]?.ToObject<int>() ?? defaults[key];
-                        break;
-                    case float:
-                        defaults[key] = jObject[key]?.ToObject<float>() ?? defaults[key];
-                        break;
+                    string json = await reader.ReadToEndAsync();
+                    JObject jObject = JObject.Parse(json);
+
+                    JToken metadataToken = jObject["_metadata"];
+                    if (metadataToken?["cachedAt"] != null)
+                    {
+                        DateTime cachedAt = metadataToken["cachedAt"].ToObject<DateTime>();
+                        if ((DateTime.UtcNow - cachedAt).TotalSeconds > localCacheExpirationSeconds)
+                        {
+                            QuickLog.Info<FirebaseRemoteConfigProvider>(
+                                "Local Firebase cache expired ({0}s old, max {1}s). Using hardcoded defaults.",
+                                (DateTime.UtcNow - cachedAt).TotalSeconds,
+                                localCacheExpirationSeconds
+                            );
+                            return;
+                        }
+                    }
+
+                    List<string> keys = new List<string>(defaults.Keys);
+                    foreach (string key in keys)
+                    {
+                        switch (defaults[key])
+                        {
+                            case string:
+                                defaults[key] = jObject[key]?.ToString() ?? defaults[key];
+                                break;
+                            case bool:
+                                defaults[key] = jObject[key]?.ToObject<bool>() ?? defaults[key];
+                                break;
+                            case int:
+                                defaults[key] = jObject[key]?.ToObject<int>() ?? defaults[key];
+                                break;
+                            case float:
+                                defaults[key] = jObject[key]?.ToObject<float>() ?? defaults[key];
+                                break;
+                        }
+                    }
                 }
             }
         }
@@ -321,10 +331,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         private async Task CacheRemoteConfig()
         {
             _cachedKeys ??= new List<(string, FirebaseRemoteValueType)>();
-            string path = LocalFileHandler.GetFilePath(FirebaseCachedConfigKey);
-            string directoryPath = Path.GetDirectoryName(path);
-            if (!Directory.Exists(directoryPath))
-                Directory.CreateDirectory(directoryPath);
             JObject jObject = new JObject();
             foreach ((string key, FirebaseRemoteValueType type) in _cachedKeys)
             {
@@ -348,7 +354,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             {
                 ["cachedAt"] = DateTime.UtcNow
             };
-            await File.WriteAllTextAsync(path, jObject.ToString());
+            byte[] bytes = Encoding.UTF8.GetBytes(jObject.ToString());
+            using (var ms = new MemoryStream(bytes))
+            {
+                await DS.WriteStreamAsync(FirebaseCachedConfigKey, ms);
+            }
         }
 
         private void HandleConfigCachedTaskCompleted(Task task)

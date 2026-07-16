@@ -158,8 +158,18 @@ namespace Com.Hapiga.Scheherazade.Integration
         private static Vector2 _templateProvidersScrollPos;
         private static Vector2 _templateEventsScrollPos;
         private static int _selectedParamIndex;
-        private static int _editingAssetNameIndex = -1;
         private static TemplatedTrackingEvent _pendingEventToAdd;
+        private static readonly Dictionary<int, bool> _eventParamFoldouts
+            = new Dictionary<int, bool>();
+
+        private static string _providerSearchText = "";
+        private static string _eventSearchText = "";
+
+        private static Type[] _cachedTemplatedProviderTypes;
+        private static GUIStyle _cachedValidNameStyle;
+        private static GUIStyle _cachedInvalidNameStyle;
+        private static readonly Dictionary<int, bool> _parameterFoldouts
+            = new Dictionary<int, bool>();
 
         private static readonly SettingsTab[] Tabs =
         {
@@ -242,7 +252,10 @@ namespace Com.Hapiga.Scheherazade.Integration
 
         private static Type[] FindTemplatedProviderTypes()
         {
-            return AppDomain.CurrentDomain.GetAssemblies()
+            if (_cachedTemplatedProviderTypes != null)
+                return _cachedTemplatedProviderTypes;
+
+            _cachedTemplatedProviderTypes = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a =>
                 {
                     try { return a.GetTypes(); }
@@ -254,6 +267,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                             && typeof(ITemplatedTrackingParametersProvider).IsAssignableFrom(t))
                 .OrderBy(t => t.FullName)
                 .ToArray();
+
+            return _cachedTemplatedProviderTypes;
         }
 
         private static ScriptableObject FindExistingProviderAsset(
@@ -308,15 +323,28 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
+            // ── Control Bar ──
+            DrawProviderControlBar(types);
+
+            // ── Filter ──
+            string search = _providerSearchText.Trim();
+            if (!string.IsNullOrEmpty(search))
+            {
+                types = types.Where(t =>
+                    t.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                ).ToArray();
+            }
+
             _templateProvidersScrollPos =
                 EditorGUILayout.BeginScrollView(_templateProvidersScrollPos);
 
             if (types.Length == 0)
             {
-                EditorGUILayout.HelpBox(
-                    "No classes implementing ITemplatedTrackingParametersProvider found.\n\n"
-                    + "Create one with the button below.",
-                    MessageType.Info);
+                string msg = string.IsNullOrEmpty(search)
+                    ? "No classes implementing ITemplatedTrackingParametersProvider found.\n\n"
+                      + "Create one with the button below."
+                    : $"No providers matching '{search}'.";
+                EditorGUILayout.HelpBox(msg, MessageType.Info);
             }
             else
             {
@@ -333,6 +361,36 @@ namespace Com.Hapiga.Scheherazade.Integration
             EditorGUILayout.EndScrollView();
 
             DrawNewParameterProviderButton();
+        }
+
+        private static void DrawProviderControlBar(Type[] types)
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                _providerSearchText = EditorGUILayout.TextField(
+                    _providerSearchText,
+                    EditorStyles.toolbarSearchField,
+                    GUILayout.MinWidth(120));
+
+                if (GUILayout.Button(
+                        _parameterFoldouts.Values.All(v => v) ? "Collapse All" : "Expand All",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(90)))
+                {
+                    bool expand = !_parameterFoldouts.Values.All(v => v);
+                    var keys = new List<int>(_parameterFoldouts.Keys);
+                    foreach (int k in keys)
+                        _parameterFoldouts[k] = expand;
+                }
+
+                if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60)))
+                {
+                    _cachedTemplatedProviderTypes = null;
+                    _providerSearchText = "";
+                }
+            }
+
+            GUILayout.Space(2);
         }
 
         private static void DrawTemplatedProviderCard(
@@ -639,10 +697,21 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             int validGetterCount = entries.Count(e => e.Kind == "getter" && e.IsValid);
             int validFactoryCount = entries.Count(e => e.Kind == "factory" && e.IsValid);
+            int key = asset.GetInstanceID();
 
-            EditorGUILayout.LabelField(
-                $"Defined Parameters ({validGetterCount} getters, {validFactoryCount} factories)",
-                EditorStyles.boldLabel);
+            if (!_parameterFoldouts.ContainsKey(key))
+                _parameterFoldouts[key] = true;
+
+            bool expanded = _parameterFoldouts[key];
+            string arrow = expanded ? "▼" : "▶";
+            string label = $"{arrow} Defined Parameters ({validGetterCount} getters, {validFactoryCount} factories)";
+
+            if (GUILayout.Button(label, EditorStyles.boldLabel))
+            {
+                _parameterFoldouts[key] = !expanded;
+            }
+
+            if (!expanded) return;
 
             GUILayout.Space(4);
 
@@ -739,10 +808,21 @@ namespace Com.Hapiga.Scheherazade.Integration
                     GUI.color = Color.red;
                 }
 
-                GUIStyle nameStyle = new GUIStyle(EditorStyles.boldLabel)
+                if (_cachedValidNameStyle == null)
                 {
-                    normal = { textColor = entry.IsValid ? Color.white : Color.red }
-                };
+                    _cachedValidNameStyle = new GUIStyle(EditorStyles.boldLabel)
+                    {
+                        normal = { textColor = Color.white }
+                    };
+                    _cachedInvalidNameStyle = new GUIStyle(EditorStyles.boldLabel)
+                    {
+                        normal = { textColor = Color.red }
+                    };
+                }
+
+                GUIStyle nameStyle = entry.IsValid
+                    ? _cachedValidNameStyle
+                    : _cachedInvalidNameStyle;
 
                 EditorGUILayout.LabelField(
                     $"{statusIcon} {entry.ParamName}",
@@ -899,10 +979,37 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
+            // ── Control Bar ──
+            DrawEventsControlBar(serializedManager, eventsProp);
+
+            // ── Filter events ──
+            List<int> visibleIndices = new List<int>();
+            string search = _eventSearchText.Trim();
+            for (int i = eventsProp.arraySize - 1; i >= 0; i--)
+            {
+                if (string.IsNullOrEmpty(search))
+                {
+                    visibleIndices.Add(i);
+                }
+                else
+                {
+                    SerializedProperty element = eventsProp.GetArrayElementAtIndex(i);
+                    ScriptableObject asset = element.objectReferenceValue as ScriptableObject;
+                    SerializedObject so = asset != null ? new SerializedObject(asset) : null;
+                    string eventName = so?.FindProperty("_eventName")?.stringValue ?? "";
+                    string assetName = asset?.name ?? "";
+                    if (assetName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                        || eventName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        visibleIndices.Add(i);
+                    }
+                }
+            }
+
             _templateEventsScrollPos =
                 EditorGUILayout.BeginScrollView(_templateEventsScrollPos);
 
-            for (int i = eventsProp.arraySize - 1; i >= 0; i--)
+            foreach (int i in visibleIndices)
             {
                 SerializedProperty element = eventsProp.GetArrayElementAtIndex(i);
                 DrawSingleTemplatedEvent(manager, serializedManager, eventsProp,
@@ -922,6 +1029,38 @@ namespace Com.Hapiga.Scheherazade.Integration
             DrawNewTemplatedEventButton(manager, serializedManager, eventsProp);
         }
 
+        private static void DrawEventsControlBar(
+            SerializedObject serializedManager,
+            SerializedProperty eventsProp)
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                _eventSearchText = EditorGUILayout.TextField(
+                    _eventSearchText,
+                    EditorStyles.toolbarSearchField,
+                    GUILayout.MinWidth(120));
+
+                if (GUILayout.Button(
+                        _eventParamFoldouts.Values.All(v => v) ? "Collapse All" : "Expand All",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(90)))
+                {
+                    bool expand = !_eventParamFoldouts.Values.All(v => v);
+                    var keys = new List<int>(_eventParamFoldouts.Keys);
+                    foreach (int k in keys)
+                        _eventParamFoldouts[k] = expand;
+                }
+
+                if (GUILayout.Button("Refresh", EditorStyles.toolbarButton, GUILayout.Width(60)))
+                {
+                    _eventSearchText = "";
+                    _eventParamFoldouts.Clear();
+                }
+            }
+
+            GUILayout.Space(2);
+        }
+
         private static void DrawSingleTemplatedEvent(
             ScriptableObject manager,
             SerializedObject serializedManager,
@@ -929,66 +1068,52 @@ namespace Com.Hapiga.Scheherazade.Integration
             int index,
             SerializedProperty element)
         {
-            SerializedObject eventSo = new SerializedObject(
-                element.objectReferenceValue);
+            ScriptableObject eventAsset = element.objectReferenceValue as ScriptableObject;
+            if (eventAsset == null)
+            {
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        $"<missing> (slot {index})",
+                        EditorStyles.boldLabel);
+                    if (DrawSmallDeleteButton())
+                    {
+                        eventsProp.DeleteArrayElementAtIndex(index);
+                        serializedManager.ApplyModifiedProperties();
+                        EditorUtility.SetDirty(manager);
+                        AssetDatabase.SaveAssets();
+                    }
+                }
+                return;
+            }
+
+            SerializedObject eventSo = new SerializedObject(eventAsset);
             SerializedProperty eventNameProp = eventSo.FindProperty("_eventName");
             SerializedProperty paramsProp = eventSo.FindProperty("_parameters");
+            string assetName = eventAsset.name;
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                // Header with editable asset name
+                // ── Header: asset name + Edit button + Delete ──
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    string assetName = element.objectReferenceValue != null
-                        ? element.objectReferenceValue.name
-                        : $"<missing> (slot {index})";
+                    EditorGUILayout.LabelField(assetName, EditorStyles.boldLabel);
+                    GUILayout.FlexibleSpace();
 
-                    if (_editingAssetNameIndex == index)
+                    if (GUILayout.Button("Edit", EditorStyles.miniButton, GUILayout.Width(40)))
                     {
-                        GUI.SetNextControlName($"EventNameField_{index}");
-                        string newName = EditorGUILayout.DelayedTextField(
-                            assetName,
-                            EditorStyles.boldLabel);
-                        if (newName != assetName
-                            && element.objectReferenceValue != null
-                            && !string.IsNullOrEmpty(newName))
-                        {
-                            element.objectReferenceValue.name = newName;
-                            EditorUtility.SetDirty(element.objectReferenceValue);
-                            AssetDatabase.SaveAssets();
-                            _editingAssetNameIndex = -1;
-                        }
-
-                        if (GUILayout.Button("Done", GUILayout.Width(50)))
-                        {
-                            _editingAssetNameIndex = -1;
-                        }
-                    }
-                    else
-                    {
-                        EditorGUILayout.LabelField(
-                            assetName,
-                            EditorStyles.boldLabel);
-
-                        if (element.objectReferenceValue != null
-                            && GUILayout.Button("Edit", EditorStyles.miniButton,
-                                GUILayout.Width(40)))
-                        {
-                            _editingAssetNameIndex = index;
-                            GUI.FocusControl(null);
-                        }
+                        Rect buttonRect = GUILayoutUtility.GetLastRect();
+                        buttonRect.position = GUIUtility.GUIToScreenPoint(buttonRect.position);
+                        var popup = new EventEditPopup(
+                            eventAsset, eventNameProp, paramsProp,
+                            manager, serializedManager, eventsProp, index);
+                        PopupWindow.Show(buttonRect, popup);
                     }
 
                     if (DrawSmallDeleteButton())
                     {
-                        if (element.objectReferenceValue != null)
-                        {
-                            AssetDatabase.RemoveObjectFromAsset(
-                                element.objectReferenceValue);
-                            UnityEngine.Object.DestroyImmediate(
-                                element.objectReferenceValue, true);
-                        }
-
+                        AssetDatabase.RemoveObjectFromAsset(eventAsset);
+                        UnityEngine.Object.DestroyImmediate(eventAsset, true);
                         eventsProp.DeleteArrayElementAtIndex(index);
                         serializedManager.ApplyModifiedProperties();
                         EditorUtility.SetDirty(manager);
@@ -997,133 +1122,145 @@ namespace Com.Hapiga.Scheherazade.Integration
                     }
                 }
 
-                if (element.objectReferenceValue == null) return;
-
-                // Event name
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.PropertyField(eventNameProp,
-                    new GUIContent("Event Name"));
-                if (EditorGUI.EndChangeCheck())
+                // ── Event name (read-only) ──
+                string eventName = eventNameProp?.stringValue ?? "";
+                using (new EditorGUI.DisabledScope(true))
                 {
-                    eventSo.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(element.objectReferenceValue);
+                    EditorGUILayout.TextField("Event Name", eventName);
                 }
 
-                if (string.IsNullOrEmpty(eventNameProp.stringValue))
+                if (string.IsNullOrEmpty(eventName))
                 {
                     EditorGUILayout.HelpBox(
                         "Event name must not be empty.",
                         MessageType.Error);
                 }
 
-                GUILayout.Space(4);
-
-                // Gather available parameter names from enabled providers
-                List<string> availableParamNames =
-                    CollectAvailableParamNamesFromProviders(manager);
-                string[] availableOptions = availableParamNames.ToArray();
-
-                // Parameters
-                EditorGUILayout.LabelField("Parameters", EditorStyles.miniBoldLabel);
-                GUILayout.Space(2);
-
-                if (paramsProp != null && paramsProp.isArray)
-                {
-                    HashSet<string> existingParamNames = new HashSet<string>();
-                    List<string> duplicateNames = new List<string>();
-                    bool anyRemoved = false;
-
-                    for (int p = paramsProp.arraySize - 1; p >= 0; p--)
-                    {
-                        SerializedProperty nameProp =
-                            paramsProp.GetArrayElementAtIndex(p)
-                                .FindPropertyRelative("_name");
-
-                        string pName = nameProp?.stringValue ?? "";
-
-                        if (!string.IsNullOrEmpty(pName) && !existingParamNames.Add(pName))
-                        {
-                            duplicateNames.Add(pName);
-                        }
-
-                        bool removed = DrawSingleEventParameter(
-                            p, nameProp, availableOptions,
-                            eventSo, paramsProp, element.objectReferenceValue);
-                        if (removed) anyRemoved = true;
-                    }
-
-                    if (duplicateNames.Count > 0)
-                    {
-                        EditorGUILayout.HelpBox(
-                            $"Duplicate parameter names: {string.Join(", ", duplicateNames)}",
-                            MessageType.Error);
-                    }
-
-                    if (anyRemoved)
-                    {
-                        eventSo.ApplyModifiedProperties();
-                    }
-
-                    GUILayout.Space(4);
-
-                    // Dropdown + Add button for parameters from providers
-                    List<string> unaddedParams = availableParamNames
-                        .Where(n => !existingParamNames.Contains(n))
-                        .ToList();
-
-                    if (unaddedParams.Count > 0)
-                    {
-                        if (_selectedParamIndex >= unaddedParams.Count)
-                            _selectedParamIndex = 0;
-
-                        using (new EditorGUILayout.HorizontalScope())
-                        {
-                            _selectedParamIndex = EditorGUILayout.Popup(
-                                "Add Parameter",
-                                _selectedParamIndex,
-                                unaddedParams.ToArray());
-
-                            if (GUILayout.Button("+ Add Selected", GUILayout.Width(110)))
-                            {
-                                int newIdx = paramsProp.arraySize++;
-                                SerializedProperty newParam =
-                                    paramsProp.GetArrayElementAtIndex(newIdx);
-                                SerializedProperty newNameProp =
-                                    newParam.FindPropertyRelative("_name");
-                                if (newNameProp != null)
-                                {
-                                    newNameProp.stringValue =
-                                        unaddedParams[_selectedParamIndex];
-                                }
-
-                                eventSo.ApplyModifiedProperties();
-                                EditorUtility.SetDirty(element.objectReferenceValue);
-                                _selectedParamIndex = 0;
-                            }
-                        }
-                    }
-                    else if (availableOptions.Length > 0)
-                    {
-                        EditorGUILayout.LabelField(
-                            "All provider parameters have been added.",
-                            EditorStyles.miniLabel);
-                    }
-                    else
-                    {
-                        EditorGUILayout.HelpBox(
-                            "No parameters available from enabled providers.",
-                            MessageType.Info);
-                    }
-
-                    DrawEventParameterWarnings(paramsProp, manager);
-                }
+                // ── Parameters section ──
+                DrawEventParametersSection(
+                    manager, eventAsset, eventSo,
+                    eventNameProp, paramsProp,
+                    serializedManager, eventsProp, index);
 
                 if (eventSo.hasModifiedProperties)
                 {
                     eventSo.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(element.objectReferenceValue);
+                    EditorUtility.SetDirty(eventAsset);
                 }
             }
+        }
+
+        private static void DrawEventParametersSection(
+            ScriptableObject manager,
+            ScriptableObject eventAsset,
+            SerializedObject eventSo,
+            SerializedProperty eventNameProp,
+            SerializedProperty paramsProp,
+            SerializedObject serializedManager,
+            SerializedProperty eventsProp,
+            int index)
+        {
+            if (paramsProp == null || !paramsProp.isArray) return;
+
+            int key = eventAsset.GetInstanceID();
+            if (!_eventParamFoldouts.ContainsKey(key))
+                _eventParamFoldouts[key] = true;
+            bool expanded = _eventParamFoldouts[key];
+
+            List<string> availableParamNames =
+                CollectAvailableParamNamesFromProviders(manager);
+
+            // ── Header row: Parameters + Edit + Collapse/Expand ──
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                string arrow = expanded ? "▼" : "▶";
+                int paramCount = paramsProp.arraySize;
+                EditorGUILayout.LabelField(
+                    $"Parameters ({paramCount})",
+                    EditorStyles.boldLabel);
+                GUILayout.FlexibleSpace();
+
+                // if (GUILayout.Button("Edit", EditorStyles.miniButton, GUILayout.Width(40)))
+                // {
+                //     Rect buttonRect = GUILayoutUtility.GetLastRect();
+                //     buttonRect.position = GUIUtility.GUIToScreenPoint(buttonRect.position);
+                //     var popup = new EventEditPopup(
+                //         eventAsset, eventNameProp, paramsProp,
+                //         manager, serializedManager, eventsProp, index);
+                //     PopupWindow.Show(buttonRect, popup);
+                // }
+
+                string toggleLabel = expanded ? "Collapse" : "Expand";
+                if (GUILayout.Button(toggleLabel, EditorStyles.miniButton, GUILayout.Width(60)))
+                {
+                    _eventParamFoldouts[key] = !expanded;
+                }
+            }
+
+            if (!expanded) return;
+
+            GUILayout.Space(4);
+
+            // ── Read-only parameter rows ──
+            for (int p = 0; p < paramsProp.arraySize; p++)
+            {
+                SerializedProperty nameProp =
+                    paramsProp.GetArrayElementAtIndex(p)
+                        .FindPropertyRelative("_name");
+                string pName = nameProp?.stringValue ?? "";
+
+                // Determine parameter type from providers
+                string typeLabel = ResolveParamType(manager, pName);
+
+                using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(pName, EditorStyles.boldLabel);
+                    GUILayout.FlexibleSpace();
+                    if (!string.IsNullOrEmpty(typeLabel))
+                    {
+                        EditorGUILayout.LabelField(
+                            typeLabel,
+                            EditorStyles.miniLabel,
+                            GUILayout.Width(60));
+                    }
+                }
+            }
+
+            // ── Warnings ──
+            DrawEventParameterWarnings(paramsProp, manager);
+        }
+
+        private static string ResolveParamType(ScriptableObject manager, string paramName)
+        {
+            if (string.IsNullOrEmpty(paramName)) return "";
+
+            SerializedObject so = new SerializedObject(manager);
+            SerializedProperty providersProp =
+                so.FindProperty("templatedParameterProviders");
+
+            if (providersProp == null || !providersProp.isArray) return "";
+
+            for (int i = 0; i < providersProp.arraySize; i++)
+            {
+                ScriptableObject asset =
+                    providersProp.GetArrayElementAtIndex(i)
+                        .objectReferenceValue as ScriptableObject;
+                if (asset == null) continue;
+                if (asset is not ITemplatedTrackingParametersProvider provider) continue;
+                if (!provider.IsEnabled) continue;
+
+                Type type = asset.GetType();
+                foreach (MethodInfo method in type.GetMethods(
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                {
+                    TrackingParamGetterAttribute getterAttr =
+                        method.GetCustomAttribute<TrackingParamGetterAttribute>();
+                    if (getterAttr != null && getterAttr.ParameterName == paramName)
+                        return GetFriendlyTypeName(method.ReturnType);
+                }
+            }
+
+            return "";
         }
 
         private static List<string> CollectAvailableParamNamesFromProviders(
@@ -1313,6 +1450,211 @@ namespace Com.Hapiga.Scheherazade.Integration
                 }
             }
         }
+
+        #endregion
+
+        #region Event Edit Popup
+
+        private sealed class EventEditPopup : PopupWindowContent
+        {
+            private readonly ScriptableObject _eventAsset;
+            private readonly SerializedProperty _eventNameProp;
+            private readonly SerializedProperty _paramsProp;
+            private readonly ScriptableObject _manager;
+            private readonly SerializedObject _serializedManager;
+            private readonly SerializedProperty _eventsProp;
+            private readonly int _index;
+
+            private string _assetName;
+            private string _eventName;
+            private string _popupSearchText = "";
+            private List<string> _availableParams;
+            private HashSet<string> _selectedParams;
+            private Vector2 _scroll;
+
+            public EventEditPopup(
+                ScriptableObject eventAsset,
+                SerializedProperty eventNameProp,
+                SerializedProperty paramsProp,
+                ScriptableObject manager,
+                SerializedObject serializedManager,
+                SerializedProperty eventsProp,
+                int index)
+            {
+                _eventAsset = eventAsset;
+                _eventNameProp = eventNameProp;
+                _paramsProp = paramsProp;
+                _manager = manager;
+                _serializedManager = serializedManager;
+                _eventsProp = eventsProp;
+                _index = index;
+
+                _assetName = eventAsset.name;
+                _eventName = eventNameProp?.stringValue ?? "";
+
+                _availableParams = CollectAvailableParamNamesFromProviders(manager);
+                _selectedParams = new HashSet<string>();
+                if (paramsProp != null && paramsProp.isArray)
+                {
+                    for (int i = 0; i < paramsProp.arraySize; i++)
+                    {
+                        string name = paramsProp.GetArrayElementAtIndex(i)
+                            .FindPropertyRelative("_name")?.stringValue;
+                        if (!string.IsNullOrEmpty(name))
+                            _selectedParams.Add(name);
+                    }
+                }
+            }
+
+            public override Vector2 GetWindowSize()
+            {
+                float rows = 4f // header + asset name + event name + separator
+                    + _availableParams.Count;
+                float h = 28f + rows * 26f + 8f;
+                return new Vector2(360f, Mathf.Min(h, 420f));
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                EditorGUILayout.LabelField("Edit Event", EditorStyles.boldLabel);
+                GUILayout.Space(4);
+
+                // ── Asset Name ──
+                _assetName = EditorGUILayout.TextField("Asset Name", _assetName);
+
+                // ── Event Name ──
+                _eventName = EditorGUILayout.TextField("Event Name", _eventName);
+
+                GUILayout.Space(4);
+                Rect div = EditorGUILayout.GetControlRect(false, 1f);
+                EditorGUI.DrawRect(div, new Color(0.5f, 0.5f, 0.5f, 0.3f));
+                GUILayout.Space(4);
+
+                // ── Parameters ──
+                EditorGUILayout.LabelField(
+                    $"Parameters ({_selectedParams.Count}/{_availableParams.Count})",
+                    EditorStyles.boldLabel);
+
+                if (_availableParams.Count == 0)
+                {
+                    EditorGUILayout.HelpBox(
+                        "No parameters available from enabled providers.",
+                        MessageType.Info);
+                }
+                else
+                {
+                    _popupSearchText = EditorGUILayout.TextField(
+                        _popupSearchText,
+                        EditorStyles.toolbarSearchField);
+
+                    GUILayout.Space(2);
+
+                    string search = _popupSearchText.Trim();
+                    var filteredParams = string.IsNullOrEmpty(search)
+                        ? _availableParams
+                        : _availableParams.Where(p =>
+                            p.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                        ).ToList();
+
+                    _scroll = EditorGUILayout.BeginScrollView(_scroll);
+
+                    for (int i = filteredParams.Count - 1; i >= 0; i--)
+                    {
+                        string param = filteredParams[i];
+                        bool isSelected = _selectedParams.Contains(param);
+                        string typeLabel = ResolveParamType(_manager, param);
+
+                        using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                        {
+                            bool newSelected = EditorGUILayout.Toggle(
+                                isSelected, GUILayout.Width(20));
+                            EditorGUILayout.LabelField(
+                                param, EditorStyles.boldLabel);
+                            GUILayout.FlexibleSpace();
+                            if (!string.IsNullOrEmpty(typeLabel))
+                            {
+                                EditorGUILayout.LabelField(
+                                    typeLabel,
+                                    EditorStyles.miniLabel,
+                                    GUILayout.Width(60));
+                            }
+
+                            if (newSelected != isSelected)
+                            {
+                                if (newSelected)
+                                    _selectedParams.Add(param);
+                                else
+                                    _selectedParams.Remove(param);
+                            }
+                        }
+                    }
+
+                    EditorGUILayout.EndScrollView();
+                }
+
+                GUILayout.Space(4);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Done", GUILayout.Height(24)))
+                    {
+                        CommitChanges();
+                        editorWindow.Close();
+                    }
+
+                    if (GUILayout.Button("Cancel", GUILayout.Height(24)))
+                    {
+                        editorWindow.Close();
+                    }
+                }
+            }
+
+            private void CommitChanges()
+            {
+                // ── Commit asset name ──
+                if (!string.IsNullOrEmpty(_assetName) && _assetName != _eventAsset.name)
+                {
+                    _eventAsset.name = _assetName;
+                    EditorUtility.SetDirty(_eventAsset);
+                    AssetDatabase.SaveAssets();
+                }
+
+                // ── Commit event name ──
+                if (_eventName != (_eventNameProp?.stringValue ?? ""))
+                {
+                    _eventNameProp.stringValue = _eventName;
+                    _eventNameProp.serializedObject.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(_eventAsset);
+                }
+
+                // ── Commit parameters: rebuild the array from _selectedParams ──
+                if (_paramsProp != null && _paramsProp.isArray)
+                {
+                    // Remove all existing parameters
+                    while (_paramsProp.arraySize > 0)
+                        _paramsProp.DeleteArrayElementAtIndex(_paramsProp.arraySize - 1);
+
+                    // Add selected parameters
+                    foreach (string param in _availableParams)
+                    {
+                        if (!_selectedParams.Contains(param)) continue;
+
+                        int newIdx = _paramsProp.arraySize++;
+                        SerializedProperty newParam = _paramsProp.GetArrayElementAtIndex(newIdx);
+                        SerializedProperty nameProp = newParam.FindPropertyRelative("_name");
+                        if (nameProp != null)
+                            nameProp.stringValue = param;
+                    }
+
+                    _paramsProp.serializedObject.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(_eventAsset);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Templated Events Drawing
 
         private static void DrawNewTemplatedEventButton(
             ScriptableObject manager,

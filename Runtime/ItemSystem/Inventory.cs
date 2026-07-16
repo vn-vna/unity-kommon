@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Com.Hapiga.FallAway.Inventory;
 using Com.Hapiga.Scheherazade.Common.Chrono;
-using Com.Hapiga.Scheherazade.Common.LocalSave;
+using Com.Hapiga.Scheherazade.Common.DataSync;
 
 using UnityEngine;
 
