@@ -11,7 +11,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 {
     [CreateAssetMenu(
         fileName = "GoogleServiceSaveAdapter",
-        menuName = "Scheherazade/Data Sync/Google Service Save Adapter")]
+        menuName = "Scheherazade/Data Sync/Google Service Save Adapter"
+    )]
     public class GoogleServiceSaveAdapter :
         ScriptableObject,
         ISaveAdapter
@@ -100,17 +101,16 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<Stream> OpenReadAsync(
             string key, CancellationToken ct = default)
         {
-            ISavedGameMetadata metadata =
-                await OpenConnection(key, ct);
+            ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return null;
             return await OpenByteReadStream(metadata);
         }
 
         public async Task WriteAsync(
-            string key, Stream data, CancellationToken ct = default)
+            string key, Stream data, 
+            CancellationToken ct = default)
         {
-            ISavedGameMetadata metadata =
-                await OpenConnection(key, ct);
+            ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return;
             byte[] bytes = null;
             if (data is MemoryStream stream)

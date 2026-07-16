@@ -1,52 +1,151 @@
+#if UNITY_CLOUDSAVE
+
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Com.Hapiga.Scheherazade.Common.Logging;
+using Unity.Services.CloudSave;
+using Unity.Services.CloudSave.Models;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.DataSync
 {
+    [CreateAssetMenu(
+        fileName = "UnityCloudSaveAdaptor",
+        menuName = "Scheherazade/Data Sync/Unity Cloud Save Adaptor"
+    )]
     public class UnityCloudSaveAdaptor :
         ScriptableObject,
         ISaveAdapter
     {
         public string AdapterId => "unity-cloud-save";
 
-        public bool IsAvailable => throw new NotImplementedException();
-
-        public Task<bool> DeleteAsync(string key, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task<bool> ExistsAsync(string key, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task<DateTime?> GetLastWriteTimeAsync(string key, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task<bool> InitializeAsync()
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task<Stream> OpenReadAsync(string key, CancellationToken ct = default)
-        {
-            throw new NotImplementedException();
-        }
+        public bool IsAvailable { get; private set; }
 
         public void Reset()
+        { }
+
+        public async Task<bool> InitializeAsync()
         {
-            throw new NotImplementedException();
+            IsAvailable = false;
+
+            try
+            {
+                List<FileItem> files = await CloudSaveService
+                    .Instance
+                    .Files
+                    .Player
+                    .ListAllAsync();
+
+                IsAvailable = true;
+                return true;
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot initialize unity cloud save adaptor"
+                );
+            }
+            return false;
         }
 
-        public Task WriteAsync(string key, Stream data, CancellationToken ct = default)
+        public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
-            throw new NotImplementedException();
+            try
+            {
+
+                await CloudSaveService.Instance
+                    .Files
+                    .Player.DeleteAsync(key);
+                return true;
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot delete file saved by unity cloud save adaptor"
+                );
+            }
+
+            return false;
+        }
+
+        public async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
+        {
+            try
+            {
+                FileItem metadata = await CloudSaveService.Instance
+                    .Files
+                    .Player.GetMetadataAsync(key);
+                return metadata != null;
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot delete file saved by unity cloud save adaptor"
+                );
+            }
+
+            return false;
+        }
+
+        public async Task<DateTime?> GetLastWriteTimeAsync(string key, CancellationToken ct = default)
+        {
+            try
+            {
+                FileItem metadata = await CloudSaveService.Instance
+                    .Files
+                    .Player.GetMetadataAsync(key);
+
+                return metadata?.Modified;
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot delete file saved by unity cloud save adaptor"
+                );
+            }
+
+            return null;
+        }
+
+        public async Task<Stream> OpenReadAsync(string key, CancellationToken ct = default)
+        {
+            try
+            {
+                return await CloudSaveService.Instance
+                    .Files
+                    .Player
+                    .LoadStreamAsync(key);
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot delete file saved by unity cloud save adaptor"
+                );
+            }
+
+            return null;
+        }
+
+        public async Task WriteAsync(string key, Stream data, CancellationToken ct = default)
+        {
+            try
+            {
+                await CloudSaveService.Instance
+                    .Files
+                    .Player
+                    .SaveAsync(key, data);
+            }
+            catch
+            {
+                QuickLog.Warning<UnityCloudSaveAdaptor>(
+                    "Cannot delete file saved by unity cloud save adaptor"
+                );
+            }
         }
     }
 }
+
+#endif

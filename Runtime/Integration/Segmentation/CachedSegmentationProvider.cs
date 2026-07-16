@@ -1,9 +1,9 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.DataSync;
-using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using Newtonsoft.Json;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
@@ -33,7 +33,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
 
     public async void Initialize()
     {
-        if (!await DS.ExistsAsync(saveKey))
+        string filePath = GetCacheFilePath(saveKey);
+
+        if (!File.Exists(filePath))
         {
             QuickLog.Info<CachedSegmentationProvider>(
                 "No cached segmentation data found."
@@ -42,12 +44,29 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             return;
         }
 
-        SegmentationInformation cachedData = await DS.LoadAsync<SegmentationInformation>(saveKey);
+        SegmentationInformation cachedData;
+        try
+        {
+            string json = await File.ReadAllTextAsync(filePath);
+            cachedData =
+                JsonConvert.DeserializeObject<SegmentationInformation>(
+                    json
+                );
+        }
+        catch (Exception ex)
+        {
+            QuickLog.Warning<CachedSegmentationProvider>(
+                "Failed to load cached segmentation data: {0}",
+                ex.Message
+            );
+            IsInitialized = true;
+            return;
+        }
 
         if (cachedData == null)
         {
             QuickLog.Warning<CachedSegmentationProvider>(
-                "Failed to load cached segmentation data."
+                "Loaded cached segmentation data was null."
             );
             IsInitialized = true;
             return;
@@ -81,13 +100,35 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
             "Segmentation data changed. Saving to cache."
         );
 
-        DS.Save(saveKey, Manager.SegmentInformation);
+        SaveToFile(saveKey, Manager.SegmentInformation);
         _lastSavedTime = Manager.LastSegmentationUpdateTime.Value;
     }
 
         public void CleanUp()
         {
             IsInitialized = false;
+        }
+
+        private static void SaveToFile(
+            string key, object data)
+        {
+            string filePath = GetCacheFilePath(key);
+            string dir = Path.GetDirectoryName(filePath);
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            string json =
+                JsonConvert.SerializeObject(data);
+            File.WriteAllText(filePath, json);
+        }
+
+        private static string GetCacheFilePath(string key)
+        {
+            return Path.Combine(
+                Application.persistentDataPath,
+                "com.hapiga.cache",
+                key + ".json"
+            );
         }
     }
 }

@@ -6,8 +6,6 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.DataSync;
-using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using Firebase.RemoteConfig;
@@ -129,7 +127,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             }
 
             // Add Cached Config Key
-            if (await DS.ExistsAsync(FirebaseCachedConfigKey))
+            if (File.Exists(GetCacheFilePath(FirebaseCachedConfigKey)))
             {
                 try
                 {
@@ -147,51 +145,65 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             return defaults;
         }
 
-        private async Task TryApplyCachedDefaults(Dictionary<string, object> defaults)
+        private async Task TryApplyCachedDefaults(
+            Dictionary<string, object> defaults)
         {
-            using (Stream stream = await DS.OpenReadStreamAsync(FirebaseCachedConfigKey))
+            string filePath =
+                GetCacheFilePath(FirebaseCachedConfigKey);
+            if (!File.Exists(filePath))
+                return;
+
+            using Stream stream = File.OpenRead(filePath);
+            using var reader = new StreamReader(stream);
+            string json = await reader.ReadToEndAsync();
+            JObject jObject = JObject.Parse(json);
+
+            JToken metadataToken = jObject["_metadata"];
+            if (metadataToken?["cachedAt"] != null)
             {
-                if (stream == null) return;
-
-                using (var reader = new StreamReader(stream))
+                DateTime cachedAt =
+                    metadataToken["cachedAt"]
+                        .ToObject<DateTime>();
+                double ageSeconds =
+                    (DateTime.UtcNow - cachedAt).TotalSeconds;
+                if (ageSeconds > localCacheExpirationSeconds)
                 {
-                    string json = await reader.ReadToEndAsync();
-                    JObject jObject = JObject.Parse(json);
+                    QuickLog.Info<FirebaseRemoteConfigProvider>(
+                        "Local Firebase cache expired "
+                        + "({0:F0}s old, max {1:F0}s). "
+                        + "Using hardcoded defaults.",
+                        ageSeconds,
+                        localCacheExpirationSeconds
+                    );
+                    return;
+                }
+            }
 
-                    JToken metadataToken = jObject["_metadata"];
-                    if (metadataToken?["cachedAt"] != null)
-                    {
-                        DateTime cachedAt = metadataToken["cachedAt"].ToObject<DateTime>();
-                        if ((DateTime.UtcNow - cachedAt).TotalSeconds > localCacheExpirationSeconds)
-                        {
-                            QuickLog.Info<FirebaseRemoteConfigProvider>(
-                                "Local Firebase cache expired ({0}s old, max {1}s). Using hardcoded defaults.",
-                                (DateTime.UtcNow - cachedAt).TotalSeconds,
-                                localCacheExpirationSeconds
-                            );
-                            return;
-                        }
-                    }
-
-                    List<string> keys = new List<string>(defaults.Keys);
-                    foreach (string key in keys)
-                    {
-                        switch (defaults[key])
-                        {
-                            case string:
-                                defaults[key] = jObject[key]?.ToString() ?? defaults[key];
-                                break;
-                            case bool:
-                                defaults[key] = jObject[key]?.ToObject<bool>() ?? defaults[key];
-                                break;
-                            case int:
-                                defaults[key] = jObject[key]?.ToObject<int>() ?? defaults[key];
-                                break;
-                            case float:
-                                defaults[key] = jObject[key]?.ToObject<float>() ?? defaults[key];
-                                break;
-                        }
-                    }
+            List<string> keys = new List<string>(defaults.Keys);
+            foreach (string key in keys)
+            {
+                switch (defaults[key])
+                {
+                    case string:
+                        defaults[key] =
+                            jObject[key]?.ToString()
+                            ?? defaults[key];
+                        break;
+                    case bool:
+                        defaults[key] =
+                            jObject[key]?.ToObject<bool>()
+                            ?? defaults[key];
+                        break;
+                    case int:
+                        defaults[key] =
+                            jObject[key]?.ToObject<int>()
+                            ?? defaults[key];
+                        break;
+                    case float:
+                        defaults[key] =
+                            jObject[key]?.ToObject<float>()
+                            ?? defaults[key];
+                        break;
                 }
             }
         }
@@ -354,11 +366,17 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
             {
                 ["cachedAt"] = DateTime.UtcNow
             };
+
             byte[] bytes = Encoding.UTF8.GetBytes(jObject.ToString());
-            using (var ms = new MemoryStream(bytes))
-            {
-                await DS.WriteStreamAsync(FirebaseCachedConfigKey, ms);
-            }
+            string filePath =
+                GetCacheFilePath(FirebaseCachedConfigKey);
+
+            // Ensure directory exists
+            string dir = Path.GetDirectoryName(filePath);
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            await File.WriteAllBytesAsync(filePath, bytes);
         }
 
         private void HandleConfigCachedTaskCompleted(Task task)
@@ -470,6 +488,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                     result = default;
                     return false;
             }
+        }
+        private static string GetCacheFilePath(string key)
+        {
+            return Path.Combine(
+                Application.persistentDataPath,
+                "com.hapiga.cache",
+                key + ".json"
+            );
         }
     }
 }

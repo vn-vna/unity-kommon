@@ -16,84 +16,30 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
     public class DataSyncDirector : SingletonBehavior<DataSyncDirector>
     {
         #region Constants
-
-        private const string ConfigPath =
-            "Integration/Managers/DataSyncConfiguration";
-
+        private const string ConfigPath = "Integration/Managers/DataSyncConfiguration";
         #endregion
 
         #region Static Init
-
-        /// <summary>
-        /// Completes when the director has finished Awake() and is ready
-        /// to serve requests. Code that may execute before the bootstrap
-        /// finishes can await this to avoid premature calls.
-        /// </summary>
-        private static readonly TaskCompletionSource<bool> _readySource =
-            new TaskCompletionSource<bool>();
-
-        /// <summary>
-        /// Task that completes when the DataSyncDirector is fully initialized.
-        /// </summary>
+        private static readonly TaskCompletionSource<bool> _readySource = new TaskCompletionSource<bool>();
         public static Task ReadyTask => _readySource.Task;
-
         #endregion
 
         #region Per-Key Write Ordering
-
-        /// <summary>
-        /// One semaphore per key ensures that operations on the same key
-        /// are serialized (writes never overlap, reads never race with writes).
-        /// </summary>
-        private static readonly ConcurrentDictionary<
-            string, SemaphoreSlim
-        > _keySemaphores = new ConcurrentDictionary<
-            string, SemaphoreSlim
-        >();
-
-        /// <summary>
-        /// Runs an async operation under a per-key lock so that
-        /// concurrent calls for the same key are serialized.
-        /// </summary>
-        private static async Task RunWithKeyLockAsync(
-            string key,
-            Func<Task> operation)
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _keySemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();
+        private static async Task RunWithKeyLockAsync(string key, Func<Task> operation)
         {
-            SemaphoreSlim semaphore = _keySemaphores.GetOrAdd(
-                key, _ => new SemaphoreSlim(1, 1)
-            );
-
+            SemaphoreSlim semaphore = _keySemaphores.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
             await semaphore.WaitAsync();
-            try
-            {
-                await operation();
-            }
-            finally
-            {
-                semaphore.Release();
-            }
+            try { await operation(); }
+            finally { semaphore.Release(); }
         }
 
-        /// <summary>
-        /// Runs an async operation that returns a value under a per-key lock.
-        /// </summary>
-        private static async Task<T> RunWithKeyLockAsync<T>(
-            string key,
-            Func<Task<T>> operation)
+        private static async Task<T> RunWithKeyLockAsync<T>(string key, Func<Task<T>> operation)
         {
-            SemaphoreSlim semaphore = _keySemaphores.GetOrAdd(
-                key, _ => new SemaphoreSlim(1, 1)
-            );
-
+            SemaphoreSlim semaphore = _keySemaphores.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
             await semaphore.WaitAsync();
-            try
-            {
-                return await operation();
-            }
-            finally
-            {
-                semaphore.Release();
-            }
+            try { return await operation(); }
+            finally { semaphore.Release(); }
         }
 
         #endregion
@@ -114,68 +60,57 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
             try
             {
-                _config = Resources.Load<DataSyncConfiguration>(
-                    ConfigPath
-                );
+                _config = Resources.Load<DataSyncConfiguration>(ConfigPath);
 
                 if (_config != null)
                 {
-                    _saveOrderGroups =
-                        _config.ResolveSaveOrderGroups();
-                    _loadOrderGroups =
-                        _config.ResolveLoadOrderGroups();
+                    _saveOrderGroups = _config.ResolveSaveOrderGroups();
+                    _loadOrderGroups = _config.ResolveLoadOrderGroups();
                     _translators = _config.Translators
-                                       ?.Where(t => t != null)
-                                       .ToList()
-                                   ?? new List<ISaveTranslator>();
+                        ?.Where(t => t != null).ToList()
+                        ?? new List<ISaveTranslator>();
 
-                    // Initialize and filter adapters
                     await InitializeAndFilterAsync();
                 }
                 else
                 {
-                    var localAdapter =
-                        ScriptableObject
-                            .CreateInstance<LocalSaveAdapter>();
-                    _saveOrderGroups = new[]
-                        { new ISaveAdapter[] { localAdapter } };
-                    _loadOrderGroups = new[]
-                        { new ISaveAdapter[] { localAdapter } };
-                    _translators =
-                        new List<ISaveTranslator>
-                        {
-                            ScriptableObject
-                                .CreateInstance<UnityJsonTranslator>()
-                        };
+                    var localAdapter = ScriptableObject.CreateInstance<LocalSaveAdapter>();
+                    _saveOrderGroups = new[] { new ISaveAdapter[] { localAdapter } };
+                    _loadOrderGroups = new[] { new ISaveAdapter[] { localAdapter } };
+                    _translators = new List<ISaveTranslator> { ScriptableObject.CreateInstance<UnityJsonTranslator>() };
                 }
             }
             finally
             {
-                // Signal readiness even if init partially failed —
-                // the configured values (or fallbacks) are now set.
                 _readySource.TrySetResult(true);
             }
         }
 
         private async Task InitializeAndFilterAsync()
         {
-            // Collect unique adapters from both orders
             var allAdapters = new HashSet<ISaveAdapter>();
             foreach (ISaveAdapter[] group in _saveOrderGroups)
-            foreach (ISaveAdapter a in group)
-                if (a != null) allAdapters.Add(a);
-            foreach (ISaveAdapter[] group in _loadOrderGroups)
-            foreach (ISaveAdapter a in group)
-                if (a != null) allAdapters.Add(a);
+            {
+                foreach (ISaveAdapter a in group)
+                {
+                    if (a != null) allAdapters.Add(a);
+                }
+            }
 
-            // Initialize each adapter; log failures
+            foreach (ISaveAdapter[] group in _loadOrderGroups)
+            {
+                foreach (ISaveAdapter a in group)
+                {
+                    if (a != null) allAdapters.Add(a);
+                }
+            }
+
             foreach (ISaveAdapter adapter in allAdapters)
             {
                 try
                 {
                     bool ok = await adapter.InitializeAsync();
-                    QuickLog.Info<DataSyncDirector>(
-                        "Adapter '{0}' init: {1}",
+                    QuickLog.Info<DataSyncDirector>("Adapter '{0}' init: {1}",
                         adapter.AdapterId,
                         ok ? "available" : "unavailable"
                     );
@@ -189,8 +124,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 }
             }
 
-            // Filter groups — remove unavailable adapters,
-            // drop empty groups
             _saveOrderGroups = FilterGroups(_saveOrderGroups);
             _loadOrderGroups = FilterGroups(_loadOrderGroups);
         }
@@ -205,11 +138,15 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 foreach (ISaveAdapter a in group)
                 {
                     if (a != null && a.IsAvailable)
+                    {
                         available.Add(a);
+                    }
                 }
 
                 if (available.Count > 0)
+                {
                     result.Add(available.ToArray());
+                }
             }
 
             return result.ToArray();
@@ -219,8 +156,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         #region Bootstrap
 
-        [RuntimeInitializeOnLoadMethod(
-            RuntimeInitializeLoadType.AfterSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
             var go = new GameObject(
@@ -235,48 +171,19 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         #region Typed API (public — with per-key lock)
 
-        public Task SaveAsync<T>(
-            string key,
-            T data,
-            CancellationToken ct = default
-        ) where T : IVersionedData
-        {
-            return RunWithKeyLockAsync(
-                key,
-                () => SaveInternalAsync(key, data, ct)
-            );
-        }
+        public Task SaveAsync<T>(string key, T data, CancellationToken ct = default)
+            where T : IVersionedData
+            => RunWithKeyLockAsync(key, () => SaveInternalAsync(key, data, ct));
 
-        public Task<T> LoadAsync<T>(
-            string key,
-            CancellationToken ct = default
-        ) where T : IVersionedData, new()
-        {
-            return RunWithKeyLockAsync(
-                key,
-                () => LoadInternalAsync<T>(key, ct)
-            );
-        }
+        public Task<T> LoadAsync<T>(string key, CancellationToken ct = default)
+            where T : IVersionedData, new()
+            => RunWithKeyLockAsync(key, () => LoadInternalAsync<T>(key, ct));
 
-        public Task DeleteAsync(
-            string key,
-            CancellationToken ct = default)
-        {
-            return RunWithKeyLockAsync(
-                key,
-                () => DeleteInternalAsync(key, ct)
-            );
-        }
+        public Task DeleteAsync(string key, CancellationToken ct = default)
+            => RunWithKeyLockAsync(key, () => DeleteInternalAsync(key, ct));
 
-        public Task<bool> ExistsAsync(
-            string key,
-            CancellationToken ct = default)
-        {
-            return RunWithKeyLockAsync(
-                key,
-                () => ExistsInternalAsync(key, ct)
-            );
-        }
+        public Task<bool> ExistsAsync(string key, CancellationToken ct = default)
+            => RunWithKeyLockAsync(key, () => ExistsInternalAsync(key, ct));
 
         #endregion
 
@@ -307,101 +214,109 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         #region Internal Implementations (no locking — called under per-key lock)
 
-        /// <summary>
-        /// Saves data using save-order groups.
-        /// For each group, writes to the first adapter that succeeds.
-        /// </summary>
         private async Task SaveInternalAsync<T>(
             string key,
             T data,
             CancellationToken ct
         ) where T : IVersionedData
         {
-            VersionTag currentVersion =
-                VersionRegistry.GetCurrentVersion(typeof(T));
+            VersionTag currentVersion = VersionRegistry.GetCurrentVersion(typeof(T));
             ISaveTranslator translator = ResolveTranslator();
 
             if (_saveOrderGroups.Length == 0)
             {
-                throw new SaveAdapterException(
-                    "none",
-                    "No save groups configured"
+                throw new SaveAdapterException("none", "No save groups configured");
+            }
+
+            using var encodeStream = new MemoryStream();
+            await translator.EncodeAsync(
+                data, currentVersion, encodeStream, ct
+            );
+            byte[] encodedBytes = encodeStream.ToArray();
+
+            int groupCount = _saveOrderGroups.Length;
+            var groupTasks = new Task<(bool success, ISaveAdapter adapter, int groupIndex)>[groupCount];
+
+            for (int g = 0; g < groupCount; g++)
+            {
+                int groupIndex = g;
+                ISaveAdapter[] group = _saveOrderGroups[g];
+                groupTasks[g] = TryWriteToGroupAsync(key, encodedBytes, groupIndex, group, ct);
+            }
+
+            (bool success, ISaveAdapter adapter, int groupIndex)[] results = await Task.WhenAll(groupTasks);
+
+            var successes = results.Where(r => r.success).ToArray();
+            var failures = results.Where(r => !r.success).ToArray();
+
+            if (successes.Length > 0)
+            {
+                QuickLog.Info<DataSyncDirector>(
+                    "Saved key '{0}' → {1}/{2} group(s): [{3}]",
+                    key,
+                    successes.Length,
+                    groupCount,
+                    string.Join(", ", successes.Select(s => s.adapter.AdapterId))
                 );
             }
 
-            using (var ms = new MemoryStream())
+            if (failures.Length == groupCount)
             {
-                await translator.EncodeAsync(
-                    data, currentVersion, ms, ct
+                throw new AggregateException(
+                    $"All save groups failed for key '{key}'",
+                    failures.Select(f =>
+                        new SaveAdapterException(
+                            $"group[{f.groupIndex}]",
+                            $"All adapters in save group {f.groupIndex} failed for key '{key}'"
+                        )
+                    )
                 );
+            }
 
-                var allErrors = new List<Exception>();
-
-                for (int g = 0; g < _saveOrderGroups.Length; g++)
-                {
-                    ISaveAdapter[] group = _saveOrderGroups[g];
-                    bool groupSucceeded = false;
-
-                    foreach (ISaveAdapter adapter in group)
-                    {
-                        try
-                        {
-                            ms.Position = 0;
-                            await adapter.WriteAsync(key, ms, ct);
-                            groupSucceeded = true;
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            QuickLog.Warning<DataSyncDirector>(
-                                "Save group[{0}] adapter '{1}' "
-                                + "failed for key '{2}': {3}",
-                                g, adapter.AdapterId, key,
-                                ex.Message
-                            );
-                        }
-                    }
-
-                    if (!groupSucceeded)
-                    {
-                        allErrors.Add(
-                            new SaveAdapterException(
-                                $"group[{g}]",
-                                $"All adapters in save group {g} "
-                                + $"failed for key '{key}'"
-                            )
-                        );
-
-                        continue;
-                    }
-                }
-
-                if (allErrors.Count == _saveOrderGroups.Length)
-                {
-                    throw new AggregateException(
-                        $"All save groups failed for key '{key}'",
-                        allErrors
-                    );
-                }
+            if (failures.Length > 0)
+            {
+                QuickLog.Warning<DataSyncDirector>(
+                    "Save key '{0}': {1}/{2} group(s) failed — [{3}]",
+                    key,
+                    failures.Length,
+                    groupCount,
+                    string.Join(", ", failures.Select(f => $"group[{f.groupIndex}]"))
+                );
             }
         }
 
-        /// <summary>
-        /// Loads data using load-order groups.
-        /// Groups are tried in priority order; within a group
-        /// adapters are tried until one returns data.
-        /// </summary>
-        private async Task<T> LoadInternalAsync<T>(
-            string key,
-            CancellationToken ct
-        ) where T : IVersionedData, new()
+        private static async Task<(bool success, ISaveAdapter adapter, int groupIndex)> TryWriteToGroupAsync(
+            string key, byte[] encodedBytes, int groupIndex,
+            ISaveAdapter[] group, CancellationToken ct
+        )
+        {
+            foreach (ISaveAdapter adapter in group)
+            {
+                try
+                {
+                    using MemoryStream ms = new MemoryStream(encodedBytes);
+                    await adapter.WriteAsync(key, ms, ct);
+                    return (true, adapter, groupIndex);
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Save group[{0}] adapter '{1}' failed for key '{2}': {3}",
+                        groupIndex, adapter.AdapterId, key,
+                        ex.Message
+                    );
+                }
+            }
+
+            return (false, null, groupIndex);
+        }
+
+        private async Task<T> LoadInternalAsync<T>(string key, CancellationToken ct)
+            where T : IVersionedData, new()
         {
             if (_loadOrderGroups.Length == 0)
             {
-                throw new SaveAdapterException(
-                    "none",
-                    "No load groups configured"
-                );
+                throw new SaveAdapterException("none", "No load groups configured");
             }
 
             for (int g = 0; g < _loadOrderGroups.Length; g++)
@@ -412,37 +327,27 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 {
                     try
                     {
-                        Stream stream =
-                            await adapter.OpenReadAsync(key, ct);
-                        if (stream == null)
-                            continue;
+                        Stream stream = await adapter.OpenReadAsync(key, ct);
+                        if (stream == null) continue;
+
+                        QuickLog.Info<DataSyncDirector>(
+                            "Loaded key '{0}' from adapter '{1}' in group [{2}]",
+                            key, adapter.AdapterId, g
+                        );
 
                         using (stream)
                         {
-                            DecodeResult decoded =
-                                await DecodeStream(stream, ct);
-                            Type snapshotType =
-                                VersionRegistry.GetSnapshotType(
-                                    typeof(T), decoded.Version
-                                );
-                            ISaveTranslator translator =
-                                ResolveTranslator();
-                            object snapshot =
-                                translator.ConvertTo(
-                                    decoded.Data, snapshotType
-                                );
-                            return (T)VersionRegistry
-                                .MigrateToCurrent(
-                                    snapshot, typeof(T),
-                                    decoded.Version
-                                );
+                            DecodeResult decoded = await DecodeStream(stream, ct);
+                            Type snapshotType = VersionRegistry.GetSnapshotType(typeof(T), decoded.Version);
+                            ISaveTranslator translator = ResolveTranslator();
+                            object snapshot = translator.ConvertTo(decoded.Data, snapshotType);
+                            return (T)VersionRegistry.MigrateToCurrent(snapshot, typeof(T), decoded.Version);
                         }
                     }
                     catch (Exception ex)
                     {
                         QuickLog.Warning<DataSyncDirector>(
-                            "Load group[{0}] adapter '{1}' "
-                            + "failed for key '{2}': {3}",
+                            "Load group[{0}] adapter '{1}' failed for key '{2}': {3}",
                             g, adapter.AdapterId, key,
                             ex.Message
                         );
@@ -453,51 +358,48 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             throw new SaveNotFoundException(key);
         }
 
-        private async Task DeleteInternalAsync(
-            string key,
-            CancellationToken ct)
+        private async Task DeleteInternalAsync(string key, CancellationToken ct)
         {
             for (int g = 0; g < _saveOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter in _saveOrderGroups[g])
+                await DeleteDataInInSingleGroupInternalAsync(key, g, ct);
+            }
+        }
+
+        private async Task DeleteDataInInSingleGroupInternalAsync(string key, int g, CancellationToken ct)
+        {
+            foreach (ISaveAdapter adapter in _saveOrderGroups[g])
+            {
+                try
                 {
-                    try
-                    {
-                        await adapter.DeleteAsync(key, ct);
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        QuickLog.Warning<DataSyncDirector>(
-                            "Delete group[{0}] adapter '{1}' "
-                            + "failed for key '{2}': {3}",
-                            g, adapter.AdapterId, key,
-                            ex.Message
-                        );
-                    }
+                    await adapter.DeleteAsync(key, ct);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Delete group[{0}] adapter '{1}' failed for key '{2}': {3}",
+                        g, adapter.AdapterId, key,
+                        ex.Message
+                    );
                 }
             }
         }
 
-        private async Task<bool> ExistsInternalAsync(
-            string key,
-            CancellationToken ct)
+        private async Task<bool> ExistsInternalAsync(string key, CancellationToken ct)
         {
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter
-                         in _loadOrderGroups[g])
+                foreach (ISaveAdapter adapter in _loadOrderGroups[g])
                 {
                     try
                     {
-                        if (await adapter.ExistsAsync(key, ct))
-                            return true;
+                        if (await adapter.ExistsAsync(key, ct)) return true;
                     }
                     catch (Exception ex)
                     {
                         QuickLog.Warning<DataSyncDirector>(
-                            "Exists group[{0}] adapter '{1}' "
-                            + "failed for key '{2}': {3}",
+                            "Exists group[{0}] adapter '{1}' failed for key '{2}': {3}",
                             g, adapter.AdapterId, key,
                             ex.Message
                         );
@@ -508,27 +410,21 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             return false;
         }
 
-        private async Task<Stream> OpenReadStreamInternalAsync(
-            string key,
-            CancellationToken ct)
+        private async Task<Stream> OpenReadStreamInternalAsync(string key, CancellationToken ct)
         {
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter
-                         in _loadOrderGroups[g])
+                foreach (ISaveAdapter adapter in _loadOrderGroups[g])
                 {
                     try
                     {
-                        Stream stream =
-                            await adapter.OpenReadAsync(key, ct);
-                        if (stream != null)
-                            return stream;
+                        Stream stream = await adapter.OpenReadAsync(key, ct);
+                        if (stream != null) return stream;
                     }
                     catch (Exception ex)
                     {
                         QuickLog.Warning<DataSyncDirector>(
-                            "OpenRead group[{0}] adapter '{1}' "
-                            + "failed for key '{2}': {3}",
+                            "OpenRead group[{0}] adapter '{1}' failed for key '{2}': {3}",
                             g, adapter.AdapterId, key,
                             ex.Message
                         );
@@ -539,15 +435,11 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             throw new SaveNotFoundException(key);
         }
 
-        private async Task WriteStreamInternalAsync(
-            string key,
-            Stream data,
-            CancellationToken ct)
+        private async Task WriteStreamInternalAsync(string key, Stream data, CancellationToken ct)
         {
             for (int g = 0; g < _saveOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter
-                         in _saveOrderGroups[g])
+                foreach (ISaveAdapter adapter in _saveOrderGroups[g])
                 {
                     try
                     {
@@ -572,15 +464,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         #region Adapter / Translator Resolution
 
-        /// <summary>
-        /// Returns the first adapter from the first load group.
-        /// For backward compatibility — prefer typed API methods.
-        /// </summary>
         public ISaveAdapter ResolveAdapter()
         {
-            if (_loadOrderGroups.Length > 0
-                && _loadOrderGroups[0].Length > 0)
+            if (_loadOrderGroups.Length > 0 && _loadOrderGroups[0].Length > 0)
+            {
                 return _loadOrderGroups[0][0];
+            }
 
             throw new SaveAdapterException(
                 "none",
@@ -588,9 +477,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             );
         }
 
-        /// <summary>
-        /// All adapters across all groups (flattened, deduplicated).
-        /// </summary>
         public ISaveAdapter[] ActiveAdapters
             => _saveOrderGroups
                 .SelectMany(g => g)
@@ -599,20 +485,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 .ToArray();
 
         public ISaveTranslator ResolveTranslator()
-        {
-            return _translators.FirstOrDefault()
-                   ?? throw new TranslationException(
-                       "No translators configured"
-                   );
-        }
+            => _translators.FirstOrDefault()
+                ?? throw new TranslationException("No translators configured");
 
         #endregion
 
         #region Decode Pipeline
 
-        private async Task<DecodeResult> DecodeStream(
-            Stream stream,
-            CancellationToken ct)
+        private async Task<DecodeResult> DecodeStream(Stream stream, CancellationToken ct)
         {
             ISaveTranslator translator = ResolveTranslator();
 
@@ -628,29 +508,21 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             foreach (ISaveTranslator t in _translators)
             {
                 stream.Position = 0;
-                if (TryMatchSignature(stream, t.Signature))
-                {
-                    stream.Position = 0;
-                    return await t.DecodeAsync(stream, ct);
-                }
+                if (!TryMatchSignature(stream, t.Signature)) continue;
+                stream.Position = 0;
+                return await t.DecodeAsync(stream, ct);
             }
 
-            throw new TranslationException(
-                "No translator matched the data signature"
-            );
+            throw new TranslationException("No translator matched the data signature");
         }
 
-        private static bool TryMatchSignature(
-            Stream stream,
-            byte[] signature)
+        private static bool TryMatchSignature(Stream stream, byte[] signature)
         {
-            if (signature == null || signature.Length == 0)
-                return false;
+            if (signature == null || signature.Length == 0) return false;
 
             var buffer = new byte[signature.Length];
             int bytesRead = stream.Read(buffer, 0, signature.Length);
-            return bytesRead == signature.Length
-                   && buffer.SequenceEqual(signature);
+            return bytesRead == signature.Length && buffer.SequenceEqual(signature);
         }
 
         #endregion
