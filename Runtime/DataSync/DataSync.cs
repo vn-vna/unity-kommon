@@ -28,7 +28,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string key,
             T data,
             CancellationToken ct = default
-        ) where T : IVersionedData
+        )
         {
             await EnsureReadyAsync();
             await DataSyncDirector.Instance.SaveAsync(key, data, ct);
@@ -37,7 +37,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public static async Task<T> LoadAsync<T>(
             string key,
             CancellationToken ct = default
-        ) where T : IVersionedData, new()
+        )
         {
             await EnsureReadyAsync();
             return await DataSyncDirector.Instance.LoadAsync<T>(
@@ -96,7 +96,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         #region Fire-and-Forget (safe for Unity Update callers)
 
         public static async void Save<T>(string key, T data)
-            where T : IVersionedData
         {
             try
             {
@@ -116,7 +115,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public static async void Load<T>(
             string key,
             Action<T> onLoaded
-        ) where T : IVersionedData, new()
+        )
         {
             try
             {

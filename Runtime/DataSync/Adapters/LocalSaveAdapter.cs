@@ -16,6 +16,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public bool IsAvailable => true;
 
+        public SaveAdapterFeature SupportedFeatures
+            => SaveAdapterFeature.Read
+             | SaveAdapterFeature.Write
+             | SaveAdapterFeature.Delete
+             | SaveAdapterFeature.Exists
+             | SaveAdapterFeature.KvStore;
+
         public Task<bool> InitializeAsync()
         {
             Directory.CreateDirectory(RootPath);
@@ -44,24 +51,21 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string path = GetFilePath(key);
             Directory.CreateDirectory(RootPath);
 
-            using (var fs = new FileStream(
-                path, FileMode.Create, FileAccess.Write,
-                FileShare.None, 4096, useAsync: true))
-            {
-                await data.CopyToAsync(fs, 81920, ct);
-            }
+            using FileStream fs = new FileStream(
+                path, FileMode.Create, FileAccess.Write, 
+                FileShare.None, 4096, useAsync: true
+            );
+
+            await data.CopyToAsync(fs, 81920, ct);
         }
 
         public Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
             string path = GetFilePath(key);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-                return Task.FromResult(true);
-            }
+            if (!File.Exists(path)) return Task.FromResult(false);
 
-            return Task.FromResult(false);
+            File.Delete(path);
+            return Task.FromResult(true);
         }
 
         public Task<bool> ExistsAsync(string key, CancellationToken ct = default)

@@ -172,11 +172,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         #region Typed API (public — with per-key lock)
 
         public Task SaveAsync<T>(string key, T data, CancellationToken ct = default)
-            where T : IVersionedData
             => RunWithKeyLockAsync(key, () => SaveInternalAsync(key, data, ct));
 
         public Task<T> LoadAsync<T>(string key, CancellationToken ct = default)
-            where T : IVersionedData, new()
             => RunWithKeyLockAsync(key, () => LoadInternalAsync<T>(key, ct));
 
         public Task DeleteAsync(string key, CancellationToken ct = default)
@@ -218,7 +216,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string key,
             T data,
             CancellationToken ct
-        ) where T : IVersionedData
+        )
         {
             VersionTag currentVersion = VersionRegistry.GetCurrentVersion(typeof(T));
             ISaveTranslator translator = ResolveTranslator();
@@ -312,7 +310,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         }
 
         private async Task<T> LoadInternalAsync<T>(string key, CancellationToken ct)
-            where T : IVersionedData, new()
         {
             if (_loadOrderGroups.Length == 0)
             {

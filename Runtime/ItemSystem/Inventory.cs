@@ -15,7 +15,6 @@ namespace Com.Hapiga.Schehrazade.IS
     }
 
     public abstract class Inventory :
-        IVersionedData,
         ISerializationCallbackReceiver,
         IInventory
     {

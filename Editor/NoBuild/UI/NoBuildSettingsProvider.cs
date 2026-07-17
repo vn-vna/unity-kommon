@@ -33,6 +33,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private double _lastDeviceRefreshTime;
         private const double DeviceRefreshInterval = 2.0;
         private string _installApkPath = "";
+        private string _installAabPath = "";
         private List<WirelessDeviceInfo> _wirelessDevices;
         private string _pairingCode = "";
 
@@ -1201,6 +1202,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _installApkPath = picked;
             }
             GUI.backgroundColor = Color.white;
+
+            GUILayout.Space(8);
+            GUI.backgroundColor = new Color(0.7f, 0.5f, 0.2f);
+            if (GUILayout.Button("Install AAB...",
+                    GUILayout.Height(26)))
+            {
+                string picked = EditorUtility.OpenFilePanel(
+                    "Select AAB", "", "aab");
+                if (!string.IsNullOrEmpty(picked))
+                    _installAabPath = picked;
+            }
+            GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
@@ -1398,7 +1411,87 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.backgroundColor = Color.white;
             }
 
+            // Install AAB button (if AAB path is set)
+            if (!string.IsNullOrEmpty(_installAabPath)
+                && isOnline)
+            {
+                GUI.backgroundColor =
+                    new Color(0.7f, 0.45f, 0.15f);
+                if (GUILayout.Button(
+                        "Install AAB",
+                        GUILayout.Width(75),
+                        GUILayout.Height(24)))
+                {
+                    InstallAabToDevice(device);
+                }
+                GUI.backgroundColor = Color.white;
+            }
+
             EditorGUILayout.EndHorizontal();
+        }
+
+
+        private void InstallAabToDevice(AdbDeviceInfo device)
+        {
+            string aabFile = System.IO.Path.GetFileName(
+                _installAabPath);
+            if (!EditorUtility.DisplayDialog(
+                    "Install AAB",
+                    $"Install {aabFile} to " +
+                    $"{device.Model}?\n\n" +
+                    "The AAB will be converted to APKS first.",
+                    "Install", "Cancel"))
+            {
+                return;
+            }
+
+            string tempApksPath = null;
+            try
+            {
+                EditorUtility.DisplayProgressBar(
+                    "NoBuild",
+                    $"Converting {aabFile}...",
+                    0.3f);
+                tempApksPath =
+                    AabUtility.BuildApks(
+                        _installAabPath);
+
+                EditorUtility.DisplayProgressBar(
+                    "NoBuild",
+                    $"Installing to {device.Model}...",
+                    0.6f);
+                bool ok = AabUtility.InstallApks(
+                    tempApksPath, device.Serial);
+                EditorUtility.ClearProgressBar();
+
+                if (ok)
+                {
+                    EditorPrefs.SetString(
+                        "NoBuild_LastAdbDevice",
+                        device.Serial);
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog(
+                        "NoBuild",
+                        "AAB install failed.",
+                        "OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.ClearProgressBar();
+                EditorUtility.DisplayDialog(
+                    "NoBuild — Install Failed",
+                    $"AAB install failed.\n\n" +
+                    $"{ex.Message}",
+                    "OK");
+            }
+            finally
+            {
+                if (tempApksPath != null)
+                    AabUtility.Cleanup(tempApksPath);
+            }
         }
 
         private void DrawWirelessRow(

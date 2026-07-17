@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Com.Hapiga.Scheherazade.Common.Logging;
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 using GooglePlayGames.BasicApi.SavedGame;
@@ -21,8 +22,16 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public bool IsAvailable { get; private set; }
 
-        public static ISavedGameClient Client
-            => PlayGamesPlatform.Instance?.SavedGame;
+        public SaveAdapterFeature SupportedFeatures
+            => SaveAdapterFeature.Read
+             | SaveAdapterFeature.Write
+             | SaveAdapterFeature.Delete
+             | SaveAdapterFeature.Exists
+             | SaveAdapterFeature.Cloud;
+
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+        public static ISavedGameClient Client => PlayGamesPlatform.Instance?.SavedGame;
+#endif
 
         public async Task<bool> InitializeAsync()
         {
@@ -77,12 +86,20 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             IsAvailable = false;
         }
 
-        public async Task<bool> DeleteAsync(
-            string key, CancellationToken ct = default)
+        public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             if (!PlayGamesPlatform.Instance.IsAuthenticated())
+            {
                 return false;
+            }
+
+            ISavedGameMetadata metadata = await OpenConnection(key, ct);
+            Client.Delete(metadata);
             return true;
+#else
+            return false;
+#endif
         }
 
         public async Task<bool> ExistsAsync(
@@ -107,7 +124,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         }
 
         public async Task WriteAsync(
-            string key, Stream data, 
+            string key, Stream data,
             CancellationToken ct = default)
         {
             ISavedGameMetadata metadata = await OpenConnection(key, ct);

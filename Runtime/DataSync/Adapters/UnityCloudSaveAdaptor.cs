@@ -24,6 +24,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public bool IsAvailable { get; private set; }
 
+        public SaveAdapterFeature SupportedFeatures
+            => SaveAdapterFeature.Read
+             | SaveAdapterFeature.Write
+             | SaveAdapterFeature.Delete
+             | SaveAdapterFeature.Exists
+             | SaveAdapterFeature.Cloud;
+
         public void Reset()
         { }
 

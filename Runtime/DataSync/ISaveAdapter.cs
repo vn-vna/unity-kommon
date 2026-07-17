@@ -24,5 +24,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         Task<bool> ExistsAsync(string key, CancellationToken ct = default);
 
         Task<DateTime?> GetLastWriteTimeAsync(string key, CancellationToken ct = default);
+
+        SaveAdapterFeature SupportedFeatures { get; }
     }
 }

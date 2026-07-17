@@ -5,7 +5,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 {
     [Serializable]
     [CurrentDataVersion("1.0.0")]
-    public class TestSyncData : IVersionedData
+    public class TestSyncData
     {
         public string playerName = "Player";
         public int score;
@@ -18,7 +18,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
     }
 
     [Serializable]
-    public class TestSyncDataV0 : IVersionedData
+    public class TestSyncDataV0
     {
         public string playerName;
         public int score;
