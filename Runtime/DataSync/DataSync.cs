@@ -60,9 +60,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         )
         {
             await EnsureReadyAsync();
-            return await DataSyncDirector.Instance.ExistsAsync(
-                key, ct
-            );
+            return await DataSyncDirector.Instance.ExistsAsync(key, ct);
         }
 
         #endregion
@@ -75,8 +73,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         )
         {
             await EnsureReadyAsync();
-            return await DataSyncDirector.Instance
-                .OpenReadStreamAsync(key, ct);
+            return await DataSyncDirector.Instance.OpenReadStreamAsync(key, ct);
         }
 
         public static async Task WriteStreamAsync(
@@ -86,9 +83,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         )
         {
             await EnsureReadyAsync();
-            await DataSyncDirector.Instance.WriteStreamAsync(
-                key, data, ct
-            );
+            await DataSyncDirector.Instance.WriteStreamAsync(key, data, ct);
         }
 
         #endregion
@@ -100,9 +95,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             try
             {
                 await EnsureReadyAsync();
-                await DataSyncDirector.Instance.SaveAsync(
-                    key, data
-                );
+                await DataSyncDirector.Instance.SaveAsync(key, data);
             }
             catch (Exception ex)
             {
@@ -120,8 +113,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             try
             {
                 await EnsureReadyAsync();
-                T result = await DataSyncDirector.Instance
-                    .LoadAsync<T>(key);
+                T result = await DataSyncDirector.Instance.LoadAsync<T>(key);
                 onLoaded?.Invoke(result);
             }
             catch (Exception ex)

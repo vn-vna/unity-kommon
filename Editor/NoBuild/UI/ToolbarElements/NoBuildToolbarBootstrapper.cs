@@ -244,6 +244,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     {
                         Rect btnRect =
                             GUILayoutUtility.GetLastRect();
+                        btnRect.position +=
+                            editorWindow.position.position;
                         UnityEditor.PopupWindow.Show(btnRect,
                             NoBuildDropdowns.CreateDeviceSelectPopup(
                                 (option, serial) =>

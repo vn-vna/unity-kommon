@@ -608,49 +608,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             return new BuildStateSnapshot
             {
-                scriptDefines =
-                    PlayerSettings.GetScriptingDefineSymbols(namedTarget),
-                scriptingBackend =
-                    PlayerSettings.GetScriptingBackend(namedTarget),
-                il2CppCodeGeneration =
-                    PlayerSettings.GetIl2CppCodeGeneration(namedTarget),
-                strippingLevel =
-                    PlayerSettings.GetManagedStrippingLevel(namedTarget),
-                stripEngineCode =
-                    PlayerSettings.stripEngineCode,
-                developmentBuild =
-                    EditorUserBuildSettings.development,
-                allowDebugging =
-                    EditorUserBuildSettings.allowDebugging,
-                connectProfiler =
-                    EditorUserBuildSettings.connectProfiler,
-                bundleIdentifier =
-                    PlayerSettings.GetApplicationIdentifier(namedTarget),
-                productName =
-                    PlayerSettings.productName,
+                scriptDefines = PlayerSettings.GetScriptingDefineSymbols(namedTarget),
+                scriptingBackend = PlayerSettings.GetScriptingBackend(namedTarget),
+                il2CppCodeGeneration = PlayerSettings.GetIl2CppCodeGeneration(namedTarget),
+                strippingLevel = PlayerSettings.GetManagedStrippingLevel(namedTarget),
+                stripEngineCode = PlayerSettings.stripEngineCode,
+                developmentBuild = EditorUserBuildSettings.development,
+                allowDebugging = EditorUserBuildSettings.allowDebugging,
+                connectProfiler = EditorUserBuildSettings.connectProfiler,
+                bundleIdentifier = PlayerSettings.GetApplicationIdentifier(namedTarget),
+                productName = PlayerSettings.productName,
 #if UNITY_ANDROID
-                androidArchitecture =
-                    PlayerSettings.Android.targetArchitectures,
-                androidExportProject =
-                    EditorUserBuildSettings.exportAsGoogleAndroidProject,
-                androidBuildAppBundle =
-                    EditorUserBuildSettings.buildAppBundle,
-                androidSplitBinary =
-                    PlayerSettings.Android.splitApplicationBinary,
-#if UNITY_ANDROID
-                debugSymbolLevel =
-                    UnityEditor.Android.UserBuildSettings
-                        .DebugSymbols.level,
-                debugSymbolFormat =
-                    UnityEditor.Android.UserBuildSettings
-                        .DebugSymbols.format,
-#endif
+                androidArchitecture = PlayerSettings.Android.targetArchitectures,
+                androidExportProject = EditorUserBuildSettings.exportAsGoogleAndroidProject,
+                androidBuildAppBundle = EditorUserBuildSettings.buildAppBundle,
+                androidSplitBinary = PlayerSettings.Android.splitApplicationBinary,
+                debugSymbolLevel = UnityEditor.Android.UserBuildSettings.DebugSymbols.level,
+                debugSymbolFormat = UnityEditor.Android.UserBuildSettings.DebugSymbols.format,
 #endif
 #if UNITY_IOS
-                iosTeamId =
-                    PlayerSettings.iOS.appleDeveloperTeamID,
-                iosAutomaticSigning =
-                    PlayerSettings.iOS.appleEnableAutomaticSigning,
+                iosTeamId = PlayerSettings.iOS.appleDeveloperTeamID,
+                iosAutomaticSigning = PlayerSettings.iOS.appleEnableAutomaticSigning,
 #endif
             };
         }
@@ -658,7 +636,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static void ApplyBuildConfiguration(
             BuildConfiguration config,
             UnityEditor.Build.NamedBuildTarget namedTarget,
-            BuildTargetGroup targetGroup)
+            BuildTargetGroup targetGroup
+        )
         {
             PlayerSettings.SetScriptingBackend(namedTarget, config.scriptingBackend);
             PlayerSettings.SetIl2CppCodeGeneration(namedTarget, config.il2CppCodeGeneration);
@@ -670,21 +649,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorUserBuildSettings.connectProfiler = config.connectWithProfiler;
 
             if (!string.IsNullOrEmpty(config.bundleIdentifierOverride))
+            {
                 PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride);
+            }
+
             if (!string.IsNullOrEmpty(config.productNameOverride))
+            {
                 PlayerSettings.productName = config.productNameOverride;
+            }
 
 #if UNITY_ANDROID
             PlayerSettings.Android.targetArchitectures = config.androidTargetArchitecture;
             EditorUserBuildSettings.exportAsGoogleAndroidProject = config.androidExportProject;
             EditorUserBuildSettings.buildAppBundle = config.androidBuildAppBundle;
             PlayerSettings.Android.splitApplicationBinary = config.androidSplitBinary;
-#if UNITY_ANDROID
-            UnityEditor.Android.UserBuildSettings.DebugSymbols.level =
-                config.debugSymbolLevel;
-            UnityEditor.Android.UserBuildSettings.DebugSymbols.format =
-                config.debugSymbolFormat;
-#endif
+            UnityEditor.Android.UserBuildSettings.DebugSymbols.level = config.debugSymbolLevel;
+            UnityEditor.Android.UserBuildSettings.DebugSymbols.format = config.debugSymbolFormat;
 #endif
 
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE
@@ -693,8 +673,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 #endif
 
 #if UNITY_IOS
-            if (!string.IsNullOrEmpty(config.iosTeamId))
-                PlayerSettings.iOS.appleDeveloperTeamID = config.iosTeamId;
+            if (!string.IsNullOrEmpty(config.iosTeamId)) PlayerSettings.iOS.appleDeveloperTeamID = config.iosTeamId;
             PlayerSettings.iOS.appleEnableAutomaticSigning = config.iosAutomaticSigning;
 #endif
         }
@@ -712,6 +691,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     namedTarget,
                     snapshot.scriptDefines ?? ""
                 );
+
                 PlayerSettings.SetScriptingBackend(namedTarget, snapshot.scriptingBackend);
                 PlayerSettings.SetIl2CppCodeGeneration(namedTarget, snapshot.il2CppCodeGeneration);
                 PlayerSettings.SetManagedStrippingLevel(namedTarget, snapshot.strippingLevel);
@@ -730,16 +710,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = snapshot.androidExportProject;
                 EditorUserBuildSettings.buildAppBundle = snapshot.androidBuildAppBundle;
                 PlayerSettings.Android.splitApplicationBinary = snapshot.androidSplitBinary;
-#if UNITY_ANDROID
-                UnityEditor.Android.UserBuildSettings.DebugSymbols.level =
-                    snapshot.debugSymbolLevel;
-                UnityEditor.Android.UserBuildSettings.DebugSymbols.format =
-                    snapshot.debugSymbolFormat;
-#endif
+                UnityEditor.Android.UserBuildSettings.DebugSymbols.level = snapshot.debugSymbolLevel;
+                UnityEditor.Android.UserBuildSettings.DebugSymbols.format = snapshot.debugSymbolFormat;
 #endif
 #if UNITY_IOS
-                if (!string.IsNullOrEmpty(snapshot.iosTeamId))
+                if (!string.IsNullOrEmpty(snapshot.iosTeamId)) 
+                {
                     PlayerSettings.iOS.appleDeveloperTeamID = snapshot.iosTeamId;
+                }
+
                 PlayerSettings.iOS.appleEnableAutomaticSigning = snapshot.iosAutomaticSigning;
 #endif
             }
@@ -762,7 +741,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// restored) global EditorUserBuildSettings value.
         /// </summary>
         private static string GetPlatformExtension(
-            BuildTarget target, BuildConfiguration config)
+            BuildTarget target, BuildConfiguration config
+        )
         {
             switch (target)
             {

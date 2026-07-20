@@ -851,6 +851,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _so.ApplyModifiedProperties();
                     Rect btnRect =
                         GUILayoutUtility.GetLastRect();
+                    btnRect.position =
+                        GUIUtility.GUIToScreenPoint(
+                            btnRect.position);
                     PopupWindow.Show(btnRect,
                         NoBuildDropdowns.CreateDeviceSelectPopup(
                             (option, serial) =>
@@ -1665,7 +1668,11 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             if (GUI.Button(btnRect, btnContent, btnStyle))
             {
-                PopupWindow.Show(btnRect,
+                Rect screenRect = btnRect;
+                screenRect.position =
+                    GUIUtility.GUIToScreenPoint(
+                        screenRect.position);
+                PopupWindow.Show(screenRect,
                     NoBuildDropdowns.CreatePlatformGridDropdown(
                         currentPlatform,
                         newPlatform =>
@@ -1732,13 +1739,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
             prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
             if (GUILayout.Button("?", GUILayout.Width(22)))
-                PlaceholderGuide.Show(
-                    GUILayoutUtility.GetLastRect(),
+            {
+                Rect btnRect =
+                    GUILayoutUtility.GetLastRect();
+                btnRect.position =
+                    GUIUtility.GUIToScreenPoint(
+                        btnRect.position);
+                PlaceholderGuide.Show(btnRect,
                     key =>
                     {
                         prop.stringValue += key;
                         prop.serializedObject.ApplyModifiedProperties();
                     });
+            }
             EditorGUILayout.EndHorizontal();
         }
 

@@ -32,7 +32,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             try
             {
                 foreach (string tmpFile in Directory.GetFiles(RootPath, "*.tmp"))
+                {
                     File.Delete(tmpFile);
+                }
             }
             catch { }
 
@@ -41,11 +43,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public void Reset() { }
 
-        private static string RootPath
-            => Path.Combine(Application.persistentDataPath, "SaveData");
-
-        private string GetFilePath(string key)
-            => Path.Combine(RootPath, key + ".dat");
+        private static string RootPath => Path.Combine(Application.persistentDataPath, "SaveData");
+        private string GetFilePath(string key) => Path.Combine(RootPath, key + ".dat");
 
         public async Task<Stream> OpenReadAsync(string key, CancellationToken ct = default)
         {
@@ -87,8 +86,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             }
 
             string tmpPath = path + ".tmp";
-            if (File.Exists(tmpPath))
-                File.Delete(tmpPath);
+            if (File.Exists(tmpPath)) File.Delete(tmpPath);
 
             return Task.FromResult(deleted);
         }
