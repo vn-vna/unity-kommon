@@ -148,7 +148,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     settings.flagDefinitions)
                 {
                     sb.Append(ResolveSingleFlag(
-                        flag, settings));
+                        flag, settings, profile));
                 }
                 return sb.ToString();
             };
@@ -187,7 +187,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     if (flag != null)
                         return Sanitize(
                             ResolveSingleFlag(
-                                flag, settings));
+                                flag, settings, profile));
                     return match.Value;
                 }
 
@@ -246,51 +246,156 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         }
 
         private static string ResolveSingleFlag(
-            FlagDefinition flag, NoBuildSettings settings)
+            FlagDefinition flag,
+            NoBuildSettings settings,
+            BuildProfile profile = null)
         {
             if (flag == null || settings == null)
                 return "";
 
-            HashSet<string> currentDefines =
-                ScriptDefinitionSwitcher.GetCurrentDefines();
             bool isActive = false;
 
             if (flag.type == FlagDefinitionType.Template)
             {
-                if (flag.scriptDefinitionSetIndex >= 0
-                    && flag.scriptDefinitionSetIndex
-                    < settings.scriptDefinitionSets.Count)
+                // Resolve the flag's own slot to extract
+                // target symbol and its default enabled state
+                ScriptDefinitionSlot flagSlot =
+                    GetFlagSlot(flag, settings);
+                if (flagSlot == null
+                    || string.IsNullOrEmpty(
+                        flagSlot.defineSymbol))
                 {
-                    ScriptDefinitionSet set =
+                    // Cannot determine target — remain inactive
+                }
+                else if (profile != null
+                    && profile.HasValidDefineSet(settings))
+                {
+                    // Look up the target symbol in the
+                    // PROFILE's set (authority)
+                    ScriptDefinitionSet profileSet =
                         settings.scriptDefinitionSets[
-                            flag.scriptDefinitionSetIndex];
-                    if (set.slots != null
-                        && flag.scriptDefinitionSlotIndex >= 0
-                        && flag.scriptDefinitionSlotIndex
-                        < set.slots.Count)
-                    {
-                        ScriptDefinitionSlot slot =
-                            set.slots[
-                                flag.scriptDefinitionSlotIndex];
-                        isActive = slot.enabled
-                            && !string.IsNullOrEmpty(
-                                slot.defineSymbol)
-                            && currentDefines.Contains(
-                                slot.defineSymbol);
-                    }
+                            profile.scriptDefinitionSetIndex];
+                    isActive = LookupSymbolInSet(
+                        profileSet,
+                        flagSlot.defineSymbol,
+                        flagSlot.enabled);
+                }
+                else
+                {
+                    // No profile — use flag's own slot
+                    isActive = flagSlot.enabled;
                 }
             }
             else // Custom
             {
-                isActive = !string.IsNullOrEmpty(
-                    flag.customDefineSymbol)
-                    && currentDefines.Contains(
-                        flag.customDefineSymbol);
+                // Resolve against profile's set when available
+                if (profile != null
+                    && profile.HasValidDefineSet(settings))
+                {
+                    ScriptDefinitionSet profileSet =
+                        settings.scriptDefinitionSets[
+                            profile.scriptDefinitionSetIndex];
+                    isActive = LookupSymbolInSet(
+                        profileSet,
+                        flag.customDefineSymbol,
+                        fallbackEnabled: false);
+                    if (!isActive)
+                    {
+                        // Not found in profile's set — fall
+                        // back to current PlayerSettings
+                        HashSet<string> currentDefines =
+                            ScriptDefinitionSwitcher
+                                .GetCurrentDefines();
+                        isActive = !string.IsNullOrEmpty(
+                            flag.customDefineSymbol)
+                            && currentDefines.Contains(
+                                flag.customDefineSymbol);
+                    }
+                }
+                else
+                {
+                    HashSet<string> currentDefines =
+                        ScriptDefinitionSwitcher
+                            .GetCurrentDefines();
+                    isActive = !string.IsNullOrEmpty(
+                        flag.customDefineSymbol)
+                        && currentDefines.Contains(
+                            flag.customDefineSymbol);
+                }
             }
 
             return isActive
                 ? flag.trueFlag
                 : flag.falseFlag;
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Flag Helpers
+        // ══════════════════════════════════════════════════
+
+        /// <summary>
+        /// Resolves the <see cref="ScriptDefinitionSlot"/> referenced
+        /// by a Template-type flag.  Returns null when the reference
+        /// is invalid.
+        /// </summary>
+        private static ScriptDefinitionSlot GetFlagSlot(
+            FlagDefinition flag, NoBuildSettings settings)
+        {
+            if (flag == null || settings == null)
+                return null;
+            if (flag.scriptDefinitionSetIndex < 0
+                || flag.scriptDefinitionSetIndex
+                >= settings.scriptDefinitionSets.Count)
+                return null;
+            ScriptDefinitionSet set =
+                settings.scriptDefinitionSets[
+                    flag.scriptDefinitionSetIndex];
+            if (set.slots == null
+                || flag.scriptDefinitionSlotIndex < 0
+                || flag.scriptDefinitionSlotIndex
+                >= set.slots.Count)
+                return null;
+            return set.slots[
+                flag.scriptDefinitionSlotIndex];
+        }
+
+        /// <summary>
+        /// Looks up a symbol in a <see cref="ScriptDefinitionSet"/>.
+        /// </summary>
+        /// <param name="set">The set to search.</param>
+        /// <param name="symbol">The define symbol to look for.</param>
+        /// <param name="fallbackEnabled">
+        /// Value to return when the symbol is NOT found in
+        /// <paramref name="set"/>.
+        /// </param>
+        /// <returns>
+        /// <c>true</c> when the symbol is found and its slot is
+        /// enabled; <c>false</c> when found but disabled;
+        /// <paramref name="fallbackEnabled"/> when not found.
+        /// </returns>
+        private static bool LookupSymbolInSet(
+            ScriptDefinitionSet set,
+            string symbol,
+            bool fallbackEnabled)
+        {
+            if (set?.slots == null
+                || string.IsNullOrEmpty(symbol))
+                return fallbackEnabled;
+
+            foreach (ScriptDefinitionSlot slot in set.slots)
+            {
+                if (string.Equals(
+                    slot.defineSymbol,
+                    symbol,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return slot.enabled
+                        && !string.IsNullOrEmpty(
+                            slot.defineSymbol);
+                }
+            }
+
+            return fallbackEnabled;
         }
 
         // ══════════════════════════════════════════════════

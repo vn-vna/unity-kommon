@@ -40,153 +40,239 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         /// <summary>
         /// Executes a full build based on the given profile.
+        /// Returns the <see cref="BuildReport"/> on success,
+        /// or <c>null</c> on validation error, exception, or
+        /// build pipeline failure.
         /// </summary>
-        public static void Build(BuildProfile profile, string outputPath = null)
+        public static BuildReport? Build(
+            BuildProfile profile,
+            string outputPath = null)
         {
             if (profile == null)
             {
                 FireFailed(null, "Build profile is null.");
-                return;
+                return null;
             }
 
-            NoBuildSettings settings = NoBuildResourceUtility.GetSettings();
+            NoBuildSettings settings =
+                NoBuildResourceUtility.GetSettings();
             if (settings == null)
             {
-                FireFailed(profile, "NoBuild settings not found. Create them in Project Settings.");
-                return;
+                FireFailed(
+                    profile,
+                    "NoBuild settings not found. "
+                    + "Create them in Project Settings.");
+                return null;
             }
 
-            // Validate
-            string validationError = ValidateProfile(profile, settings);
+            // ── Validate ──────────────────────
+            string validationError =
+                ValidateProfile(profile, settings);
             if (validationError != null)
             {
                 FireFailed(profile, validationError);
                 EditorUtility.DisplayDialog(
                     "NoBuild — Build Validation Failed",
                     validationError,
-                    "OK"
-                );
-                return;
+                    "OK");
+                return null;
             }
 
-            BuildConfiguration config = profile.buildConfiguration;
+            BuildConfiguration config =
+                profile.buildConfiguration;
             BuildTarget buildTarget = config.platform;
-            BuildTargetGroup targetGroup = BuildPipeline.GetBuildTargetGroup(buildTarget);
-            UnityEditor.Build.NamedBuildTarget namedTarget =
-                UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(targetGroup);
+            BuildTargetGroup targetGroup =
+                BuildPipeline.GetBuildTargetGroup(
+                    buildTarget);
+            UnityEditor.Build.NamedBuildTarget
+                namedTarget =
+                    UnityEditor.Build
+                        .NamedBuildTarget
+                        .FromBuildTargetGroup(targetGroup);
 
-            // Snapshot original state
-            BuildStateSnapshot snapshot = CaptureBuildState(namedTarget, targetGroup);
+            // ── Snapshot ──────────────────────
+            BuildStateSnapshot snapshot =
+                CaptureBuildState(namedTarget,
+                    targetGroup);
 
             try
             {
-                // ── Pre-Build Phase ────────────────
-                // Save current scene
-                EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo();
+                // Wire up the current profile so that
+                // name resolvers can use its designated
+                // define set as authority
+                BuildProfile.CurrentBuildProfile =
+                    profile;
 
-                // Apply script defines
+                // ── Phase 1: Save scenes ──────
+                ShowProgress(
+                    profile.profileName,
+                    "Saving scenes...",
+                    0.05f);
+                EditorSceneManager
+                    .SaveCurrentModifiedScenesIfUserWantsTo();
+
+                // ── Phase 2: Apply defines ─────
                 if (profile.HasValidDefineSet(settings))
                 {
+                    ShowProgress(
+                        profile.profileName,
+                        "Applying script defines...",
+                        0.10f);
                     ScriptDefinitionSet defineSet =
-                        settings.scriptDefinitionSets[profile.scriptDefinitionSetIndex];
-                    ScriptDefinitionSwitcher.ApplySet(defineSet, targetGroup);
+                        settings.scriptDefinitionSets[
+                            profile
+                                .scriptDefinitionSetIndex];
+                    ScriptDefinitionSwitcher.ApplySet(
+                        defineSet, targetGroup);
                 }
 
-                // Apply build configuration overrides
-                ApplyBuildConfiguration(config, namedTarget, targetGroup);
+                // ── Phase 3: Build config ─────
+                ShowProgress(
+                    profile.profileName,
+                    "Applying build overrides...",
+                    0.15f);
+                ApplyBuildConfiguration(
+                    config, namedTarget, targetGroup);
 
-                // Build scene list from the scene set
-                string[] scenePaths = GetScenePaths(profile, settings);
+                // ── Phase 4: Resolve paths ─────
+                ShowProgress(
+                    profile.profileName,
+                    "Resolving build output...",
+                    0.20f);
+                string[] scenePaths =
+                    GetScenePaths(profile, settings);
                 if (scenePaths.Length == 0)
                 {
-                    throw new InvalidOperationException("No valid scenes to build.");
+                    throw new InvalidOperationException(
+                        "No valid scenes to build.");
                 }
 
-                // Resolve output path: folder + name template + platform extension
                 string resolvedFolder =
                     BuildNameResolver.Resolve(
-                        profile.buildFolder?.template ?? "{project-root}/Builds",
+                        profile.buildFolder?.template
+                            ?? "{project-root}/Builds",
                         profile, settings);
                 string resolvedName =
                     BuildNameResolver.Resolve(
-                        profile.buildNameTemplate?.template ?? "{app-version}",
+                        profile.buildNameTemplate
+                            ?.template
+                            ?? "{app-version}",
                         profile, settings);
                 string resolvedOutputPath = outputPath
-                    ?? Path.Combine(resolvedFolder,
-                        resolvedName + GetPlatformExtension(buildTarget));
+                    ?? Path.Combine(
+                        resolvedFolder,
+                        resolvedName
+                        + GetPlatformExtension(
+                            buildTarget));
 
                 // Ensure output directory exists
-                string outputDir = Path.GetDirectoryName(resolvedOutputPath);
-                if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
+                string outputDir =
+                    Path.GetDirectoryName(
+                        resolvedOutputPath);
+                if (!string.IsNullOrEmpty(outputDir)
+                    && !Directory.Exists(outputDir))
                 {
                     Directory.CreateDirectory(outputDir);
                 }
 
-                // ── Build Phase ────────────────────
-                BuildPlayerOptions buildOptions = new BuildPlayerOptions
-                {
-                    scenes = scenePaths,
-                    locationPathName = resolvedOutputPath,
-                    target = buildTarget,
-                    options = BuildOptions.None
-                };
+                // ── Phase 5: Build ────────────
+                // Clear our bar so Unity's native
+                // build progress bar takes over
+                EditorUtility.ClearProgressBar();
+
+                BuildPlayerOptions buildOptions =
+                    new BuildPlayerOptions
+                    {
+                        scenes = scenePaths,
+                        locationPathName =
+                            resolvedOutputPath,
+                        target = buildTarget,
+                        options = BuildOptions.None
+                    };
 
                 if (config.developmentBuild)
                 {
-                    buildOptions.options |= BuildOptions.Development;
+                    buildOptions.options |=
+                        BuildOptions.Development;
                 }
 
                 if (config.allowDebugging)
                 {
-                    buildOptions.options |= BuildOptions.AllowDebugging;
+                    buildOptions.options |=
+                        BuildOptions.AllowDebugging;
                 }
 
                 if (config.connectWithProfiler)
                 {
-                    buildOptions.options |= BuildOptions.ConnectWithProfiler;
+                    buildOptions.options |=
+                        BuildOptions.ConnectWithProfiler;
                 }
 
                 Debug.Log(
-                    $"[NoBuild] Starting build: {profile.profileName} → {resolvedOutputPath}"
-                );
+                    $"[NoBuild] Starting build: "
+                    + $"{profile.profileName} → "
+                    + $"{resolvedOutputPath}");
 
-                BuildReport report = BuildPipeline.BuildPlayer(buildOptions);
+                BuildReport report =
+                    BuildPipeline.BuildPlayer(
+                        buildOptions);
                 BuildSummary summary = report.summary;
 
-                if (summary.result == BuildResult.Succeeded)
+                if (summary.result
+                    == BuildResult.Succeeded)
                 {
                     Debug.Log(
-                        $"[NoBuild] Build succeeded. " +
-                        $"Platform: {summary.platform}, " +
-                        $"Size: {summary.totalSize / 1024 / 1024} MB, " +
-                        $"Time: {summary.totalTime}"
-                    );
-                    BuildCompleted?.Invoke(profile, report);
+                        $"[NoBuild] Build succeeded. "
+                        + $"Platform: "
+                        + $"{summary.platform}, "
+                        + $"Size: "
+                        + $"{summary.totalSize / 1024 / 1024}"
+                        + " MB, "
+                        + $"Time: {summary.totalTime}");
+                    BuildCompleted?.Invoke(
+                        profile, report);
+                    return report;
                 }
-                else
-                {
-                    string errorMsg =
-                        $"Build failed with {summary.totalErrors} error(s). " +
-                        $"Result: {summary.result}";
-                    Debug.LogError($"[NoBuild] {errorMsg}");
-                    BuildFailed?.Invoke(profile, errorMsg);
-                    EditorUtility.DisplayDialog("NoBuild — Build Failed", errorMsg, "OK");
-                }
+
+                string errorMsg =
+                    $"Build failed with "
+                    + $"{summary.totalErrors} error(s). "
+                    + $"Result: {summary.result}";
+                Debug.LogError(
+                    $"[NoBuild] {errorMsg}");
+                BuildFailed?.Invoke(profile, errorMsg);
+                EditorUtility.DisplayDialog(
+                    "NoBuild — Build Failed",
+                    errorMsg, "OK");
+                return null;
             }
             catch (Exception ex)
             {
-                FireFailed(profile, $"Build exception: {ex.Message}");
+                FireFailed(
+                    profile,
+                    $"Build exception: {ex.Message}");
                 Debug.LogException(ex);
                 EditorUtility.DisplayDialog(
                     "NoBuild — Build Failed",
-                    $"An error occurred during the build:\n{ex.Message}",
-                    "OK"
-                );
+                    "An error occurred during the "
+                    + $"build:\n{ex.Message}",
+                    "OK");
+                return null;
             }
             finally
             {
-                // ── Restore Phase ──────────────────
-                RestoreBuildState(snapshot, namedTarget, targetGroup);
+                BuildProfile.CurrentBuildProfile = null;
+
+                ShowProgress(
+                    profile.profileName,
+                    "Restoring editor state...",
+                    0.80f);
+
+                RestoreBuildState(
+                    snapshot, namedTarget,
+                    targetGroup);
+
+                EditorUtility.ClearProgressBar();
             }
         }
 
@@ -215,182 +301,236 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 return;
             }
 
-            // 1 ── Build ─────────────────────
-            Build(profile);
-
-            // 2 ── Get devices ──────────────
-            var devices = AdbUtility.GetDevices();
-            if (devices.Count == 0)
-            {
-                EditorUtility.DisplayDialog("NoBuild",
-                    "No Android device connected via ADB.",
-                    "OK");
-                return;
-            }
-
-            // 3 ── Select target devices ────
-            List<AdbDeviceInfo> targets = new();
-            switch (deviceOption)
-            {
-                case DeviceOption.FirstDevice:
-                    targets.Add(devices[0]);
-                    break;
-                case DeviceOption.AllDevices:
-                    targets.AddRange(devices);
-                    break;
-                case DeviceOption.SpecificDevice:
-                    var match = devices.Find(
-                        d => d.Serial == specificSerial);
-                    if (match.Serial == null)
-                    {
-                        EditorUtility.DisplayDialog(
-                            "NoBuild",
-                            $"Device '{specificSerial}' " +
-                            "not found.",
-                            "OK");
-                        return;
-                    }
-                    targets.Add(match);
-                    break;
-            }
-
-            // 4 ── Resolve output path ──────
-            NoBuildSettings s =
-                NoBuildResourceUtility.GetSettings();
-            string folder = BuildNameResolver.Resolve(
-                profile.buildFolder?.template
-                    ?? "{project-root}/Build",
-                profile, s);
-            string name = BuildNameResolver.Resolve(
-                profile.buildNameTemplate?.template
-                    ?? "{app-version}", profile, s);
+            string tempApksPath = null;
             bool isAab =
                 profile.buildConfiguration
                     .androidBuildAppBundle;
 
-            string extension = GetPlatformExtension(
-                profile.buildConfiguration.platform,
-                profile.buildConfiguration);
-            string outputPath = Path.Combine(
-                folder, name + extension);
-
-            if (!File.Exists(outputPath))
+            try
             {
-                EditorUtility.DisplayDialog("NoBuild",
-                    $"Build output not found at:\n"
-                    + $"{outputPath}", "OK");
-                return;
-            }
-
-            string installPath = outputPath;
-            string tempApksPath = null;
-
-            // If AAB, convert to APKS for installation
-            if (isAab)
-            {
-                try
+                // 1 ── Build ─────────────────
+                BuildReport? report = Build(profile);
+                if (report == null
+                    || report.summary.result
+                    != BuildResult.Succeeded)
                 {
-                    EditorUtility.DisplayProgressBar(
-                        "NoBuild — AAB Conversion",
-                        "Converting AAB to APKS...", 0f);
-                    tempApksPath =
-                        AabUtility.BuildApks(outputPath);
-                }
-                catch (Exception ex)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild — AAB Conversion Failed",
-                        ex.Message, "OK");
+                    // Build() already showed a failure
+                    // dialog — just abort the run
                     return;
                 }
-                finally
+
+                // 2 ── Get devices ───────────
+                ShowProgress(
+                    profile.profileName,
+                    "Detecting devices...",
+                    0f);
+                var devices = AdbUtility.GetDevices();
+                if (devices.Count == 0)
                 {
-                    EditorUtility.ClearProgressBar();
+                    EditorUtility.DisplayDialog(
+                        "NoBuild",
+                        "No Android device connected "
+                        + "via ADB.",
+                        "OK");
+                    return;
                 }
 
-                installPath = tempApksPath;
-            }
+                // 3 ── Select target devices ──
+                List<AdbDeviceInfo> targets = new();
+                switch (deviceOption)
+                {
+                    case DeviceOption.FirstDevice:
+                        targets.Add(devices[0]);
+                        break;
+                    case DeviceOption.AllDevices:
+                        targets.AddRange(devices);
+                        break;
+                    case DeviceOption.SpecificDevice:
+                        var match = devices.Find(
+                            d => d.Serial
+                                == specificSerial);
+                        if (match.Serial == null)
+                        {
+                            EditorUtility.DisplayDialog(
+                                "NoBuild",
+                                $"Device "
+                                + $"'{specificSerial}' "
+                                + "not found.",
+                                "OK");
+                            return;
+                        }
 
-            string packageName = AdbUtility.GetPackageName();
+                        targets.Add(match);
+                        break;
+                }
 
-            // 5 ── Install + Launch per device
-            int successCount = 0;
-            int failCount = 0;
+                // 4 ── Resolve output path ───
+                ShowProgress(
+                    profile.profileName,
+                    "Resolving build output path...",
+                    0f);
+                NoBuildSettings s =
+                    NoBuildResourceUtility.GetSettings();
+                string folder =
+                    BuildNameResolver.Resolve(
+                        profile.buildFolder?.template
+                            ?? "{project-root}/Build",
+                        profile, s);
+                string name =
+                    BuildNameResolver.Resolve(
+                        profile.buildNameTemplate
+                            ?.template
+                            ?? "{app-version}",
+                        profile, s);
 
-            foreach (var device in targets)
-            {
-                EditorUtility.DisplayProgressBar(
-                    "NoBuild",
-                    $"Installing to {device.DisplayName}...",
-                    (float)successCount / targets.Count);
+                string extension =
+                    GetPlatformExtension(
+                        profile.buildConfiguration
+                            .platform,
+                        profile.buildConfiguration);
+                string outputPath = Path.Combine(
+                    folder, name + extension);
 
-                bool installed;
+                if (!File.Exists(outputPath))
+                {
+                    EditorUtility.DisplayDialog(
+                        "NoBuild",
+                        "Build output not found at:\n"
+                        + $"{outputPath}",
+                        "OK");
+                    return;
+                }
+
+                string installPath = outputPath;
+
+                // 5 ── AAB → APKS conversion ─
                 if (isAab)
                 {
-                    installed = AabUtility.InstallApks(
-                        tempApksPath, device.Serial);
-                }
-                else
-                {
-                    installed = AdbUtility.InstallApk(
-                        installPath, device.Serial);
-                }
-
-                if (!installed)
-                {
-                    failCount++;
-                    Debug.LogError(
-                        $"[NoBuild] Install failed on " +
-                        $"{device.DisplayName}");
-                    continue;
+                    // BuildApks() manages its own
+                    // progress bar internally
+                    tempApksPath =
+                        AabUtility.BuildApks(
+                            outputPath);
+                    installPath = tempApksPath;
                 }
 
-                bool launched = AdbUtility.LaunchApp(
-                    device.Serial, packageName);
-                if (launched)
+                // 6 ── Install + Launch ──────
+                string packageName =
+                    AdbUtility.GetPackageName();
+                int successCount = 0;
+                int failCount = 0;
+
+                foreach (var device in targets)
                 {
-                    successCount++;
-                    Debug.Log(
-                        $"[NoBuild] Launched on " +
-                        $"{device.DisplayName} " +
-                        $"({device.Serial})");
-                    EditorPrefs.SetString(
-                        "NoBuild_LastAdbDevice",
-                        device.Serial);
+                    ShowProgress(
+                        profile.profileName,
+                        $"Installing to "
+                        + $"{device.DisplayName} "
+                        + $"[{successCount + 1}/"
+                        + $"{targets.Count}]...",
+                        (float)successCount
+                        / targets.Count);
+
+                    bool installed;
+                    if (isAab)
+                    {
+                        installed =
+                            AabUtility.InstallApks(
+                                tempApksPath,
+                                device.Serial);
+                    }
+                    else
+                    {
+                        installed =
+                            AdbUtility.InstallApk(
+                                installPath,
+                                device.Serial);
+                    }
+
+                    if (!installed)
+                    {
+                        failCount++;
+                        Debug.LogError(
+                            $"[NoBuild] Install failed "
+                            + "on "
+                            + $"{device.DisplayName}");
+                        continue;
+                    }
+
+                    bool launched =
+                        AdbUtility.LaunchApp(
+                            device.Serial,
+                            packageName);
+                    if (launched)
+                    {
+                        successCount++;
+                        Debug.Log(
+                            $"[NoBuild] Launched on "
+                            + $"{device.DisplayName} "
+                            + $"({device.Serial})");
+                        EditorPrefs.SetString(
+                            "NoBuild_LastAdbDevice",
+                            device.Serial);
+                    }
+                    else
+                    {
+                        failCount++;
+                        Debug.LogError(
+                            $"[NoBuild] Launch failed "
+                            + "on "
+                            + $"{device.DisplayName}");
+                    }
                 }
-                else
+
+                // 7 ── Summary ───────────────
+                if (failCount > 0
+                    && successCount == 0)
                 {
-                    failCount++;
-                    Debug.LogError(
-                        $"[NoBuild] Launch failed on " +
-                        $"{device.DisplayName}");
+                    EditorUtility.DisplayDialog(
+                        "NoBuild",
+                        "Failed to install/launch "
+                        + "on all "
+                        + $"{targets.Count} "
+                        + "device(s).",
+                        "OK");
                 }
+                else if (failCount > 0)
+                {
+                    EditorUtility.DisplayDialog(
+                        "NoBuild",
+                        $"{successCount} device(s) "
+                        + "succeeded, "
+                        + $"{failCount} failed.",
+                        "OK");
+                }
+                // All succeeded — silent (log only)
             }
-
-            // Cleanup temp APKS
-            if (isAab && tempApksPath != null)
-                AabUtility.Cleanup(tempApksPath);
-
-            EditorUtility.ClearProgressBar();
-
-            // 6 ── Summary ─────────────────
-            if (failCount > 0 && successCount == 0)
+            catch (Exception ex)
             {
                 EditorUtility.DisplayDialog(
-                    "NoBuild",
-                    $"Failed to install/launch on all " +
-                    $"{targets.Count} device(s).",
+                    "NoBuild — Error",
+                    "An error occurred during "
+                    + $"Build & Run:\n{ex.Message}",
                     "OK");
+                Debug.LogException(ex);
             }
-            else if (failCount > 0)
+            finally
             {
-                EditorUtility.DisplayDialog(
-                    "NoBuild",
-                    $"{successCount} device(s) succeeded, " +
-                    $"{failCount} failed.",
-                    "OK");
+                // ── Cleanup is inevitable ────
+                ShowProgress(
+                    profile.profileName,
+                    "Cleaning up temporary files...",
+                    0f);
+
+                if (isAab
+                    && !string.IsNullOrEmpty(
+                        tempApksPath))
+                {
+                    AabUtility.Cleanup(tempApksPath);
+                }
+
+                EditorUtility.ClearProgressBar();
             }
-            // All succeeded — silent (log only)
         }
 
         // ══════════════════════════════════════════════════
@@ -650,6 +790,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             Debug.LogError($"[NoBuild] {message}");
             BuildFailed?.Invoke(profile, message);
+        }
+
+        /// <summary>
+        /// Wraps <see cref="EditorUtility.DisplayProgressBar"/> with a
+        /// standard NoBuild title prefix.
+        /// </summary>
+        private static void ShowProgress(
+            string context, string info, float progress)
+        {
+            EditorUtility.DisplayProgressBar(
+                "NoBuild",
+                $"{context}: {info}",
+                progress);
         }
 
         // ══════════════════════════════════════════════════

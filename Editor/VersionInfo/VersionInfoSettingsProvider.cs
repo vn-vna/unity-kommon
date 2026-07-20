@@ -1338,42 +1338,107 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
             private static bool IsFlagActive(
                 FlagDefinition flag, NoBuildSettings settings)
             {
-                HashSet<string> currentDefines =
-                    ScriptDefinitionSwitcher.GetCurrentDefines();
-
                 if (flag.type == FlagDefinitionType.Template)
                 {
-                    if (flag.scriptDefinitionSetIndex >= 0
-                        && flag.scriptDefinitionSetIndex
-                        < settings.scriptDefinitionSets.Count)
+                    ScriptDefinitionSlot flagSlot =
+                        GetFlagSlot(flag, settings);
+                    if (flagSlot == null
+                        || string.IsNullOrEmpty(
+                            flagSlot.defineSymbol))
+                        return false;
+
+                    BuildProfile profile =
+                        BuildProfile.CurrentBuildProfile;
+                    if (profile != null
+                        && profile.HasValidDefineSet(settings))
                     {
-                        ScriptDefinitionSet set = settings
-                            .scriptDefinitionSets[
-                                flag.scriptDefinitionSetIndex];
-                        if (set.slots != null
-                            && flag.scriptDefinitionSlotIndex >= 0
-                            && flag.scriptDefinitionSlotIndex
-                            < set.slots.Count)
-                        {
-                            ScriptDefinitionSlot slot =
-                                set.slots[flag.scriptDefinitionSlotIndex];
-                            return slot.enabled
-                                && !string.IsNullOrEmpty(
-                                    slot.defineSymbol)
-                                && currentDefines.Contains(
-                                    slot.defineSymbol);
-                        }
+                        ScriptDefinitionSet profileSet =
+                            settings.scriptDefinitionSets[
+                                profile.scriptDefinitionSetIndex];
+                        return LookupSymbolInSet(
+                            profileSet,
+                            flagSlot.defineSymbol,
+                            flagSlot.enabled);
                     }
+
+                    return flagSlot.enabled;
                 }
                 else
                 {
+                    BuildProfile profile =
+                        BuildProfile.CurrentBuildProfile;
+                    if (profile != null
+                        && profile.HasValidDefineSet(settings))
+                    {
+                        ScriptDefinitionSet profileSet =
+                            settings.scriptDefinitionSets[
+                                profile.scriptDefinitionSetIndex];
+                        if (LookupSymbolInSet(
+                            profileSet,
+                            flag.customDefineSymbol,
+                            fallbackEnabled: false))
+                            return true;
+
+                        // Not found — fall back to PlayerSettings
+                    }
+
+                    HashSet<string> currentDefines =
+                        ScriptDefinitionSwitcher.GetCurrentDefines();
                     return !string.IsNullOrEmpty(
                         flag.customDefineSymbol)
                         && currentDefines.Contains(
                             flag.customDefineSymbol);
                 }
+            }
 
-                return false;
+            // ══════════════════════════════════════════════════
+            // ── Flag Helpers (mirrors BuildNameResolver)
+            // ══════════════════════════════════════════════════
+
+            private static ScriptDefinitionSlot GetFlagSlot(
+                FlagDefinition flag, NoBuildSettings settings)
+            {
+                if (flag == null || settings == null)
+                    return null;
+                if (flag.scriptDefinitionSetIndex < 0
+                    || flag.scriptDefinitionSetIndex
+                    >= settings.scriptDefinitionSets.Count)
+                    return null;
+                ScriptDefinitionSet set =
+                    settings.scriptDefinitionSets[
+                        flag.scriptDefinitionSetIndex];
+                if (set.slots == null
+                    || flag.scriptDefinitionSlotIndex < 0
+                    || flag.scriptDefinitionSlotIndex
+                    >= set.slots.Count)
+                    return null;
+                return set.slots[
+                    flag.scriptDefinitionSlotIndex];
+            }
+
+            private static bool LookupSymbolInSet(
+                ScriptDefinitionSet set,
+                string symbol,
+                bool fallbackEnabled)
+            {
+                if (set?.slots == null
+                    || string.IsNullOrEmpty(symbol))
+                    return fallbackEnabled;
+
+                foreach (ScriptDefinitionSlot slot in set.slots)
+                {
+                    if (string.Equals(
+                        slot.defineSymbol,
+                        symbol,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        return slot.enabled
+                            && !string.IsNullOrEmpty(
+                                slot.defineSymbol);
+                    }
+                }
+
+                return fallbackEnabled;
             }
 
             private static NoBuildSettings GetNoBuildSettings()

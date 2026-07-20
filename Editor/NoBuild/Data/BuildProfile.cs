@@ -154,6 +154,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         [Tooltip("Index into NoBuildSettings.scriptDefinitionSets. -1 means none.")]
         public int scriptDefinitionSetIndex = -1;
 
+        /// <summary>
+        /// Set by <see cref="BuildExecutor"/> during a build so that
+        /// name resolvers can consult the profile's designated
+        /// <see cref="ScriptDefinitionSet"/> instead of current
+        /// PlayerSettings.
+        /// </summary>
+        internal static BuildProfile CurrentBuildProfile;
+
         [Tooltip("Build configuration parameters (platform, backend, stripping, etc.).")]
         public BuildConfiguration buildConfiguration = new();
 
