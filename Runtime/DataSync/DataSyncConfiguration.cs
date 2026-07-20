@@ -101,7 +101,17 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         [SerializeField]
         private ScriptableObject[] _translators;
 
+        // --- Parallel Load ---
+        [SerializeField]
+        private bool _parallelLoadEnabled = true;
+
         #region Properties
+
+        public bool ParallelLoadEnabled
+        {
+            get => _parallelLoadEnabled;
+            set => _parallelLoadEnabled = value;
+        }
 
         public ISaveTranslator[] Translators
             => _translators?.OfType<ISaveTranslator>().ToArray()

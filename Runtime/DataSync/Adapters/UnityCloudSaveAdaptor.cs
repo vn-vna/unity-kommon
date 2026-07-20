@@ -22,6 +22,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
     {
         public string AdapterId => "unity-cloud-save";
 
+        public TimeSpan ReadTimeout => TimeSpan.FromSeconds(10);
+
         public bool IsAvailable { get; private set; }
 
         public SaveAdapterFeature SupportedFeatures

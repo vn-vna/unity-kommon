@@ -20,40 +20,55 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public byte[] Signature => new byte[] { 0x1F, 0x8B };
 
+        public bool ValidateSignature(byte[] header)
+            => header != null
+            && header.Length >= Signature.Length
+            && header[0] == 0x1F
+            && header[1] == 0x8B;
+
         public async Task<DecodeResult> DecodeAsync(
             Stream input, CancellationToken ct = default)
         {
-            using (var gzip = new GZipStream(
-                input, CompressionMode.Decompress, leaveOpen: true))
-            using (var reader = new BsonReader(gzip))
-            {
-                var serializer = new JsonSerializer();
-                JObject obj = serializer.Deserialize<JObject>(reader);
-                JToken versionToken = obj["_version"];
-                VersionTag version = versionToken != null
-                    ? VersionTag.Parse(versionToken.ToString())
-                    : VersionTag.Zero;
-                obj.Remove("_version");
-                await Task.CompletedTask;
-                return new DecodeResult(obj, typeof(JObject), version);
-            }
+            Debug.Log($"[BSON Decode] Starting GZip decompress, stream length={input.Length}");
+
+            using var gzip = new GZipStream(input, CompressionMode.Decompress, leaveOpen: true);
+            using var reader = new BsonReader(gzip);
+            var serializer = new JsonSerializer();
+            JObject obj = serializer.Deserialize<JObject>(reader);
+
+            Debug.Log($"[BSON Decode] BSON parsed OK, property count={obj.Count}");
+
+            JToken versionToken = obj["_version"];
+            VersionTag version = versionToken != null
+                ? VersionTag.Parse(versionToken.ToString())
+                : VersionTag.Zero;
+
+            Debug.Log($"[BSON Decode] Version: {version}");
+
+            obj.Remove("_version");
+            await Task.CompletedTask;
+            return new DecodeResult(obj, typeof(JObject), version);
         }
 
         public async Task EncodeAsync(
             object data, VersionTag version,
             Stream output, CancellationToken ct = default)
         {
+            Debug.Log($"[BSON Encode] Wrapping data, version={version}");
+
             JObject wrapper = JObject.FromObject(data);
             wrapper["_version"] = version.ToString();
 
-            using (var gzip = new GZipStream(
-                output, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
-            using (var writer = new BsonWriter(gzip))
-            {
-                var serializer = new JsonSerializer();
-                serializer.Serialize(writer, wrapper);
-                await Task.CompletedTask;
-            }
+            Debug.Log($"[BSON Encode] Serializing, property count={wrapper.Count}");
+
+            using var gzip = new GZipStream(output, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true);
+            using var writer = new BsonWriter(gzip);
+            var serializer = new JsonSerializer();
+            serializer.Serialize(writer, wrapper);
+            writer.Flush();
+            await Task.CompletedTask;
+
+            Debug.Log($"[BSON Encode] Done, output length={output.Length}");
         }
 
         public object ConvertTo(object data, Type targetType)

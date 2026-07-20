@@ -14,6 +14,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
     {
         public string AdapterId => "local";
 
+        public TimeSpan ReadTimeout => TimeSpan.FromSeconds(3);
+
         public bool IsAvailable => true;
 
         public SaveAdapterFeature SupportedFeatures
@@ -26,6 +28,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public Task<bool> InitializeAsync()
         {
             Directory.CreateDirectory(RootPath);
+
+            try
+            {
+                foreach (string tmpFile in Directory.GetFiles(RootPath, "*.tmp"))
+                    File.Delete(tmpFile);
+            }
+            catch { }
+
             return Task.FromResult(true);
         }
 
@@ -49,23 +59,38 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task WriteAsync(string key, Stream data, CancellationToken ct = default)
         {
             string path = GetFilePath(key);
+            string tmpPath = path + ".tmp";
             Directory.CreateDirectory(RootPath);
 
-            using FileStream fs = new FileStream(
-                path, FileMode.Create, FileAccess.Write, 
-                FileShare.None, 4096, useAsync: true
-            );
+            using (FileStream fs = new FileStream(
+                tmpPath, FileMode.Create, FileAccess.Write,
+                FileShare.None, 4096, useAsync: true))
+            {
+                await data.CopyToAsync(fs, 81920, ct);
+            }
 
-            await data.CopyToAsync(fs, 81920, ct);
+            if (File.Exists(path))
+                File.Delete(path);
+
+            File.Move(tmpPath, path);
         }
 
         public Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
             string path = GetFilePath(key);
-            if (!File.Exists(path)) return Task.FromResult(false);
+            bool deleted = false;
 
-            File.Delete(path);
-            return Task.FromResult(true);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                deleted = true;
+            }
+
+            string tmpPath = path + ".tmp";
+            if (File.Exists(tmpPath))
+                File.Delete(tmpPath);
+
+            return Task.FromResult(deleted);
         }
 
         public Task<bool> ExistsAsync(string key, CancellationToken ct = default)

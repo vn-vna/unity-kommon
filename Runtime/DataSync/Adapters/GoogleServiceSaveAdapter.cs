@@ -3,10 +3,13 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using UnityEngine;
+
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 using GooglePlayGames.BasicApi.SavedGame;
-using UnityEngine;
+#endif
 
 namespace Com.Hapiga.Scheherazade.Common.DataSync
 {
@@ -19,6 +22,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         ISaveAdapter
     {
         public string AdapterId => "google_play_service_save";
+
+        public TimeSpan ReadTimeout => TimeSpan.FromSeconds(10);
 
         public bool IsAvailable { get; private set; }
 
@@ -105,28 +110,41 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<bool> ExistsAsync(
             string key, CancellationToken ct = default)
         {
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             return (await OpenConnection(key, ct)) != null;
+#else
+            return false;
+#endif
         }
 
         public async Task<DateTime?> GetLastWriteTimeAsync(
             string key, CancellationToken ct = default)
         {
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             return (await OpenConnection(key, ct))
                 ?.LastModifiedTimestamp;
+#else
+            return null;
+#endif
         }
 
         public async Task<Stream> OpenReadAsync(
             string key, CancellationToken ct = default)
         {
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return null;
             return await OpenByteReadStream(metadata);
+#else
+            return null;
+#endif
         }
 
         public async Task WriteAsync(
             string key, Stream data,
             CancellationToken ct = default)
         {
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return;
             byte[] bytes = null;
@@ -140,6 +158,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             }
 
             await WriteToStorage(metadata, bytes);
+#endif
         }
 
         private async Task ValidateConnection()
@@ -164,10 +183,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 #endif
         }
 
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
         private async Task<ISavedGameMetadata> OpenConnection(
             string key, CancellationToken ct)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             await ValidateConnection();
             TaskCompletionSource<ISavedGameMetadata> tsc =
                 new TaskCompletionSource<ISavedGameMetadata>();
@@ -184,15 +203,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
             ct.Register(() => tsc.TrySetCanceled());
             return await tsc.Task;
-#else
-            throw new InvalidOperationException("Goole Play Save is not available");
-#endif
         }
+#endif
 
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
         private async Task<Stream> OpenByteReadStream(
             ISavedGameMetadata metadata)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             await ValidateConnection();
 
             TaskCompletionSource<Stream> tsc =
@@ -204,15 +221,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 tsc.SetResult(new MemoryStream(data));
             });
             return await tsc.Task;
-#else
-            throw new InvalidOperationException("Goole Play Save is not available");
-#endif
         }
+#endif
 
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
         private async Task<ISavedGameMetadata> WriteToStorage(
             ISavedGameMetadata metadata, byte[] bytes)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             await ValidateConnection();
 
             TaskCompletionSource<ISavedGameMetadata> tsc =
@@ -239,9 +254,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             );
 
             return await tsc.Task;
-#else
-            throw new InvalidOperationException("Goole Play Save is not available");
-#endif
         }
+#endif
     }
 }

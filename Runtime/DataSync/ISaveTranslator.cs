@@ -11,6 +11,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         byte[] Signature { get; }
 
+        bool ValidateSignature(byte[] header);
+
         Task<DecodeResult> DecodeAsync(Stream input, CancellationToken ct = default);
 
         Task EncodeAsync(object data, VersionTag version, Stream output, CancellationToken ct = default);

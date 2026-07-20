@@ -18,6 +18,11 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public byte[] Signature => new byte[] { 0x7B };
 
+        public bool ValidateSignature(byte[] header)
+            => header != null
+            && header.Length >= Signature.Length
+            && header[0] == 0x7B;
+
         public async Task<DecodeResult> DecodeAsync(
             Stream input, CancellationToken ct = default)
         {

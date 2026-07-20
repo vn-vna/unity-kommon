@@ -9,6 +9,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
     {
         string AdapterId { get; }
 
+        TimeSpan ReadTimeout { get; }
+
         bool IsAvailable { get; }
 
         Task<bool> InitializeAsync();

@@ -50,6 +50,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         private ISaveAdapter[][] _saveOrderGroups;
         private ISaveAdapter[][] _loadOrderGroups;
         private List<ISaveTranslator> _translators;
+        private int _maxSignatureLength;
         #endregion
 
         #region Unity Callbacks
@@ -70,6 +71,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                         ?.Where(t => t != null).ToList()
                         ?? new List<ISaveTranslator>();
 
+                    _maxSignatureLength = _translators.Max(t => t.Signature?.Length ?? 0);
+
                     await InitializeAndFilterAsync();
                 }
                 else
@@ -78,6 +81,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     _saveOrderGroups = new[] { new ISaveAdapter[] { localAdapter } };
                     _loadOrderGroups = new[] { new ISaveAdapter[] { localAdapter } };
                     _translators = new List<ISaveTranslator> { ScriptableObject.CreateInstance<UnityJsonTranslator>() };
+                    _maxSignatureLength = _translators.Max(t => t.Signature?.Length ?? 0);
                 }
             }
             finally
@@ -221,16 +225,22 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             VersionTag currentVersion = VersionRegistry.GetCurrentVersion(typeof(T));
             ISaveTranslator translator = ResolveTranslator();
 
+            QuickLog.Debug<DataSyncDirector>(
+                "Save<{0}>('{1}'): version={2}, translator={3}",
+                typeof(T).Name, key, currentVersion, translator.FormatId);
+
             if (_saveOrderGroups.Length == 0)
-            {
                 throw new SaveAdapterException("none", "No save groups configured");
-            }
 
             using var encodeStream = new MemoryStream();
             await translator.EncodeAsync(
                 data, currentVersion, encodeStream, ct
             );
             byte[] encodedBytes = encodeStream.ToArray();
+
+            QuickLog.Debug<DataSyncDirector>(
+                "Save<{0}>('{1}'): encoded {2} bytes",
+                typeof(T).Name, key, encodedBytes.Length);
 
             int groupCount = _saveOrderGroups.Length;
             var groupTasks = new Task<(bool success, ISaveAdapter adapter, int groupIndex)>[groupCount];
@@ -312,33 +322,76 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         private async Task<T> LoadInternalAsync<T>(string key, CancellationToken ct)
         {
             if (_loadOrderGroups.Length == 0)
-            {
                 throw new SaveAdapterException("none", "No load groups configured");
-            }
 
+            bool parallel = _config != null && _config.ParallelLoadEnabled;
+            QuickLog.Debug<DataSyncDirector>(
+                "Load<{0}>('{1}'): groups={2}, parallel={3}, translators={4}",
+                typeof(T).Name, key, _loadOrderGroups.Length, parallel, _translators.Count);
+
+            if (!parallel)
+                return await LoadInternalSequentialAsync<T>(key, ct);
+
+            return await LoadInternalParallelAsync<T>(key, ct);
+        }
+
+        private async Task<T> LoadInternalSequentialAsync<T>(string key, CancellationToken ct)
+        {
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
                 ISaveAdapter[] group = _loadOrderGroups[g];
 
-                foreach (ISaveAdapter adapter in group)
+                for (int a = 0; a < group.Length; a++)
                 {
+                    ISaveAdapter adapter = group[a];
                     try
                     {
-                        Stream stream = await adapter.OpenReadAsync(key, ct);
-                        if (stream == null) continue;
+                        QuickLog.Debug<DataSyncDirector>(
+                            "Load seq: trying group[{0}] adapter[{1}] '{2}' for key '{3}'",
+                            g, a, adapter.AdapterId, key);
 
-                        QuickLog.Info<DataSyncDirector>(
-                            "Loaded key '{0}' from adapter '{1}' in group [{2}]",
-                            key, adapter.AdapterId, g
-                        );
+                        Stream stream = await adapter.OpenReadAsync(key, ct);
+                        if (stream == null)
+                        {
+                            QuickLog.Debug<DataSyncDirector>(
+                                "Load seq: group[{0}] adapter '{1}' returned null stream for key '{2}'",
+                                g, adapter.AdapterId, key);
+                            continue;
+                        }
+
+                        QuickLog.Debug<DataSyncDirector>(
+                            "Load seq: group[{0}] adapter '{1}' returned {2} bytes for key '{3}'",
+                            g, adapter.AdapterId, stream.Length, key);
 
                         using (stream)
                         {
+                            QuickLog.Debug<DataSyncDirector>(
+                                "Load seq: decoding stream for key '{0}'", key);
+
                             DecodeResult decoded = await DecodeStream(stream, ct);
+
+                            QuickLog.Debug<DataSyncDirector>(
+                                "Load seq: decoded version={0}, dataType={1} for key '{2}'",
+                                decoded.Version, decoded.DataType.Name, key);
+
                             Type snapshotType = VersionRegistry.GetSnapshotType(typeof(T), decoded.Version);
+                            QuickLog.Debug<DataSyncDirector>(
+                                "Load seq: snapshotType={0} for key '{1}'",
+                                snapshotType.Name, key);
+
                             ISaveTranslator translator = ResolveTranslator();
                             object snapshot = translator.ConvertTo(decoded.Data, snapshotType);
-                            return (T)VersionRegistry.MigrateToCurrent(snapshot, typeof(T), decoded.Version);
+
+                            QuickLog.Debug<DataSyncDirector>(
+                                "Load seq: converted to {0}, migrating for key '{1}'",
+                                snapshot?.GetType().Name ?? "null", key);
+
+                            T result = (T)VersionRegistry.MigrateToCurrent(snapshot, typeof(T), decoded.Version);
+
+                            QuickLog.Info<DataSyncDirector>(
+                                "Loaded key '{0}' from adapter '{1}' in group [{2}]",
+                                key, adapter.AdapterId, g);
+                            return result;
                         }
                     }
                     catch (Exception ex)
@@ -353,6 +406,135 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             }
 
             throw new SaveNotFoundException(key);
+        }
+
+        private async Task<T> LoadInternalParallelAsync<T>(string key, CancellationToken ct)
+        {
+            var entries = new List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>();
+            for (int g = 0; g < _loadOrderGroups.Length; g++)
+            {
+                ISaveAdapter[] group = _loadOrderGroups[g];
+                for (int a = 0; a < group.Length; a++)
+                    entries.Add((group[a], g, a));
+            }
+
+            QuickLog.Debug<DataSyncDirector>(
+                "Load parallel: launching {0} fetches for key '{1}'",
+                entries.Count, key);
+
+            var fetchTasks = entries.Select(e =>
+                TryFetchAsync(e.adapter, key, e.adapter.ReadTimeout, ct));
+            var results = await Task.WhenAll(fetchTasks);
+
+            var candidates = new List<(int groupIndex, int adapterIndex, string adapterId, byte[] data)>();
+            for (int i = 0; i < results.Length; i++)
+            {
+                if (results[i].data != null)
+                {
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: adapter '{0}' returned {1} bytes for key '{2}'",
+                        entries[i].adapter.AdapterId, results[i].data.Length, key);
+                    candidates.Add((entries[i].groupIndex, entries[i].adapterIndex, entries[i].adapter.AdapterId, results[i].data));
+                }
+                else if (results[i].timedOut)
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Parallel load: adapter '{0}' timed out for key '{1}'",
+                        entries[i].adapter.AdapterId, key
+                    );
+                else
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: adapter '{0}' returned no data for key '{1}'",
+                        entries[i].adapter.AdapterId, key);
+            }
+
+            candidates.Sort((a, b) =>
+            {
+                int cmp = a.groupIndex.CompareTo(b.groupIndex);
+                if (cmp != 0) return cmp;
+                return a.adapterIndex.CompareTo(b.adapterIndex);
+            });
+
+            QuickLog.Debug<DataSyncDirector>(
+                "Load parallel: {0} candidates to try for key '{1}'",
+                candidates.Count, key);
+
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: decoding candidate group[{0}] adapter '{1}' ({2} bytes) for key '{3}'",
+                        candidate.groupIndex, candidate.adapterId, candidate.data.Length, key);
+
+                    using var ms = new MemoryStream(candidate.data);
+                    DecodeResult decoded = await DecodeStream(ms, ct);
+
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: decoded version={0}, dataType={1}",
+                        decoded.Version, decoded.DataType.Name);
+
+                    Type snapshotType = VersionRegistry.GetSnapshotType(typeof(T), decoded.Version);
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: snapshotType={0}", snapshotType.Name);
+
+                    ISaveTranslator translator = ResolveTranslator();
+                    object snapshot = translator.ConvertTo(decoded.Data, snapshotType);
+
+                    QuickLog.Debug<DataSyncDirector>(
+                        "Load parallel: converted to {0}, migrating",
+                        snapshot?.GetType().Name ?? "null");
+
+                    T result = (T)VersionRegistry.MigrateToCurrent(snapshot, typeof(T), decoded.Version);
+
+                    QuickLog.Info<DataSyncDirector>(
+                        "Loaded key '{0}' from adapter '{1}' (parallel)",
+                        key, candidate.adapterId);
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Parallel load: decode failed for group[{0}] adapter '{1}' key '{2}': {3}",
+                        candidate.groupIndex,
+                        candidate.adapterId,
+                        key, ex.Message
+                    );
+                }
+            }
+
+            throw new SaveNotFoundException(key);
+        }
+
+        private static async Task<(byte[] data, bool timedOut)> TryFetchAsync(
+            ISaveAdapter adapter, string key, TimeSpan timeout, CancellationToken ct)
+        {
+            var readTask = adapter.OpenReadAsync(key, ct);
+            if (await Task.WhenAny(readTask, Task.Delay(timeout, ct)) != readTask)
+            {
+                QuickLog.Debug<DataSyncDirector>(
+                    "TryFetch: adapter '{0}' timed out ({1}ms) for key '{2}'",
+                    adapter.AdapterId, timeout.TotalMilliseconds, key);
+                return (null, true);
+            }
+
+            Stream stream = await readTask;
+            if (stream == null)
+            {
+                QuickLog.Debug<DataSyncDirector>(
+                    "TryFetch: adapter '{0}' returned null for key '{1}'",
+                    adapter.AdapterId, key);
+                return (null, false);
+            }
+
+            using (stream)
+            using (var ms = new MemoryStream())
+            {
+                await stream.CopyToAsync(ms, ct);
+                QuickLog.Debug<DataSyncDirector>(
+                    "TryFetch: adapter '{0}' read {1} bytes for key '{2}'",
+                    adapter.AdapterId, ms.Length, key);
+                return (ms.ToArray(), false);
+            }
         }
 
         private async Task DeleteInternalAsync(string key, CancellationToken ct)
@@ -385,51 +567,80 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task<bool> ExistsInternalAsync(string key, CancellationToken ct)
         {
+            var entries = new List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>();
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter in _loadOrderGroups[g])
-                {
-                    try
-                    {
-                        if (await adapter.ExistsAsync(key, ct)) return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        QuickLog.Warning<DataSyncDirector>(
-                            "Exists group[{0}] adapter '{1}' failed for key '{2}': {3}",
-                            g, adapter.AdapterId, key,
-                            ex.Message
-                        );
-                    }
-                }
+                ISaveAdapter[] group = _loadOrderGroups[g];
+                for (int a = 0; a < group.Length; a++)
+                    entries.Add((group[a], g, a));
             }
 
-            return false;
+            var tasks = entries.Select(async e =>
+            {
+                try
+                {
+                    var task = e.adapter.ExistsAsync(key, ct);
+                    if (await Task.WhenAny(task, Task.Delay(e.adapter.ReadTimeout, ct)) != task)
+                        return false;
+                    return await task;
+                }
+                catch { return false; }
+            }).ToArray();
+
+            var results = await Task.WhenAll(tasks);
+            return results.Any(r => r);
         }
 
         private async Task<Stream> OpenReadStreamInternalAsync(string key, CancellationToken ct)
         {
+            var entries = new List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>();
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
-                foreach (ISaveAdapter adapter in _loadOrderGroups[g])
+                ISaveAdapter[] group = _loadOrderGroups[g];
+                for (int a = 0; a < group.Length; a++)
+                    entries.Add((group[a], g, a));
+            }
+
+            var tasks = entries.Select(async e =>
+            {
+                try
                 {
-                    try
-                    {
-                        Stream stream = await adapter.OpenReadAsync(key, ct);
-                        if (stream != null) return stream;
-                    }
-                    catch (Exception ex)
-                    {
-                        QuickLog.Warning<DataSyncDirector>(
-                            "OpenRead group[{0}] adapter '{1}' failed for key '{2}': {3}",
-                            g, adapter.AdapterId, key,
-                            ex.Message
-                        );
-                    }
+                    var readTask = e.adapter.OpenReadAsync(key, ct);
+                    if (await Task.WhenAny(readTask, Task.Delay(e.adapter.ReadTimeout, ct)) != readTask)
+                        return null;
+                    return await readTask;
+                }
+                catch { return null; }
+            }).ToArray();
+
+            var results = await Task.WhenAll(tasks);
+
+            Stream best = null;
+            int bestGroup = int.MaxValue;
+            int bestIndex = int.MaxValue;
+
+            for (int i = 0; i < results.Length; i++)
+            {
+                if (results[i] == null) continue;
+
+                if (entries[i].groupIndex < bestGroup
+                    || (entries[i].groupIndex == bestGroup && entries[i].adapterIndex < bestIndex))
+                {
+                    best?.Dispose();
+                    best = results[i];
+                    bestGroup = entries[i].groupIndex;
+                    bestIndex = entries[i].adapterIndex;
+                }
+                else
+                {
+                    results[i].Dispose();
                 }
             }
 
-            throw new SaveNotFoundException(key);
+            if (best == null)
+                throw new SaveNotFoundException(key);
+
+            return best;
         }
 
         private async Task WriteStreamInternalAsync(string key, Stream data, CancellationToken ct)
@@ -493,19 +704,43 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             ISaveTranslator translator = ResolveTranslator();
 
+            QuickLog.Debug<DataSyncDirector>(
+                "DecodeStream: trying primary translator '{0}', stream length={1}",
+                translator.FormatId, stream.Length);
+
             try
             {
-                return await translator.DecodeAsync(stream, ct);
+                var result = await translator.DecodeAsync(stream, ct);
+                QuickLog.Debug<DataSyncDirector>(
+                    "DecodeStream: primary translator '{0}' succeeded, version={1}",
+                    translator.FormatId, result.Version);
+                return result;
             }
-            catch
+            catch (Exception ex)
             {
-                // Fall through to signature scanning
+                QuickLog.Warning<DataSyncDirector>(
+                    "Primary translator decode failed: {0}",
+                    ex.Message
+                );
             }
+
+            QuickLog.Debug<DataSyncDirector>(
+                "DecodeStream: scanning {0} translators for signature match",
+                _translators.Count);
 
             foreach (ISaveTranslator t in _translators)
             {
                 stream.Position = 0;
-                if (!TryMatchSignature(stream, t.Signature)) continue;
+                if (!TryMatchSignature(stream, t.Signature))
+                {
+                    QuickLog.Debug<DataSyncDirector>(
+                        "DecodeStream: signature mismatch for '{0}'", t.FormatId);
+                    continue;
+                }
+
+                QuickLog.Debug<DataSyncDirector>(
+                    "DecodeStream: signature matched '{0}', attempting decode", t.FormatId);
+
                 stream.Position = 0;
                 return await t.DecodeAsync(stream, ct);
             }
