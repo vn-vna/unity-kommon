@@ -6,6 +6,22 @@ using UnityEngine;
 namespace Com.Hapiga.Scheherazade.Common.DataSync
 {
     /// <summary>
+    /// How the director resolves which adapter's data to use on load.
+    /// </summary>
+    public enum ResolveMode
+    {
+        /// <summary>Position-based: higher-priority groups/adapters win.</summary>
+        Priority,
+
+        /// <summary>
+        /// All adapters are queried in parallel; the data with the newest
+        /// <see cref="ISaveAdapter.GetLastWriteTimeAsync"/> is used.
+        /// Falls back to priority order on tie or when timestamps are unavailable.
+        /// </summary>
+        LastWriteComplete
+    }
+
+    /// <summary>
     /// A group of adapters that are tried in order.
     /// Within a group, the first available adapter is used.
     /// Groups themselves are tried in priority order (index 0 = first).
@@ -101,11 +117,21 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         [SerializeField]
         private ScriptableObject[] _translators;
 
+        // --- Resolve Mode ---
+        [SerializeField]
+        private ResolveMode _resolveMode = ResolveMode.Priority;
+
         // --- Parallel Load ---
         [SerializeField]
         private bool _parallelLoadEnabled = true;
 
         #region Properties
+
+        public ResolveMode ResolveMode
+        {
+            get => _resolveMode;
+            set => _resolveMode = value;
+        }
 
         public bool ParallelLoadEnabled
         {

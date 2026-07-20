@@ -169,6 +169,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                     "General Settings", EditorStyles.miniBoldLabel
                 );
                 DrawSerializedProperty(
+                    "_resolveMode", "Resolve Mode"
+                );
+                DrawSerializedProperty(
                     "_defaultAdapterId", "Default Adapter Id"
                 );
             }

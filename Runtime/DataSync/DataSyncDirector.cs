@@ -324,6 +324,19 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             if (_loadOrderGroups.Length == 0)
                 throw new SaveAdapterException("none", "No load groups configured");
 
+            ResolveMode mode = _config != null
+                ? _config.ResolveMode
+                : ResolveMode.Priority;
+
+            if (mode == ResolveMode.LastWriteComplete)
+            {
+                QuickLog.Info<DataSyncDirector>(
+                    "LWC: resolving key='{0}' type={1} groups={2} adapters={3}",
+                    key, typeof(T).Name, _loadOrderGroups.Length,
+                    _loadOrderGroups.Sum(g => g.Length));
+                return await LoadInternalLastWriteCompleteAsync<T>(key, ct);
+            }
+
             bool parallel = _config != null && _config.ParallelLoadEnabled;
             QuickLog.Debug<DataSyncDirector>(
                 "Load<{0}>('{1}'): groups={2}, parallel={3}, translators={4}",
@@ -503,6 +516,262 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             }
 
             throw new SaveNotFoundException(key);
+        }
+
+        private async Task<T> LoadInternalLastWriteCompleteAsync<T>(
+            string key, CancellationToken ct)
+        {
+            // ── Phase 1: Flatten & launch all fetches ──
+            var entries = FlattenLoadOrder();
+            QuickLog.Info<DataSyncDirector>(
+                "LWC: [phase=FETCH] key='{0}' launching {1} adapter(s)",
+                key, entries.Count);
+
+            var fetchTasks = entries.Select(e =>
+                TryFetchAsync(e.adapter, key, e.adapter.ReadTimeout, ct));
+            var results = await Task.WhenAll(fetchTasks);
+
+            // ── Phase 2: Collect successful fetches ──
+            var candidates = new List<(ISaveAdapter adapter, int groupIndex,
+                int adapterIndex, byte[] data)>();
+            int timedOut = 0;
+            int notFound = 0;
+
+            for (int i = 0; i < results.Length; i++)
+            {
+                string adapterId = entries[i].adapter.AdapterId;
+
+                if (results[i].data != null)
+                {
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=FETCH] adapter='{0}' key='{1}' "
+                        + "-> {2} bytes",
+                        adapterId, key, results[i].data.Length);
+                    candidates.Add((
+                        entries[i].adapter,
+                        entries[i].groupIndex,
+                        entries[i].adapterIndex,
+                        results[i].data
+                    ));
+                }
+                else if (results[i].timedOut)
+                {
+                    timedOut++;
+                    QuickLog.Warning<DataSyncDirector>(
+                        "LWC: [phase=FETCH] adapter='{0}' key='{1}' "
+                        + "-> TIMED OUT",
+                        adapterId, key);
+                }
+                else
+                {
+                    notFound++;
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=FETCH] adapter='{0}' key='{1}' "
+                        + "-> NOT FOUND",
+                        adapterId, key);
+                }
+            }
+
+            QuickLog.Info<DataSyncDirector>(
+                "LWC: [phase=FETCH] key='{0}' result: found={1} "
+                + "timedOut={2} notFound={3}",
+                key, candidates.Count, timedOut, notFound);
+
+            if (candidates.Count == 0)
+            {
+                QuickLog.Info<DataSyncDirector>(
+                    "LWC: [phase=DONE] key='{0}' NO DATA from any adapter",
+                    key);
+                throw new SaveNotFoundException(key);
+            }
+
+            // ── Phase 3: Query last-write times ──
+            QuickLog.Info<DataSyncDirector>(
+                "LWC: [phase=WRITE_TIME] key='{0}' querying {1} adapter(s)",
+                key, candidates.Count);
+
+            var enriched = await EnrichWithWriteTimesAsync(key, candidates, ct);
+
+            foreach (var c in enriched)
+            {
+                string wtStr = c.writeTime.HasValue
+                    ? c.writeTime.Value.ToString("yyyy-MM-dd HH:mm:ss.fff")
+                    : "null";
+                QuickLog.Debug<DataSyncDirector>(
+                    "LWC: [phase=WRITE_TIME] adapter='{0}' key='{1}' "
+                    + "lastWrite={2}",
+                    c.adapterId, key, wtStr);
+            }
+
+            // ── Phase 4: Sort by timestamp (newest first) ──
+            enriched.Sort((a, b) =>
+            {
+                int hasA = a.writeTime.HasValue ? 1 : 0;
+                int hasB = b.writeTime.HasValue ? 1 : 0;
+                int cmp = hasB.CompareTo(hasA);
+                if (cmp != 0) return cmp;
+                if (a.writeTime.HasValue && b.writeTime.HasValue)
+                {
+                    cmp = b.writeTime.Value.CompareTo(a.writeTime.Value);
+                    if (cmp != 0) return cmp;
+                }
+
+                cmp = a.groupIndex.CompareTo(b.groupIndex);
+                if (cmp != 0) return cmp;
+                return a.adapterIndex.CompareTo(b.adapterIndex);
+            });
+
+            // Log sorted order
+            var sortLogParts = new List<string>();
+            for (int i = 0; i < enriched.Count; i++)
+            {
+                var c = enriched[i];
+                string wtStr = c.writeTime.HasValue
+                    ? c.writeTime.Value.ToString("HH:mm:ss.fff")
+                    : "null";
+                sortLogParts.Add(string.Format(
+                    "#{0}:'{1}'(g{2},a{3},wt={4})",
+                    i + 1, c.adapterId, c.groupIndex,
+                    c.adapterIndex, wtStr));
+            }
+
+            QuickLog.Info<DataSyncDirector>(
+                "LWC: [phase=SORT] key='{0}' order: [{1}]",
+                key, string.Join(" → ", sortLogParts));
+
+            // ── Phase 5: Decode best candidate ──
+            QuickLog.Info<DataSyncDirector>(
+                "LWC: [phase=DECODE] key='{0}' trying {1} candidate(s)",
+                key, enriched.Count);
+
+            for (int i = 0; i < enriched.Count; i++)
+            {
+                var candidate = enriched[i];
+                try
+                {
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=DECODE] key='{0}' attempt #{1}/{2} "
+                        + "adapter='{3}' wt={4}",
+                        key, i + 1, enriched.Count,
+                        candidate.adapterId,
+                        candidate.writeTime?.ToString(
+                            "yyyy-MM-dd HH:mm:ss.fff") ?? "null");
+
+                    using var ms = new MemoryStream(candidate.data);
+                    DecodeResult decoded = await DecodeStream(ms, ct);
+
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=DECODE] key='{0}' decoded "
+                        + "version={1} type={2}",
+                        key, decoded.Version, decoded.DataType.Name);
+
+                    Type snapshotType = VersionRegistry.GetSnapshotType(
+                        typeof(T), decoded.Version);
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=DECODE] key='{0}' "
+                        + "snapshotType={1}",
+                        key, snapshotType.Name);
+
+                    ISaveTranslator translator = ResolveTranslator();
+                    object snapshot = translator.ConvertTo(
+                        decoded.Data, snapshotType);
+
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=DECODE] key='{0}' converted -> {1}",
+                        key, snapshot?.GetType().Name ?? "null");
+
+                    T result = (T)VersionRegistry.MigrateToCurrent(
+                        snapshot, typeof(T), decoded.Version);
+
+                    QuickLog.Info<DataSyncDirector>(
+                        "LWC: [phase=DONE] key='{0}' RESOLVED -> "
+                        + "adapter='{1}' wt={2} "
+                        + "(attempt #{3}/{4})",
+                        key, candidate.adapterId,
+                        candidate.writeTime?.ToString(
+                            "yyyy-MM-dd HH:mm:ss.fff") ?? "null",
+                        i + 1, enriched.Count);
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "LWC: [phase=DECODE] key='{0}' attempt #{1}/{2} "
+                        + "adapter='{3}' FAILED: {4}",
+                        key, i + 1, enriched.Count,
+                        candidate.adapterId, ex.Message);
+                }
+            }
+
+            QuickLog.Error<DataSyncDirector>(
+                "LWC: [phase=DONE] key='{0}' ALL {1} decode(s) FAILED",
+                key, enriched.Count);
+            throw new SaveNotFoundException(key);
+        }
+
+        private List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>
+            FlattenLoadOrder()
+        {
+            var entries = new List<(ISaveAdapter, int, int)>();
+            for (int g = 0; g < _loadOrderGroups.Length; g++)
+            {
+                ISaveAdapter[] group = _loadOrderGroups[g];
+                for (int a = 0; a < group.Length; a++)
+                    entries.Add((group[a], g, a));
+            }
+
+            return entries;
+        }
+
+        private static async Task<List<(ISaveAdapter adapter, int groupIndex,
+            int adapterIndex, string adapterId, byte[] data, DateTime? writeTime)>>
+            EnrichWithWriteTimesAsync(
+                string key,
+                List<(ISaveAdapter adapter, int groupIndex, int adapterIndex,
+                    byte[] data)> candidates,
+                CancellationToken ct)
+        {
+            QuickLog.Debug<DataSyncDirector>(
+                "LWC: [phase=WRITE_TIME] key='{0}' querying timestamps "
+                + "from {1} adapter(s) in parallel",
+                key, candidates.Count);
+
+            var writeTimeTasks = candidates.Select(async c =>
+            {
+                DateTime? wt = null;
+                try
+                {
+                    wt = await c.adapter.GetLastWriteTimeAsync(key, ct);
+                    QuickLog.Debug<DataSyncDirector>(
+                        "LWC: [phase=WRITE_TIME] adapter='{0}' key='{1}' "
+                        + "-> {2}",
+                        c.adapter.AdapterId, key,
+                        wt.HasValue
+                            ? wt.Value.ToString("yyyy-MM-dd HH:mm:ss.fff")
+                            : "null");
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "LWC: [phase=WRITE_TIME] adapter='{0}' key='{1}' "
+                        + "QUERY FAILED: {2}",
+                        c.adapter.AdapterId, key, ex.Message);
+                }
+
+                return (
+                    c.adapter,
+                    c.groupIndex,
+                    c.adapterIndex,
+                    c.adapter.AdapterId,
+                    c.data,
+                    wt
+                );
+            });
+
+            var results = await Task.WhenAll(writeTimeTasks);
+            return new List<(ISaveAdapter, int, int, string, byte[], DateTime?)>(
+                results
+            );
         }
 
         private static async Task<(byte[] data, bool timedOut)> TryFetchAsync(
