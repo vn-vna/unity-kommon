@@ -10,7 +10,6 @@ using Com.Hapiga.Scheherazade.Common.Integration;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 using Com.Hapiga.Scheherazade.Common.Integration.IAR;
 using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.Integration.MPRL;
 using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
 using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
@@ -323,10 +322,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            // ── Control Bar ──
+            // â”€â”€ Control Bar â”€â”€
             DrawProviderControlBar(types);
 
-            // ── Filter ──
+            // â”€â”€ Filter â”€â”€
             string search = _providerSearchText.Trim();
             if (!string.IsNullOrEmpty(search))
             {
@@ -672,7 +671,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 if (getterAttr != null)
                 {
                     entries.Add(ValidateParamMethod(
-                        asset, method, getterAttr.ParameterName,
+                        asset, method, getterAttr.ParameterName, getterAttr.DisplayName,
                         "getter", seenNames, factoryResults));
                     continue;
                 }
@@ -682,7 +681,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 if (factoryAttr != null)
                 {
                     entries.Add(ValidateParamMethod(
-                        asset, method, factoryAttr.ParameterName,
+                        asset, method, factoryAttr.ParameterName, factoryAttr.DisplayName,
                         "factory", seenNames, factoryResults));
                 }
             }
@@ -703,7 +702,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 _parameterFoldouts[key] = true;
 
             bool expanded = _parameterFoldouts[key];
-            string arrow = expanded ? "▼" : "▶";
+            string arrow = expanded ? "â–¼" : "â–¶";
             string label = $"{arrow} Defined Parameters ({validGetterCount} getters, {validFactoryCount} factories)";
 
             if (GUILayout.Button(label, EditorStyles.boldLabel))
@@ -733,6 +732,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             ScriptableObject asset,
             MethodInfo method,
             string paramName,
+            string displayName,
             string kind,
             HashSet<string> seenNames,
             Dictionary<string, string> factoryResults)
@@ -740,6 +740,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             var entry = new ParamMethodEntry
             {
                 ParamName = paramName,
+                DisplayName = displayName,
                 MethodName = method.Name,
                 ReturnType = method.ReturnType,
                 Kind = kind,
@@ -797,7 +798,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             Rect boxRect = EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUI.DrawRect(boxRect, boxColor);
 
-            // ═══ Header: name + status + navigate ═══
+            // â•â•â• Header: name + status + navigate â•â•â•
             using (new EditorGUILayout.HorizontalScope())
             {
                 string statusIcon = entry.IsValid ? "\u2713" : "\u2717";
@@ -824,8 +825,13 @@ namespace Com.Hapiga.Scheherazade.Integration
                     ? _cachedValidNameStyle
                     : _cachedInvalidNameStyle;
 
+                string headerLabel = entry.DisplayName != null
+                    && entry.DisplayName != entry.ParamName
+                    ? $"{statusIcon} {entry.DisplayName} [{entry.ParamName}]"
+                    : $"{statusIcon} {entry.ParamName}";
+
                 EditorGUILayout.LabelField(
-                    $"{statusIcon} {entry.ParamName}",
+                    headerLabel,
                     nameStyle);
 
                 GUI.color = originalColor;
@@ -946,9 +952,18 @@ namespace Com.Hapiga.Scheherazade.Integration
             return type.Name;
         }
 
+        private struct ParamEntry
+        {
+            public string Id;
+            public string Name;
+            public string ReturnType;
+            public string Description;
+        }
+
         private struct ParamMethodEntry
         {
             public string ParamName;
+            public string DisplayName;
             public string MethodName;
             public Type ReturnType;
             public string Kind;
@@ -979,10 +994,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 return;
             }
 
-            // ── Control Bar ──
+            // â”€â”€ Control Bar â”€â”€
             DrawEventsControlBar(serializedManager, eventsProp);
 
-            // ── Filter events ──
+            // â”€â”€ Filter events â”€â”€
             List<int> visibleIndices = new List<int>();
             string search = _eventSearchText.Trim();
             for (int i = eventsProp.arraySize - 1; i >= 0; i--)
@@ -1094,7 +1109,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                // ── Header: asset name + Edit button + Delete ──
+                // â”€â”€ Header: asset name + Edit button + Delete â”€â”€
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField(assetName, EditorStyles.boldLabel);
@@ -1122,7 +1137,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                     }
                 }
 
-                // ── Event name (read-only) ──
+                // â”€â”€ Event name (read-only) â”€â”€
                 string eventName = eventNameProp?.stringValue ?? "";
                 using (new EditorGUI.DisabledScope(true))
                 {
@@ -1136,7 +1151,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                         MessageType.Error);
                 }
 
-                // ── Parameters section ──
+                // â”€â”€ Parameters section â”€â”€
                 DrawEventParametersSection(
                     manager, eventAsset, eventSo,
                     eventNameProp, paramsProp,
@@ -1167,28 +1182,15 @@ namespace Com.Hapiga.Scheherazade.Integration
                 _eventParamFoldouts[key] = true;
             bool expanded = _eventParamFoldouts[key];
 
-            List<string> availableParamNames =
-                CollectAvailableParamNamesFromProviders(manager);
-
-            // ── Header row: Parameters + Edit + Collapse/Expand ──
+            // â”€â”€ Header row: Parameters + Edit + Collapse/Expand â”€â”€
             using (new EditorGUILayout.HorizontalScope())
             {
-                string arrow = expanded ? "▼" : "▶";
+                string arrow = expanded ? "â–¼" : "â–¶";
                 int paramCount = paramsProp.arraySize;
                 EditorGUILayout.LabelField(
                     $"Parameters ({paramCount})",
                     EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
-
-                // if (GUILayout.Button("Edit", EditorStyles.miniButton, GUILayout.Width(40)))
-                // {
-                //     Rect buttonRect = GUILayoutUtility.GetLastRect();
-                //     buttonRect.position = GUIUtility.GUIToScreenPoint(buttonRect.position);
-                //     var popup = new EventEditPopup(
-                //         eventAsset, eventNameProp, paramsProp,
-                //         manager, serializedManager, eventsProp, index);
-                //     PopupWindow.Show(buttonRect, popup);
-                // }
 
                 string toggleLabel = expanded ? "Collapse" : "Expand";
                 if (GUILayout.Button(toggleLabel, EditorStyles.miniButton, GUILayout.Width(60)))
@@ -1201,38 +1203,82 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             GUILayout.Space(4);
 
-            // ── Read-only parameter rows ──
+            // â”€â”€ Read-only parameter rows â”€â”€
             for (int p = 0; p < paramsProp.arraySize; p++)
             {
+                SerializedProperty element =
+                    paramsProp.GetArrayElementAtIndex(p);
+
+                SerializedProperty idProp =
+                    element.FindPropertyRelative("_parameterId");
                 SerializedProperty nameProp =
-                    paramsProp.GetArrayElementAtIndex(p)
-                        .FindPropertyRelative("_name");
+                    element.FindPropertyRelative("_name");
+                SerializedProperty descProp =
+                    element.FindPropertyRelative("_description");
+                SerializedProperty defaultProp =
+                    element.FindPropertyRelative("_defaultValue");
+
+                string pId = idProp?.stringValue ?? "";
                 string pName = nameProp?.stringValue ?? "";
+                string pDesc = descProp?.stringValue ?? "";
+                string pDefault = defaultProp?.stringValue ?? "";
 
                 // Determine parameter type from providers
-                string typeLabel = ResolveParamType(manager, pName);
+                string lookupKey = !string.IsNullOrEmpty(pId) ? pId : pName;
+                string typeLabel = ResolveParamType(manager, lookupKey);
 
-                using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+                string display = (string.IsNullOrEmpty(pId) || pId == pName)
+                    ? pName
+                    : $"{pName} [{pId}]";
+
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
                 {
-                    EditorGUILayout.LabelField(pName, EditorStyles.boldLabel);
-                    GUILayout.FlexibleSpace();
-                    if (!string.IsNullOrEmpty(typeLabel))
+                    using (new EditorGUILayout.HorizontalScope())
                     {
-                        EditorGUILayout.LabelField(
-                            typeLabel,
-                            EditorStyles.miniLabel,
-                            GUILayout.Width(60));
+                        EditorGUILayout.LabelField(display, EditorStyles.boldLabel);
+                        GUILayout.FlexibleSpace();
+                        if (!string.IsNullOrEmpty(typeLabel))
+                        {
+                            EditorGUILayout.LabelField(
+                                typeLabel,
+                                EditorStyles.miniLabel,
+                                GUILayout.Width(60));
+                        }
+                    }
+
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        if (!string.IsNullOrEmpty(pDesc))
+                        {
+                            EditorGUILayout.LabelField(
+                                pDesc,
+                                EditorStyles.wordWrappedMiniLabel);
+                        }
+
+                        if (!string.IsNullOrEmpty(pDefault))
+                        {
+                            using (new EditorGUILayout.HorizontalScope())
+                            {
+                                EditorGUILayout.LabelField(
+                                    "Default:",
+                                    EditorStyles.miniLabel,
+                                    GUILayout.Width(50));
+                                EditorGUILayout.LabelField(
+                                    pDefault,
+                                    EditorStyles.miniLabel);
+                            }
+                        }
                     }
                 }
             }
 
-            // ── Warnings ──
+            // â”€â”€ Warnings â”€â”€
             DrawEventParameterWarnings(paramsProp, manager);
         }
 
-        private static string ResolveParamType(ScriptableObject manager, string paramName)
+        private static string ResolveParamType(ScriptableObject manager, string paramId)
         {
-            if (string.IsNullOrEmpty(paramName)) return "";
+            if (string.IsNullOrEmpty(paramId)) return "";
 
             SerializedObject so = new SerializedObject(manager);
             SerializedProperty providersProp =
@@ -1255,7 +1301,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 {
                     TrackingParamGetterAttribute getterAttr =
                         method.GetCustomAttribute<TrackingParamGetterAttribute>();
-                    if (getterAttr != null && getterAttr.ParameterName == paramName)
+                    if (getterAttr != null && getterAttr.ParameterName == paramId)
                         return GetFriendlyTypeName(method.ReturnType);
                 }
             }
@@ -1263,17 +1309,17 @@ namespace Com.Hapiga.Scheherazade.Integration
             return "";
         }
 
-        private static List<string> CollectAvailableParamNamesFromProviders(
+        private static List<ParamEntry> CollectAvailableParamNamesFromProviders(
             ScriptableObject manager)
         {
-            var names = new List<string>();
-            var seen = new HashSet<string>();
+            var entries = new List<ParamEntry>();
+            var seenIds = new HashSet<string>();
 
             SerializedObject so = new SerializedObject(manager);
             SerializedProperty providersProp =
                 so.FindProperty("templatedParameterProviders");
 
-            if (providersProp == null || !providersProp.isArray) return names;
+            if (providersProp == null || !providersProp.isArray) return entries;
 
             for (int i = 0; i < providersProp.arraySize; i++)
             {
@@ -1290,84 +1336,44 @@ namespace Com.Hapiga.Scheherazade.Integration
                 {
                     TrackingParamGetterAttribute getterAttr =
                         method.GetCustomAttribute<TrackingParamGetterAttribute>();
-                    if (getterAttr != null && seen.Add(getterAttr.ParameterName))
+                    if (getterAttr != null && seenIds.Add(getterAttr.ParameterName))
                     {
-                        names.Add(getterAttr.ParameterName);
+                        TrackingParamDescriptionAttribute descAttr =
+                            method.GetCustomAttribute<TrackingParamDescriptionAttribute>();
+                        entries.Add(new ParamEntry
+                        {
+                            Id = getterAttr.ParameterName,
+                            Name = getterAttr.DisplayName,
+                            ReturnType = GetFriendlyTypeName(method.ReturnType),
+                            Description = descAttr?.Description
+                        });
                         continue;
                     }
 
                     TrackingParamDefaultFactoryAttribute factoryAttr =
                         method.GetCustomAttribute<TrackingParamDefaultFactoryAttribute>();
-                    if (factoryAttr != null && seen.Add(factoryAttr.ParameterName))
+                    if (factoryAttr != null && seenIds.Add(factoryAttr.ParameterName))
                     {
-                        names.Add(factoryAttr.ParameterName);
+                        TrackingParamDescriptionAttribute descAttr =
+                            method.GetCustomAttribute<TrackingParamDescriptionAttribute>();
+                        entries.Add(new ParamEntry
+                        {
+                            Id = factoryAttr.ParameterName,
+                            Name = factoryAttr.DisplayName,
+                            ReturnType = GetFriendlyTypeName(method.ReturnType),
+                            Description = descAttr?.Description
+                        });
                     }
                 }
             }
 
-            names.Sort();
-            return names;
+            entries.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+            return entries;
         }
 
-        private static bool DrawSingleEventParameter(
-            int index,
-            SerializedProperty nameProp,
-            string[] availableOptions,
-            SerializedObject eventSo,
-            SerializedProperty paramsProp,
-            UnityEngine.Object eventAsset)
-        {
-            using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField($"#{index}", GUILayout.Width(25));
+        #endregion
 
-                if (nameProp != null)
-                {
-                    string currentName = nameProp.stringValue ?? "";
-
-                    if (availableOptions.Length > 0)
-                    {
-                        int currentIndex = Array.IndexOf(
-                            availableOptions, currentName);
-                        if (currentIndex < 0) currentIndex = 0;
-
-                        int newIndex = EditorGUILayout.Popup(
-                            currentIndex,
-                            availableOptions);
-
-                        if (newIndex != currentIndex
-                            || (currentIndex == 0 && currentName != availableOptions[0]))
-                        {
-                            nameProp.stringValue = availableOptions[newIndex];
-                            eventSo.ApplyModifiedProperties();
-                            EditorUtility.SetDirty(eventAsset);
-                        }
-                    }
-                    else
-                    {
-                        EditorGUI.BeginChangeCheck();
-                        EditorGUILayout.PropertyField(nameProp,
-                            GUIContent.none);
-                        if (EditorGUI.EndChangeCheck())
-                        {
-                            eventSo.ApplyModifiedProperties();
-                            EditorUtility.SetDirty(eventAsset);
-                        }
-                    }
-                }
-
-                if (GUILayout.Button("X", EditorStyles.miniButton,
-                        GUILayout.Width(22), GUILayout.Height(18)))
-                {
-                    paramsProp.DeleteArrayElementAtIndex(index);
-                    eventSo.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(eventAsset);
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        #region Parameter Warnings
 
         private static void DrawEventParameterWarnings(
             SerializedProperty paramsProp,
@@ -1379,8 +1385,8 @@ namespace Com.Hapiga.Scheherazade.Integration
             SerializedProperty providersProp =
                 serializedManager.FindProperty("templatedParameterProviders");
 
-            // Collect all available parameter names from enabled providers
-            HashSet<string> availableParams = new HashSet<string>();
+            // Collect all available parameter IDs from enabled providers
+            HashSet<string> availableIds = new HashSet<string>();
 
             if (providersProp != null && providersProp.isArray)
             {
@@ -1394,18 +1400,25 @@ namespace Com.Hapiga.Scheherazade.Integration
                     if (asset is not ITemplatedTrackingParametersProvider provider) continue;
                     if (!provider.IsEnabled) continue;
 
-                    CollectProviderParamNames(asset, availableParams);
+                    CollectProviderParamIds(asset, availableIds);
                 }
             }
 
             for (int i = 0; i < paramsProp.arraySize; i++)
             {
+                SerializedProperty idProp =
+                    paramsProp.GetArrayElementAtIndex(i)
+                        .FindPropertyRelative("_parameterId");
+                string pId = idProp?.stringValue;
+
                 SerializedProperty nameProp =
                     paramsProp.GetArrayElementAtIndex(i)
                         .FindPropertyRelative("_name");
-
                 string pName = nameProp?.stringValue;
                 if (string.IsNullOrEmpty(pName)) continue;
+
+                // Fall back to name if no id set (backward compat)
+                string lookupKey = !string.IsNullOrEmpty(pId) ? pId : pName;
 
                 SerializedProperty defaultProp =
                     paramsProp.GetArrayElementAtIndex(i)
@@ -1413,10 +1426,14 @@ namespace Com.Hapiga.Scheherazade.Integration
 
                 bool hasDefault = !string.IsNullOrEmpty(defaultProp?.stringValue);
 
-                if (!availableParams.Contains(pName) && !hasDefault)
+                if (!availableIds.Contains(lookupKey) && !hasDefault)
                 {
+                    string displayLabel = string.IsNullOrEmpty(pId) || pId == pName
+                        ? pName
+                        : $"{pName} [{pId}]";
+
                     EditorGUILayout.HelpBox(
-                        $"Parameter \"{pName}\" has no getter/factory in any enabled "
+                        $"Parameter \"{displayLabel}\" has no getter/factory in any enabled "
                         + "parameter provider and no default value.\n"
                         + "It will be omitted from the tracking event at runtime.",
                         MessageType.Warning);
@@ -1424,9 +1441,9 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
         }
 
-        private static void CollectProviderParamNames(
+        private static void CollectProviderParamIds(
             ScriptableObject asset,
-            HashSet<string> names)
+            HashSet<string> ids)
         {
             Type type = asset.GetType();
             MethodInfo[] methods = type.GetMethods(
@@ -1438,7 +1455,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                     method.GetCustomAttribute<TrackingParamGetterAttribute>();
                 if (getterAttr != null)
                 {
-                    names.Add(getterAttr.ParameterName);
+                    ids.Add(getterAttr.ParameterName);
                     continue;
                 }
 
@@ -1446,7 +1463,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                     method.GetCustomAttribute<TrackingParamDefaultFactoryAttribute>();
                 if (factoryAttr != null)
                 {
-                    names.Add(factoryAttr.ParameterName);
+                    ids.Add(factoryAttr.ParameterName);
                 }
             }
         }
@@ -1468,8 +1485,8 @@ namespace Com.Hapiga.Scheherazade.Integration
             private string _assetName;
             private string _eventName;
             private string _popupSearchText = "";
-            private List<string> _availableParams;
-            private HashSet<string> _selectedParams;
+            private List<ParamEntry> _availableParams;
+            private HashSet<string> _selectedIds;
             private Vector2 _scroll;
 
             public EventEditPopup(
@@ -1493,15 +1510,20 @@ namespace Com.Hapiga.Scheherazade.Integration
                 _eventName = eventNameProp?.stringValue ?? "";
 
                 _availableParams = CollectAvailableParamNamesFromProviders(manager);
-                _selectedParams = new HashSet<string>();
+                _selectedIds = new HashSet<string>();
                 if (paramsProp != null && paramsProp.isArray)
                 {
                     for (int i = 0; i < paramsProp.arraySize; i++)
                     {
-                        string name = paramsProp.GetArrayElementAtIndex(i)
-                            .FindPropertyRelative("_name")?.stringValue;
-                        if (!string.IsNullOrEmpty(name))
-                            _selectedParams.Add(name);
+                        SerializedProperty element =
+                            paramsProp.GetArrayElementAtIndex(i);
+                        string id = element.FindPropertyRelative("_parameterId")?.stringValue;
+                        string name = element.FindPropertyRelative("_name")?.stringValue;
+
+                        // Backward compat: if no id, use name as the key
+                        string key = !string.IsNullOrEmpty(id) ? id : name;
+                        if (!string.IsNullOrEmpty(key))
+                            _selectedIds.Add(key);
                     }
                 }
             }
@@ -1511,7 +1533,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 float rows = 4f // header + asset name + event name + separator
                     + _availableParams.Count;
                 float h = 28f + rows * 26f + 8f;
-                return new Vector2(360f, Mathf.Min(h, 420f));
+                return new Vector2(390f, Mathf.Min(h, 420f));
             }
 
             public override void OnGUI(Rect rect)
@@ -1519,10 +1541,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 EditorGUILayout.LabelField("Edit Event", EditorStyles.boldLabel);
                 GUILayout.Space(4);
 
-                // ── Asset Name ──
+                // â”€â”€ Asset Name â”€â”€
                 _assetName = EditorGUILayout.TextField("Asset Name", _assetName);
 
-                // ── Event Name ──
+                // â”€â”€ Event Name â”€â”€
                 _eventName = EditorGUILayout.TextField("Event Name", _eventName);
 
                 GUILayout.Space(4);
@@ -1530,9 +1552,9 @@ namespace Com.Hapiga.Scheherazade.Integration
                 EditorGUI.DrawRect(div, new Color(0.5f, 0.5f, 0.5f, 0.3f));
                 GUILayout.Space(4);
 
-                // ── Parameters ──
+                // â”€â”€ Parameters â”€â”€
                 EditorGUILayout.LabelField(
-                    $"Parameters ({_selectedParams.Count}/{_availableParams.Count})",
+                    $"Parameters ({_selectedIds.Count}/{_availableParams.Count})",
                     EditorStyles.boldLabel);
 
                 if (_availableParams.Count == 0)
@@ -1553,23 +1575,34 @@ namespace Com.Hapiga.Scheherazade.Integration
                     var filteredParams = string.IsNullOrEmpty(search)
                         ? _availableParams
                         : _availableParams.Where(p =>
-                            p.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                            p.Id.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
+                            || p.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0
                         ).ToList();
 
                     _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
                     for (int i = filteredParams.Count - 1; i >= 0; i--)
                     {
-                        string param = filteredParams[i];
-                        bool isSelected = _selectedParams.Contains(param);
-                        string typeLabel = ResolveParamType(_manager, param);
+                        ParamEntry entry = filteredParams[i];
+                        bool isSelected = _selectedIds.Contains(entry.Id);
+
+                        string display = entry.Id == entry.Name
+                            ? entry.Name
+                            : $"{entry.Name} [{entry.Id}]";
+
+                        string typeLabel = entry.ReturnType;
 
                         using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
                         {
                             bool newSelected = EditorGUILayout.Toggle(
                                 isSelected, GUILayout.Width(20));
+
+                            GUIContent labelContent = string.IsNullOrEmpty(entry.Description)
+                                ? new GUIContent(display)
+                                : new GUIContent(display, entry.Description);
                             EditorGUILayout.LabelField(
-                                param, EditorStyles.boldLabel);
+                                labelContent, EditorStyles.boldLabel);
+
                             GUILayout.FlexibleSpace();
                             if (!string.IsNullOrEmpty(typeLabel))
                             {
@@ -1582,9 +1615,9 @@ namespace Com.Hapiga.Scheherazade.Integration
                             if (newSelected != isSelected)
                             {
                                 if (newSelected)
-                                    _selectedParams.Add(param);
+                                    _selectedIds.Add(entry.Id);
                                 else
-                                    _selectedParams.Remove(param);
+                                    _selectedIds.Remove(entry.Id);
                             }
                         }
                     }
@@ -1611,7 +1644,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             private void CommitChanges()
             {
-                // ── Commit asset name ──
+                // â”€â”€ Commit asset name â”€â”€
                 if (!string.IsNullOrEmpty(_assetName) && _assetName != _eventAsset.name)
                 {
                     _eventAsset.name = _assetName;
@@ -1619,7 +1652,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                     AssetDatabase.SaveAssets();
                 }
 
-                // ── Commit event name ──
+                // â”€â”€ Commit event name â”€â”€
                 if (_eventName != (_eventNameProp?.stringValue ?? ""))
                 {
                     _eventNameProp.stringValue = _eventName;
@@ -1627,7 +1660,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                     EditorUtility.SetDirty(_eventAsset);
                 }
 
-                // ── Commit parameters: rebuild the array from _selectedParams ──
+                // â”€â”€ Commit parameters: rebuild the array from _selectedIds â”€â”€
                 if (_paramsProp != null && _paramsProp.isArray)
                 {
                     // Remove all existing parameters
@@ -1635,15 +1668,20 @@ namespace Com.Hapiga.Scheherazade.Integration
                         _paramsProp.DeleteArrayElementAtIndex(_paramsProp.arraySize - 1);
 
                     // Add selected parameters
-                    foreach (string param in _availableParams)
+                    foreach (ParamEntry entry in _availableParams)
                     {
-                        if (!_selectedParams.Contains(param)) continue;
+                        if (!_selectedIds.Contains(entry.Id)) continue;
 
                         int newIdx = _paramsProp.arraySize++;
                         SerializedProperty newParam = _paramsProp.GetArrayElementAtIndex(newIdx);
+
+                        SerializedProperty idProp = newParam.FindPropertyRelative("_parameterId");
+                        if (idProp != null)
+                            idProp.stringValue = entry.Id;
+
                         SerializedProperty nameProp = newParam.FindPropertyRelative("_name");
                         if (nameProp != null)
-                            nameProp.stringValue = param;
+                            nameProp.stringValue = entry.Name;
                     }
 
                     _paramsProp.serializedObject.ApplyModifiedProperties();
@@ -2043,1386 +2081,6 @@ namespace Com.Hapiga.Scheherazade.Integration
         {
             return new UserSegmentationIntegrationSettingsProvider(
                 "Project/Integration/User Segmentation", SettingsScope.Project);
-        }
-    }
-
-    public class AsyncResourceManagerSettingsProvider : SettingsProvider
-    {
-        private Vector2 _scrollPosition;
-        private readonly Dictionary<string, int> _tabIndices = new Dictionary<string, int>();
-        private readonly Dictionary<string, bool> _expandedTypes = new Dictionary<string, bool>();
-        private readonly Dictionary<string, ProviderCreationWizard> _providerWizards = new Dictionary<string, ProviderCreationWizard>();
-
-        private readonly string[] TabNames = { "Manager Config", "Providers" };
-
-        private AsyncResourceManagerSettingsProvider(
-            string path, SettingsScope scopes,
-            IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords)
-        { }
-
-        [SettingsProvider]
-        public static SettingsProvider CreateSettingsProvider()
-        {
-            return new AsyncResourceManagerSettingsProvider(
-                "Project/Integration/Async Resource Manager",
-                SettingsScope.Project,
-                new[] { "resource", "MPRL", "async", "provider", "reference", "folder" }
-            );
-        }
-
-        public override void OnGUI(string searchContext)
-        {
-            try
-            {
-                base.OnGUI(searchContext);
-                IntegrationSettingsDrawingUtils.ProcessPendingProviderCreations();
-
-                var centre = IntegrationSettingsDrawingUtils.GetOrCreateIntegrationCentre();
-                if (centre == null) return;
-
-                var managerTypes = FindAllResourceManagerTypes(centre);
-
-                if (managerTypes.Count == 0)
-            {
-                EditorGUILayout.HelpBox(
-                    "No concrete ResourceManagerBase classes found in the project.\n\n" +
-                    "Create a class that inherits from ResourceManagerBase<SelfType, ResourceType>.",
-                    MessageType.Info
-                );
-
-                GUILayout.Space(8);
-
-                if (GUILayout.Button("Create New Resource Manager", GUILayout.Height(30)))
-                {
-                    global::Com.Hapiga.Scheherazade.Common.Editor.Integration
-                        .CreateResourceManagerWindow.Open();
-                }
-
-                return;
-            }
-
-            GUILayout.Space(4);
-            EditorGUILayout.LabelField(
-                "Async Resource Manager Configuration", EditorStyles.boldLabel);
-            GUILayout.Space(4);
-
-            _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-
-            foreach (var info in managerTypes)
-            {
-                DrawManagerCard(info, centre);
-                GUILayout.Space(6);
-            }
-
-            EditorGUILayout.EndScrollView();
-
-            GUILayout.Space(8);
-
-            if (GUILayout.Button("Create New Resource Manager", GUILayout.Height(28)))
-            {
-                global::Com.Hapiga.Scheherazade.Common.Editor.Integration
-                    .CreateResourceManagerWindow.Open();
-            }
-            }
-            catch (ExitGUIException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[AsyncResourceManager] {ex}");
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Per‑Type Card ─────────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void DrawManagerCard(ConcreteManagerInfo info, IntegrationCentre centre)
-        {
-            Rect cardRect = EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            // ── Header ──
-            DrawCardHeader(info, centre);
-
-            // ── Body (attached only) ──
-            if (info.IsAttached && IsExpanded(info))
-            {
-                GUILayout.Space(2);
-
-                int tabIndex = GetTabIndex(info);
-                tabIndex = GUILayout.Toolbar(tabIndex, TabNames);
-                SetTabIndex(info, tabIndex);
-
-                GUILayout.Space(4);
-
-                var dividerRect = EditorGUILayout.GetControlRect(false, 1f);
-                EditorGUI.DrawRect(dividerRect, new Color(0.5f, 0.5f, 0.5f, 0.3f));
-                GUILayout.Space(4);
-
-                switch (tabIndex)
-                {
-                    case 0:
-                        DrawManagerConfig(info.AttachedAsset, info.ConcreteType,
-                            info.ResourceType);
-                        break;
-                    case 1:
-                        DrawProviders(info, centre);
-                        break;
-                }
-            }
-
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawCardHeader(ConcreteManagerInfo info, IntegrationCentre centre)
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                // ── State badge + type name ──
-                DrawStateBadge(info);
-
-                EditorGUILayout.LabelField(info.DisplayName, EditorStyles.boldLabel);
-
-                GUILayout.FlexibleSpace();
-
-                // ── Actions ──
-                DrawCardActions(info, centre);
-            }
-        }
-
-        private void DrawStateBadge(ConcreteManagerInfo info)
-        {
-            string badgeText;
-            Color badgeColor;
-
-            if (info.IsAttached)
-            {
-                badgeText = " ACTIVE ";
-                badgeColor = new Color(0.2f, 0.7f, 0.2f);
-            }
-            else if (info.HasAsset)
-            {
-                badgeText = " NOT ATTACHED ";
-                badgeColor = new Color(0.8f, 0.7f, 0.2f);
-            }
-            else
-            {
-                badgeText = " NO ASSET ";
-                badgeColor = Color.gray;
-            }
-
-            GUIStyle badgeStyle = new GUIStyle(EditorStyles.miniButton)
-            {
-                normal = { textColor = Color.white },
-                fontSize = 10,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                fixedWidth = 90
-            };
-
-            Color prevColor = GUI.backgroundColor;
-            GUI.backgroundColor = badgeColor;
-            GUILayout.Label(badgeText, badgeStyle, GUILayout.Height(20));
-            GUI.backgroundColor = prevColor;
-        }
-
-        private void DrawCardActions(ConcreteManagerInfo info, IntegrationCentre centre)
-        {
-            if (info.IsAttached)
-            {
-                if (DrawSmallButton("Configure",
-                        $"Show/hide configuration for {info.DisplayName}"))
-                {
-                    ToggleExpanded(info);
-                }
-
-                if (DrawSmallButton("Disable",
-                        $"Remove {info.DisplayName} from Integration Centre"))
-                {
-                    IntegrationSettingsDrawingUtils.SetModuleAsset(
-                        centre, info.AttachedAsset, null);
-                }
-
-                if (DrawSmallButton("Delete",
-                        $"Delete the {info.ConcreteType.Name} asset from disk"))
-                {
-                    DeleteManagerAsset(info);
-                }
-            }
-            else if (info.HasAsset)
-            {
-                ScriptableObject firstAsset = info.ExistingAssets[0];
-
-                if (DrawSmallButton("Enable",
-                        $"Add {firstAsset.name} to Integration Centre"))
-                {
-                    IntegrationSettingsDrawingUtils.SetModuleAsset(
-                        centre, null, firstAsset);
-                    info.AttachedAsset = firstAsset;
-                }
-
-                if (DrawSmallButton("Delete",
-                        $"Delete the {info.ConcreteType.Name} asset from disk"))
-                {
-                    DeleteManagerAsset(info);
-                }
-            }
-            else
-            {
-                if (DrawSmallButton("Create Asset",
-                        $"Create a new {info.ConcreteType.Name} ScriptableObject asset"))
-                {
-                    CreateManagerAsset(info, centre);
-                }
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Manager Config Tab ────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void DrawManagerConfig(
-            ScriptableObject manager, Type concreteType, Type resourceType)
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField("Resource Type", resourceType.Name);
-                EditorGUILayout.LabelField("Manager Type", concreteType.FullName);
-
-                bool isInitialized = GetManagerStatus(manager);
-                GUIStyle statusStyle = new GUIStyle(EditorStyles.label)
-                {
-                    normal = { textColor = isInitialized ? Color.green : Color.gray }
-                };
-                EditorGUILayout.LabelField(
-                    "Status",
-                    isInitialized ? "Initialized" : "Not Initialized",
-                    statusStyle
-                );
-            }
-
-            GUILayout.Space(6);
-            IntegrationSettingsDrawingUtils.DrawInlineInspector(
-                manager,
-                $"{PascalCaseToSpaced(manager.name).ToUpperInvariant()} CONFIGURATION"
-            );
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Providers Tab ─────────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void DrawProviders(ConcreteManagerInfo info, IntegrationCentre centre)
-        {
-            ScriptableObject manager = info.AttachedAsset;
-            if (manager == null) return;
-
-            Type resourceType = info.ResourceType;
-
-            // ── Built‑in Templates ──
-            var templates = FindProviderTemplates(manager, resourceType);
-            if (templates.Count > 0)
-            {
-                EditorGUILayout.LabelField("Built‑in Templates",
-                    EditorStyles.miniBoldLabel);
-                GUILayout.Space(2);
-
-                foreach (var tmpl in templates)
-                {
-                    DrawTemplateProviderCard(tmpl, info, centre, resourceType);
-                    GUILayout.Space(4);
-                }
-
-                GUILayout.Space(4);
-            }
-
-            // ── Enabled (in array) providers ──
-            SerializedObject serializedManager = new SerializedObject(manager);
-            var providersProp = serializedManager.FindProperty("initialProviders");
-            if (providersProp != null)
-            {
-                EditorGUILayout.LabelField("Enabled Providers",
-                    EditorStyles.miniBoldLabel);
-                GUILayout.Space(2);
-
-                for (int i = 0; i < providersProp.arraySize; i++)
-                {
-                    var element = providersProp.GetArrayElementAtIndex(i);
-                    ScriptableObject provider = element.objectReferenceValue as ScriptableObject;
-
-                    if (provider == null) continue;
-
-                    DrawEnabledProviderCard(
-                        provider, i, providersProp, serializedManager, manager);
-                    GUILayout.Space(4);
-                }
-            }
-
-            // ── Not‑in‑array providers (created but not enabled) ──
-            var unattached = FindUnattachedProviders(info, resourceType);
-            if (unattached.Count > 0)
-            {
-                GUILayout.Space(4);
-                EditorGUILayout.LabelField("Detached Providers", EditorStyles.miniBoldLabel);
-                GUILayout.Space(2);
-
-                foreach (var provInfo in unattached)
-                {
-                    DrawDetachedProviderCard(provInfo, info, centre, resourceType);
-                    GUILayout.Space(4);
-                }
-            }
-
-            // ── New Custom Provider ──
-            GUILayout.Space(8);
-            Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);
-            EditorGUI.DrawRect(dividerRect, new Color(0.5f, 0.5f, 0.5f, 0.3f));
-            GUILayout.Space(4);
-
-            if (GUILayout.Button("+ New Custom Provider", GUILayout.Height(24)))
-            {
-                ScriptTemplateGenerator.CreatePluginScript(
-                    null,
-                    "Assets/",
-                    typeof(IAsyncResourceProvider<>).MakeGenericType(resourceType),
-                    ScriptTemplateGenerator.GenerationMode.InterfaceImplementation);
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Template Provider Card ────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private sealed class ProviderTemplateEntry
-        {
-            public ResourceProviderAttribute Attribute;
-            public Type OpenGenericType;
-            public Type ConcreteType;
-            public ScriptableObject ExistingAsset;
-            public bool IsInArray;
-            public int ArrayIndex;
-        }
-
-        private void DrawTemplateProviderCard(ProviderTemplateEntry tmpl,
-            ConcreteManagerInfo info, IntegrationCentre centre, Type resourceType)
-        {
-            string key = info.ConcreteType.FullName + "::" +
-                         tmpl.OpenGenericType.FullName;
-
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                // ── Header ──
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.LabelField(
-                        tmpl.Attribute.DisplayName, EditorStyles.boldLabel);
-
-                    if (tmpl.Attribute.RequiredDefines != null)
-                    {
-                        string[] missing = IntegrationSettingsDrawingUtils
-                            .GetMissingDefines(tmpl.Attribute.RequiredDefines);
-
-                        if (missing.Length > 0)
-                        {
-                            GUIStyle defStyle = new GUIStyle(EditorStyles.miniLabel)
-                            {
-                                normal = { textColor = new Color(0.9f, 0.6f, 0.1f) }
-                            };
-                            EditorGUILayout.LabelField(
-                                $"Requires: {string.Join(", ", missing)}",
-                                defStyle);
-
-                            if (DrawSmallButton("Enable",
-                                    "Enable required scripting defines"))
-                            {
-                                IntegrationSettingsDrawingUtils
-                                    .EnsureScriptingDefines(missing);
-                            }
-                            EditorGUILayout.EndHorizontal();
-                            EditorGUILayout.LabelField(tmpl.Attribute.Description,
-                                EditorStyles.wordWrappedMiniLabel);
-                            return;
-                        }
-                    }
-
-                    GUILayout.FlexibleSpace();
-
-                    DrawTemplateCardActions(tmpl, info, centre, resourceType, key);
-                }
-
-                EditorGUILayout.LabelField(tmpl.Attribute.Description,
-                    EditorStyles.wordWrappedMiniLabel);
-
-                // ── Inline wizard ──
-                if (_providerWizards.TryGetValue(key, out var wizard) && wizard.Active)
-                {
-                    GUILayout.Space(6);
-                    DrawProviderCreationWizard(wizard, key, tmpl,
-                        info, centre, resourceType);
-                }
-            }
-        }
-
-        private void DrawTemplateCardActions(ProviderTemplateEntry tmpl,
-            ConcreteManagerInfo info, IntegrationCentre centre,
-            Type resourceType, string key)
-        {
-            bool inWizard = _providerWizards.TryGetValue(key, out var wizard)
-                            && wizard.Active;
-
-            if (tmpl.IsInArray)
-            {
-                if (DrawSmallButton("Config", "Toggle inline inspector"))
-                {
-                    ToggleExpanded(info);
-                }
-
-                if (!inWizard && DrawSmallButton("Disable",
-                        $"Remove provider from the array"))
-                {
-                    RemoveProviderFromArray(info.AttachedAsset,
-                        tmpl.ArrayIndex);
-                    tmpl.IsInArray = false;
-                }
-
-                if (!inWizard && DrawSmallButton("Delete",
-                        $"Delete the asset from disk"))
-                {
-                    DeleteProviderAsset(tmpl.ExistingAsset, info);
-                    tmpl.ExistingAsset = null;
-                    tmpl.ConcreteType = null;
-                    tmpl.IsInArray = false;
-                    tmpl.ArrayIndex = -1;
-                }
-            }
-            else if (tmpl.ConcreteType != null && tmpl.ExistingAsset != null)
-            {
-                if (DrawSmallButton("Enable",
-                        $"Add to provider array"))
-                {
-                    AppendProviderToArray(info.AttachedAsset,
-                        tmpl.ExistingAsset);
-                    tmpl.IsInArray = true;
-                }
-
-                if (DrawSmallButton("Delete",
-                        $"Delete the asset from disk"))
-                {
-                    DeleteProviderAsset(tmpl.ExistingAsset, info);
-                    tmpl.ExistingAsset = null;
-                    tmpl.ConcreteType = null;
-                }
-            }
-            else
-            {
-                if (!inWizard && DrawSmallButton("Create",
-                        $"Generate concrete subclass + ScriptableObject asset"))
-                {
-                    _providerWizards[key] = new ProviderCreationWizard
-                    {
-                        Active = true,
-                        ClassName = $"{resourceType.Name}{tmpl.OpenGenericType.Name}",
-                        Namespace = EditorSettings.projectGenerationRootNamespace ?? "Scripts",
-                        FolderPath = "Assets/"
-                    };
-                }
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Enabled Provider Card ─────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void DrawEnabledProviderCard(ScriptableObject provider, int index,
-            SerializedProperty providersProp, SerializedObject serializedManager,
-            ScriptableObject manager)
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.LabelField(provider.name, EditorStyles.boldLabel);
-
-                    // Reorder arrows
-                    bool canMoveUp = index > 0;
-                    bool canMoveDown = index < providersProp.arraySize - 1;
-
-                    if (canMoveUp && DrawSmallButton("▲", "Move up"))
-                    {
-                        providersProp.MoveArrayElement(index, index - 1);
-                        serializedManager.ApplyModifiedProperties();
-                        EditorUtility.SetDirty(manager);
-                        AssetDatabase.SaveAssets();
-                        return;
-                    }
-
-                    if (canMoveDown && DrawSmallButton("▼", "Move down"))
-                    {
-                        providersProp.MoveArrayElement(index, index + 1);
-                        serializedManager.ApplyModifiedProperties();
-                        EditorUtility.SetDirty(manager);
-                        AssetDatabase.SaveAssets();
-                        return;
-                    }
-
-                    GUILayout.FlexibleSpace();
-
-                    if (DrawSmallButton("Disable",
-                            $"Remove {provider.name} from provider array"))
-                    {
-                        RemoveProviderFromArray(manager, index);
-                        return;
-                    }
-
-                    if (DrawSmallButton("Delete",
-                            $"Delete {provider.name} asset from disk"))
-                    {
-                        DeleteProviderAsset(provider, null);
-                        return;
-                    }
-                }
-
-                GUILayout.Space(2);
-                IntegrationSettingsDrawingUtils.DrawInlineInspector(
-                    provider,
-                    $"{PascalCaseToSpaced(provider.name).ToUpperInvariant()} PROVIDER"
-                );
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Detached Provider Card ────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private sealed class DetachedProviderInfo
-        {
-            public Type ConcreteType;
-            public ScriptableObject Asset;
-        }
-
-        private void DrawDetachedProviderCard(DetachedProviderInfo provInfo,
-            ConcreteManagerInfo info, IntegrationCentre centre, Type resourceType)
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    EditorGUILayout.LabelField(provInfo.Asset.name,
-                        EditorStyles.boldLabel);
-
-                    Color prevColor = GUI.color;
-                    GUI.color = new Color(0.6f, 0.6f, 0.6f);
-                    EditorGUILayout.LabelField(
-                        $"({provInfo.ConcreteType.Name})",
-                        EditorStyles.miniLabel);
-                    GUI.color = prevColor;
-
-                    GUILayout.FlexibleSpace();
-
-                    if (DrawSmallButton("Enable",
-                            $"Add {provInfo.Asset.name} to provider array"))
-                    {
-                        AppendProviderToArray(info.AttachedAsset, provInfo.Asset);
-                    }
-
-                    if (DrawSmallButton("Delete",
-                            $"Delete {provInfo.Asset.name} from disk"))
-                    {
-                        DeleteProviderAsset(provInfo.Asset, info);
-                    }
-                }
-            }
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Inline Creation Wizard ────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private sealed class ProviderCreationWizard
-        {
-            public bool Active;
-            public string ClassName = "";
-            public string Namespace = "";
-            public string FolderPath = "Assets/";
-            public bool Fired;
-        }
-
-        private void DrawProviderCreationWizard(ProviderCreationWizard wizard,
-            string key, ProviderTemplateEntry tmpl, ConcreteManagerInfo info,
-            IntegrationCentre centre, Type resourceType)
-        {
-            Rect wizardRect = EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            EditorGUILayout.LabelField("Create Provider Subclass",
-                EditorStyles.miniBoldLabel);
-
-            wizard.ClassName = EditorGUILayout.TextField("Class Name",
-                wizard.ClassName);
-
-            EditorGUI.BeginChangeCheck();
-            wizard.Namespace = EditorGUILayout.TextField("Namespace",
-                wizard.Namespace);
-            if (EditorGUI.EndChangeCheck())
-            {
-                wizard.FolderPath = NamespaceToFolder(wizard.Namespace);
-            }
-
-            wizard.FolderPath = EditorGUILayout.TextField("Folder",
-                wizard.FolderPath);
-
-            GUILayout.Space(4);
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                GUILayout.FlexibleSpace();
-
-                if (GUILayout.Button("Cancel", GUILayout.Width(70)))
-                {
-                    _providerWizards.Remove(key);
-                }
-
-                if (GUILayout.Button("Generate", GUILayout.Width(80)))
-                {
-                    GenerateProviderSubclass(wizard, tmpl, info, resourceType);
-                    _providerWizards.Remove(key);
-                }
-            }
-
-            EditorGUILayout.EndVertical();
-        }
-
-        private void GenerateProviderSubclass(ProviderCreationWizard wizard,
-            ProviderTemplateEntry tmpl, ConcreteManagerInfo info,
-            Type resourceType)
-        {
-            string className = wizard.ClassName;
-            string ns = wizard.Namespace;
-            string folder = wizard.FolderPath.TrimEnd('/');
-
-            string openGenName = tmpl.OpenGenericType.FullName;
-            int backtick = openGenName.IndexOf('`');
-            string baseName = backtick > 0
-                ? openGenName.Substring(0, backtick)
-                : openGenName;
-            string resName = resourceType.FullName;
-
-            var sb = new System.Text.StringBuilder();
-            if (!string.IsNullOrEmpty(ns))
-            {
-                sb.AppendLine($"using {tmpl.OpenGenericType.Namespace};");
-            }
-            sb.AppendLine("using UnityEngine;");
-            sb.AppendLine();
-            if (!string.IsNullOrEmpty(ns))
-            {
-                sb.AppendLine($"namespace {ns}");
-                sb.AppendLine("{");
-            }
-            string indent = string.IsNullOrEmpty(ns) ? "" : "    ";
-            sb.AppendLine(
-                $"{indent}public sealed class {className} : {baseName}<{resName}>");
-            sb.AppendLine($"{indent}{{");
-
-            // Add stub overrides for abstract members
-            Type closedGeneric = tmpl.OpenGenericType.MakeGenericType(resourceType);
-            WriteAbstractMemberStubs(sb, closedGeneric, indent);
-
-            sb.AppendLine($"{indent}}}");
-            if (!string.IsNullOrEmpty(ns))
-            {
-                sb.AppendLine("}");
-            }
-
-            string filePath = System.IO.Path.Combine(folder,
-                className + ".cs").Replace('\\', '/');
-
-            string dir = System.IO.Path.GetDirectoryName(filePath);
-            if (!System.IO.Directory.Exists(dir))
-                System.IO.Directory.CreateDirectory(dir);
-
-            System.IO.File.WriteAllText(filePath, sb.ToString(),
-                System.Text.Encoding.UTF8);
-            AssetDatabase.Refresh();
-
-            var script = AssetDatabase.LoadAssetAtPath<MonoScript>(filePath);
-            if (script != null)
-            {
-                EditorGUIUtility.PingObject(script);
-            }
-        }
-
-        private static void WriteAbstractMemberStubs(System.Text.StringBuilder sb,
-            Type type, string indent)
-        {
-            if (!type.IsAbstract) return;
-
-            string inner = indent + "    ";
-
-            foreach (var method in type.GetMethods(
-                         BindingFlags.Public | BindingFlags.NonPublic |
-                         BindingFlags.Instance | BindingFlags.DeclaredOnly))
-            {
-                if (!method.IsAbstract) continue;
-
-                string ret = GetTypeName(method.ReturnType);
-                var paramList = string.Join(", ",
-                    method.GetParameters().Select(p =>
-                        $"{GetTypeName(p.ParameterType)} {p.Name}"));
-                string access = method.IsPublic ? "public" : "protected";
-
-                sb.AppendLine();
-                sb.AppendLine(
-                    $"{inner}{access} override {ret} {method.Name}({paramList})");
-                sb.AppendLine($"{inner}{{");
-
-                if (method.ReturnType != typeof(void))
-                {
-                    sb.AppendLine($"{inner}    throw new System.NotImplementedException();");
-                }
-                else
-                {
-                    sb.AppendLine(
-                        $"{inner}    throw new System.NotImplementedException();");
-                }
-
-                sb.AppendLine($"{inner}}}");
-            }
-
-            foreach (var prop in type.GetProperties(
-                         BindingFlags.Public | BindingFlags.NonPublic |
-                         BindingFlags.Instance | BindingFlags.DeclaredOnly))
-            {
-                var getter = prop.GetGetMethod(true);
-                var setter = prop.GetSetMethod(true);
-                if (getter == null || !getter.IsAbstract) continue;
-
-                string propType = GetTypeName(prop.PropertyType);
-                string access = (getter.IsPublic || (setter != null && setter.IsPublic))
-                    ? "public" : "protected";
-
-                sb.AppendLine();
-                sb.AppendLine(
-                    $"{inner}{access} override {propType} {prop.Name}");
-                sb.AppendLine($"{inner}{{");
-
-                if (getter.IsAbstract)
-                    sb.AppendLine(
-                        $"{inner}    get => throw new System.NotImplementedException();");
-                if (setter != null && setter.IsAbstract)
-                    sb.AppendLine(
-                        $"{inner}    set => throw new System.NotImplementedException();");
-
-                sb.AppendLine($"{inner}}}");
-            }
-        }
-
-        private static string GetTypeName(Type type)
-        {
-            if (!type.IsGenericType) return type.FullName ?? type.Name;
-
-            string name = type.Name;
-            int backtick = name.IndexOf('`');
-            name = backtick > 0 ? name.Substring(0, backtick) : name;
-            string args = string.Join(", ",
-                type.GenericTypeArguments.Select(GetTypeName));
-            return $"{name}<{args}>";
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Provider Array Manipulation ───────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void AppendProviderToArray(ScriptableObject manager,
-            ScriptableObject provider)
-        {
-            if (manager == null || provider == null) return;
-
-            SerializedObject serializedManager = new SerializedObject(manager);
-            var providersProp = serializedManager.FindProperty("initialProviders");
-            if (providersProp == null) return;
-
-            int newIdx = providersProp.arraySize++;
-            providersProp.GetArrayElementAtIndex(newIdx).objectReferenceValue
-                = provider;
-            serializedManager.ApplyModifiedProperties();
-            EditorUtility.SetDirty(manager);
-            AssetDatabase.SaveAssets();
-        }
-
-        private void RemoveProviderFromArray(ScriptableObject manager, int index)
-        {
-            if (manager == null || index < 0) return;
-
-            SerializedObject serializedManager = new SerializedObject(manager);
-            var providersProp = serializedManager.FindProperty("initialProviders");
-            if (providersProp == null) return;
-
-            if (index >= providersProp.arraySize) return;
-
-            IntegrationSettingsDrawingUtils.DeleteArrayElement(
-                providersProp, index);
-            serializedManager.ApplyModifiedProperties();
-            EditorUtility.SetDirty(manager);
-            AssetDatabase.SaveAssets();
-        }
-
-        private void DeleteProviderAsset(ScriptableObject provider,
-            ConcreteManagerInfo info)
-        {
-            if (provider == null) return;
-
-            string path = AssetDatabase.GetAssetPath(provider);
-            if (string.IsNullOrEmpty(path)) return;
-
-            bool confirm = EditorUtility.DisplayDialog(
-                "Delete Provider Asset",
-                $"Permanently delete '{path}'?\n\n" +
-                "This cannot be undone.",
-                "Delete", "Cancel");
-            if (!confirm) return;
-
-            // Remove from provider arrays if the manager is attached
-            if (info?.AttachedAsset != null)
-            {
-                SerializedObject serializedManager =
-                    new SerializedObject(info.AttachedAsset);
-                var providersProp = serializedManager
-                    .FindProperty("initialProviders");
-                if (providersProp != null)
-                {
-                    for (int i = providersProp.arraySize - 1; i >= 0; i--)
-                    {
-                        if (providersProp.GetArrayElementAtIndex(i)
-                                .objectReferenceValue == provider)
-                        {
-                            IntegrationSettingsDrawingUtils.DeleteArrayElement(
-                                providersProp, i);
-                            break;
-                        }
-                    }
-                    serializedManager.ApplyModifiedProperties();
-                    EditorUtility.SetDirty(info.AttachedAsset);
-                }
-            }
-
-            AssetDatabase.DeleteAsset(path);
-            AssetDatabase.SaveAssets();
-        }
-
-        private static string NamespaceToFolder(string ns)
-        {
-            if (string.IsNullOrEmpty(ns)) return "Assets/";
-            string rootNs = EditorSettings.projectGenerationRootNamespace;
-            if (!string.IsNullOrEmpty(rootNs) && ns.StartsWith(rootNs))
-            {
-                string sub = ns.Substring(rootNs.Length).TrimStart('.');
-                return "Assets/" + sub.Replace('.', '/') + "/";
-            }
-            return "Assets/" + ns.Replace('.', '/') + "/";
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Actions ───────────────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private void CreateManagerAsset(ConcreteManagerInfo info,
-            IntegrationCentre centre)
-        {
-            string path = EditorUtility.SaveFilePanelInProject(
-                $"Create {info.ConcreteType.Name}",
-                info.ConcreteType.Name,
-                "asset",
-                $"Create a new {info.ConcreteType.Name} asset"
-            );
-
-            if (string.IsNullOrEmpty(path)) return;
-
-            ScriptableObject asset = ScriptableObject.CreateInstance(info.ConcreteType);
-            asset.name = System.IO.Path.GetFileNameWithoutExtension(path);
-            AssetDatabase.CreateAsset(asset, path);
-            AssetDatabase.SaveAssets();
-            EditorGUIUtility.PingObject(asset);
-
-            IntegrationSettingsDrawingUtils.SetModuleAsset(
-                centre, null, asset);
-            info.ExistingAssets.Add(asset);
-            info.AttachedAsset = asset;
-        }
-
-        private void DeleteManagerAsset(ConcreteManagerInfo info)
-        {
-            ScriptableObject assetToDelete = info.AttachedAsset;
-
-            if (assetToDelete == null && info.ExistingAssets.Count > 0)
-                assetToDelete = info.ExistingAssets[0];
-
-            if (assetToDelete == null) return;
-
-            string assetName = assetToDelete.name;
-            string path = AssetDatabase.GetAssetPath(assetToDelete);
-
-            bool confirm = EditorUtility.DisplayDialog(
-                "Delete Asset",
-                $"Permanently delete '{path}'?\n\nThis cannot be undone.",
-                "Delete", "Cancel"
-            );
-
-            if (!confirm) return;
-
-            // Remove from IntegrationCentre if attached
-            if (info.AttachedAsset == assetToDelete)
-            {
-                var centre = IntegrationSettingsDrawingUtils
-                    .GetOrCreateIntegrationCentre();
-                if (centre != null)
-                {
-                    IntegrationSettingsDrawingUtils.SetModuleAsset(
-                        centre, assetToDelete, null);
-                }
-            }
-
-            info.ExistingAssets.Remove(assetToDelete);
-            info.AttachedAsset = null;
-
-            AssetDatabase.DeleteAsset(path);
-            AssetDatabase.SaveAssets();
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── State Helpers ─────────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private int GetTabIndex(ConcreteManagerInfo info)
-        {
-            string key = info.ConcreteType.FullName;
-            _tabIndices.TryGetValue(key, out int idx);
-            return idx;
-        }
-
-        private void SetTabIndex(ConcreteManagerInfo info, int idx)
-        {
-            _tabIndices[info.ConcreteType.FullName] = idx;
-        }
-
-        private bool IsExpanded(ConcreteManagerInfo info)
-        {
-            string key = info.ConcreteType.FullName;
-            _expandedTypes.TryGetValue(key, out bool expanded);
-            return expanded;
-        }
-
-        private void ToggleExpanded(ConcreteManagerInfo info)
-        {
-            string key = info.ConcreteType.FullName;
-            _expandedTypes[key] = !IsExpanded(info);
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Cached Type Discovery ────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        [DidReloadScripts]
-        private static void InvalidateCaches()
-        {
-            s_cachedManagerEntries = null;
-            s_cachedTemplateTypes = null;
-            s_cachedConcreteSubclass = null;
-            s_cachedInterfaceTypes = null;
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Type Discovery (cached) ───────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private sealed class ConcreteManagerInfo
-        {
-            public Type ConcreteType;
-            public Type ResourceType;
-            public string DisplayName;
-            public List<ScriptableObject> ExistingAssets;
-            public ScriptableObject AttachedAsset;
-            public bool HasAsset => ExistingAssets != null && ExistingAssets.Count > 0;
-            public bool IsAttached => AttachedAsset != null;
-        }
-
-        // Cached type-scan results — built once, cleared on [DidReloadScripts]
-        private sealed class ManagerTypeEntry
-        {
-            public Type ConcreteType;
-            public Type ResourceType;
-        }
-
-        private static List<ManagerTypeEntry> s_cachedManagerEntries;
-        private static List<Type> s_cachedTemplateTypes;
-        private static Dictionary<string, Type> s_cachedConcreteSubclass;
-        private static Dictionary<string, List<Type>> s_cachedInterfaceTypes;
-
-        private static void EnsureCaches()
-        {
-            if (s_cachedManagerEntries != null) return;
-
-            var managerEntries = new List<ManagerTypeEntry>();
-            var templateTypes = new List<Type>();
-            var subclassMap = new Dictionary<string, Type>();
-
-            // Pass 1: [ResourceProvider] templates (can be abstract)
-            foreach (Type type in IntegrationSettingsDrawingUtils.GetAllTypes())
-            {
-                var attr = type.GetCustomAttribute<ResourceProviderAttribute>();
-                if (attr != null && type.IsGenericTypeDefinition
-                    && type.Namespace != null
-                    && type.Namespace.StartsWith(
-                        "Com.Hapiga.Scheherazade.Common.Integration"))
-                {
-                    templateTypes.Add(type);
-                }
-            }
-
-            // Pass 2: concrete types (managers + subclass map)
-            foreach (Type type in IntegrationSettingsDrawingUtils.GetAllTypes())
-            {
-                if (!type.IsClass || type.IsAbstract) continue;
-
-                // ResourceManagerBase subclasses
-                Type resType = GetResourceManagerResourceType(type);
-                if (resType != null && typeof(ScriptableObject).IsAssignableFrom(type))
-                {
-                    managerEntries.Add(new ManagerTypeEntry
-                    {
-                        ConcreteType = type, ResourceType = resType
-                    });
-                }
-            }
-
-            // Build concrete-subclass lookup: for every concrete ScriptableObject,
-            // record its relationship to open generic base types
-            foreach (Type type in IntegrationSettingsDrawingUtils.GetAllTypes())
-            {
-                if (!type.IsClass || type.IsAbstract) continue;
-                if (type.IsGenericTypeDefinition) continue;
-                if (!typeof(ScriptableObject).IsAssignableFrom(type)) continue;
-
-                Type baseType = type.BaseType;
-                while (baseType != null && baseType != typeof(ScriptableObject))
-                {
-                    if (baseType.IsGenericType && baseType.IsGenericTypeDefinition)
-                    {
-                        // We found a base like ResourceFolderAsyncResourceProvider<>
-                        // The concrete type's generic args tell us the resource type
-                        Type[] genArgs = null;
-                        Type check = type.BaseType;
-                        while (check != null && check != typeof(ScriptableObject)
-                               && check != typeof(object))
-                        {
-                            if (check.IsGenericType && !check.IsGenericTypeDefinition
-                                && check.GetGenericTypeDefinition() == baseType)
-                            {
-                                genArgs = check.GetGenericArguments();
-                                break;
-                            }
-                            check = check.BaseType;
-                        }
-
-                        if (genArgs != null && genArgs.Length > 0)
-                        {
-                            string key = baseType.FullName + "|" + genArgs[0].FullName;
-                            subclassMap[key] = type;
-                        }
-                    }
-                    baseType = baseType.BaseType;
-                }
-            }
-
-            s_cachedManagerEntries = managerEntries;
-            s_cachedTemplateTypes = templateTypes;
-            s_cachedConcreteSubclass = subclassMap;
-
-            // Build interface → concrete types lookup for IAsyncResourceProvider<>
-            var interfaceMap = new Dictionary<string, List<Type>>();
-            foreach (Type type in IntegrationSettingsDrawingUtils.GetAllTypes())
-            {
-                if (!type.IsClass || type.IsAbstract) continue;
-                if (!typeof(ScriptableObject).IsAssignableFrom(type)) continue;
-
-                foreach (Type iface in type.GetInterfaces())
-                {
-                    if (!iface.IsGenericType) continue;
-                    if (iface.GetGenericTypeDefinition() !=
-                        typeof(IAsyncResourceProvider<>)) continue;
-
-                    string key = iface.FullName;
-                    if (string.IsNullOrEmpty(key)) continue;
-
-                    if (!interfaceMap.TryGetValue(key, out var list))
-                    {
-                        list = new List<Type>();
-                        interfaceMap[key] = list;
-                    }
-                    list.Add(type);
-                }
-            }
-            s_cachedInterfaceTypes = interfaceMap;
-        }
-
-        private static List<ConcreteManagerInfo> FindAllResourceManagerTypes(
-            IntegrationCentre centre)
-        {
-            EnsureCaches();
-
-            // Build lookup of types attached to IntegrationCentre
-            var attachedByType = new Dictionary<Type, ScriptableObject>();
-            SerializedObject serializedCentre = new SerializedObject(centre);
-            var listProp = serializedCentre.FindProperty("moduleScriptableObjects");
-            if (listProp != null)
-            {
-                for (int i = 0; i < listProp.arraySize; i++)
-                {
-                    ScriptableObject module = listProp
-                        .GetArrayElementAtIndex(i).objectReferenceValue
-                        as ScriptableObject;
-                    if (module == null) continue;
-                    Type moduleType = module.GetType();
-                    if (IsResourceManagerType(moduleType))
-                        attachedByType[moduleType] = module;
-                }
-            }
-
-            var results = new List<ConcreteManagerInfo>();
-            foreach (var entry in s_cachedManagerEntries)
-            {
-                // Find existing .asset files on disk
-                string[] guids = AssetDatabase.FindAssets("t:" + entry.ConcreteType.Name);
-                var existingAssets = new List<ScriptableObject>();
-                foreach (string guid in guids)
-                {
-                    string path = AssetDatabase.GUIDToAssetPath(guid);
-                    ScriptableObject asset = AssetDatabase.LoadAssetAtPath(
-                        path, entry.ConcreteType) as ScriptableObject;
-                    if (asset != null) existingAssets.Add(asset);
-                }
-
-                attachedByType.TryGetValue(entry.ConcreteType,
-                    out ScriptableObject attachedAsset);
-
-                if (attachedAsset != null && !existingAssets.Contains(attachedAsset))
-                    existingAssets.Insert(0, attachedAsset);
-
-                results.Add(new ConcreteManagerInfo
-                {
-                    ConcreteType = entry.ConcreteType,
-                    ResourceType = entry.ResourceType,
-                    DisplayName = $"{entry.ConcreteType.Name} ({entry.ResourceType.Name})",
-                    ExistingAssets = existingAssets,
-                    AttachedAsset = attachedAsset
-                });
-            }
-
-            return results;
-        }
-
-        private static List<ProviderTemplateEntry> FindProviderTemplates(
-            ScriptableObject manager, Type resourceType)
-        {
-            EnsureCaches();
-
-            // Build lookup of what's currently in initialProviders
-            var assetToIndex = new Dictionary<ScriptableObject, int>();
-            if (manager != null)
-            {
-                SerializedObject so = new SerializedObject(manager);
-                var arrProp = so.FindProperty("initialProviders");
-                if (arrProp != null)
-                {
-                    for (int i = 0; i < arrProp.arraySize; i++)
-                    {
-                        ScriptableObject p = arrProp
-                            .GetArrayElementAtIndex(i)
-                            .objectReferenceValue as ScriptableObject;
-                        if (p != null) assetToIndex[p] = i;
-                    }
-                }
-            }
-
-            var results = new List<ProviderTemplateEntry>();
-
-            foreach (Type templateType in s_cachedTemplateTypes)
-            {
-                var attr = templateType.GetCustomAttribute<ResourceProviderAttribute>();
-                if (attr == null) continue;
-
-                string key = templateType.FullName + "|" + resourceType.FullName;
-                s_cachedConcreteSubclass.TryGetValue(key, out Type concreteType);
-
-                ScriptableObject existingAsset = null;
-                int arrayIndex = -1;
-
-                if (concreteType != null)
-                {
-                    string[] guids = AssetDatabase.FindAssets(
-                        "t:" + concreteType.Name);
-                    if (guids.Length > 0)
-                    {
-                        string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-                        existingAsset = AssetDatabase.LoadAssetAtPath(
-                            path, concreteType) as ScriptableObject;
-                    }
-                }
-
-                if (existingAsset != null
-                    && assetToIndex.TryGetValue(existingAsset, out int idx))
-                {
-                    arrayIndex = idx;
-                }
-
-                results.Add(new ProviderTemplateEntry
-                {
-                    Attribute = attr,
-                    OpenGenericType = templateType,
-                    ConcreteType = concreteType,
-                    ExistingAsset = existingAsset,
-                    IsInArray = arrayIndex >= 0,
-                    ArrayIndex = arrayIndex
-                });
-            }
-
-            return results;
-        }
-
-        private static List<DetachedProviderInfo> FindUnattachedProviders(
-            ConcreteManagerInfo info, Type resourceType)
-        {
-            EnsureCaches();
-
-            Type iface = typeof(IAsyncResourceProvider<>).MakeGenericType(
-                resourceType);
-
-            var inArray = new HashSet<ScriptableObject>();
-            if (info.AttachedAsset != null)
-            {
-                SerializedObject serializedManager =
-                    new SerializedObject(info.AttachedAsset);
-                var providersProp = serializedManager
-                    .FindProperty("initialProviders");
-                if (providersProp != null)
-                {
-                    for (int i = 0; i < providersProp.arraySize; i++)
-                    {
-                        ScriptableObject so = providersProp
-                            .GetArrayElementAtIndex(i)
-                            .objectReferenceValue as ScriptableObject;
-                        if (so != null) inArray.Add(so);
-                    }
-                }
-            }
-
-            var results = new List<DetachedProviderInfo>();
-
-            string ifaceKey = iface.FullName;
-            if (s_cachedInterfaceTypes != null
-                && s_cachedInterfaceTypes.TryGetValue(ifaceKey, out var typeList))
-            {
-                foreach (Type type in typeList)
-                {
-                    if (type.GetCustomAttribute<ResourceProviderAttribute>() != null)
-                        continue;
-
-                    string[] guids = AssetDatabase.FindAssets("t:" + type.Name);
-                    foreach (string guid in guids)
-                    {
-                        string path = AssetDatabase.GUIDToAssetPath(guid);
-                        ScriptableObject asset = AssetDatabase.LoadAssetAtPath(
-                            path, type) as ScriptableObject;
-                        if (asset == null) continue;
-                        if (inArray.Contains(asset)) continue;
-
-                        results.Add(new DetachedProviderInfo
-                        {
-                            ConcreteType = type,
-                            Asset = asset
-                        });
-                    }
-                }
-            }
-
-            return results;
-        }
-
-        private static bool IsResourceManagerType(Type type)
-        {
-            Type baseType = type.BaseType;
-            while (baseType != null)
-            {
-                if (baseType.IsGenericType &&
-                    baseType.GetGenericTypeDefinition() ==
-                    typeof(ResourceManagerBase<,>))
-                {
-                    return true;
-                }
-                baseType = baseType.BaseType;
-            }
-            return false;
-        }
-
-        private static Type GetResourceManagerResourceType(Type type)
-        {
-            // Walk up the inheritance chain to find the closed
-            // ResourceManagerBase<SelfType, ResourceType>
-            Type baseType = type.BaseType;
-            while (baseType != null)
-            {
-                if (baseType.IsGenericType &&
-                    baseType.GetGenericTypeDefinition() ==
-                    typeof(ResourceManagerBase<,>))
-                {
-                    return baseType.GenericTypeArguments[1];
-                }
-                baseType = baseType.BaseType;
-            }
-            return null;
-        }
-
-        // ═══════════════════════════════════════════════════
-        // ── Utilities ─────────────────────────────────────
-        // ═══════════════════════════════════════════════════
-
-        private static bool DrawSmallButton(string label, string tooltip)
-        {
-            return GUILayout.Button(
-                new GUIContent(label, tooltip),
-                EditorStyles.miniButton,
-                GUILayout.Height(22)
-            );
-        }
-
-        private static bool GetManagerStatus(ScriptableObject manager)
-        {
-            foreach (Type iface in manager.GetType().GetInterfaces())
-            {
-                if (!iface.IsGenericType) continue;
-                if (iface.GetGenericTypeDefinition() != typeof(IResourceManager<>)) continue;
-
-                var statusProp = iface.GetProperty("Status");
-                if (statusProp == null) continue;
-
-                object status = statusProp.GetValue(manager);
-                return status is ResourceManagerStatus s
-                    && s == ResourceManagerStatus.Initialized;
-            }
-
-            return false;
-        }
-
-        private static readonly Regex PascalCaseRegex = new Regex(
-            @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])",
-            RegexOptions.Compiled
-        );
-
-        private static string PascalCaseToSpaced(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return name;
-            return PascalCaseRegex.Replace(name, " ");
         }
     }
 
