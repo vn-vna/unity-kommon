@@ -6,7 +6,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
     [Serializable]
     public class TemplatedTrackingParameter
     {
-        [Tooltip("Parameter name — matched against [TrackingParamGetter(\"name\")] methods")]
+        [Tooltip("Unique identifier — matched against [TrackingParamGetter(\"id\")] methods")]
+        [SerializeField]
+        private string _parameterId;
+
+        [Tooltip("User-friendly display name — used as the key when sending the final event")]
         [SerializeField]
         private string _name;
 
@@ -18,6 +22,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         [Tooltip("Fallback value used when no getter or factory provides this parameter")]
         [SerializeField]
         private string _defaultValue;
+
+        public string ParameterId =>
+            !string.IsNullOrEmpty(_parameterId) ? _parameterId : _name;
 
         public string Name => _name;
         public string Description => _description;

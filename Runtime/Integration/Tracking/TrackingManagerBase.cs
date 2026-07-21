@@ -855,13 +855,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 object value = null;
                 bool resolved = false;
+                string lookupKey = param.ParameterId;
 
                 foreach (ITemplatedTrackingParametersProvider provider in _templatedProviders)
                 {
                     if (!provider.IsEnabled) continue;
 
                     if (_getterCache.TryGetValue(provider, out var getters)
-                        && getters.TryGetValue(param.Name, out Func<object> getter))
+                        && getters.TryGetValue(lookupKey, out Func<object> getter))
                     {
                         value = getter();
                         resolved = true;
@@ -869,7 +870,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     }
 
                     if (_factoryCache.TryGetValue(provider, out var factories)
-                        && factories.TryGetValue(param.Name, out Func<object> factory))
+                        && factories.TryGetValue(lookupKey, out Func<object> factory))
                     {
                         value = factory();
                         resolved = true;
