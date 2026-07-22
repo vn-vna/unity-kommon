@@ -241,11 +241,29 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             }
         }
 
-        public void TrackScreen(string screenId) => throw new NotImplementedException();
-        public void TrackAction(TrackingActionInfo info) => throw new NotImplementedException();
+        public void TrackScreen(string screenId)
+        {
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Start pushing screen event: {0} (not supported by Adjust)", screenId
+            );
+            throw new NotImplementedException();
+        }
+
+        public void TrackAction(TrackingActionInfo info)
+        {
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Start pushing action event: {0} (not supported by Adjust)", info.ActionId
+            );
+            throw new NotImplementedException();
+        }
 
         public void TrackAdRevenue(AdTrackingInfo info)
         {
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Start pushing ad revenue event: {0} ({1} {2})",
+                info.NetworkName, info.Revenue, info.RevenueUnit
+            );
+
             try
             {
                 string adSourceName = AcquireAdSourceName(info);
@@ -278,6 +296,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     ex.Message
                 );
             }
+
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Finished pushing ad revenue event: {0}", info.NetworkName
+            );
         }
 
         private static string AcquireAdSourceName(AdTrackingInfo info)
@@ -295,6 +317,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackPurchaseRevenue(PurchaseTrackingInfo info)
         {
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Start pushing purchase revenue event: {0} ({1} {2})",
+                info.ProductId, info.Price, info.Currency
+            );
+
             try
             {
                 AdjustEvent e = new AdjustEvent(IapEventName);
@@ -316,6 +343,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     ex.Message
                 );
             }
+
+            QuickLog.Debug<AdjustTrackingProvider>(
+                "Finished pushing purchase revenue event: {0}", info.ProductId
+            );
         }
 
         private void HandleAdjustSessionFailure(AdjustSessionFailure failure)

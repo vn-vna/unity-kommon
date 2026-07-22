@@ -74,8 +74,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         private const int MaxPendingActionsPerProvider = 500;
         private List<ITrackingProvider> _providers;
         private HashSet<string> _filteredTrackingIds;
-        private Queue<Action> _pendingActions;
-        private Dictionary<ITrackingProvider, Queue<Action>> _providerPendingBuffers;
+        private Queue<TrackingEventData> _pendingEvents;
+        private Dictionary<ITrackingProvider, Queue<TrackingEventData>> _providerPendingBuffers;
         private float _timer;
 
         private List<ITemplatedTrackingParametersProvider> _templatedProviders;
@@ -88,30 +88,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             base.OnEnable();
             _providers ??= new List<ITrackingProvider>();
-            _pendingActions ??= new Queue<Action>();
-            _providerPendingBuffers ??= new Dictionary<ITrackingProvider, Queue<Action>>();
+            _pendingEvents ??= new Queue<TrackingEventData>();
+            _providerPendingBuffers ??= new Dictionary<ITrackingProvider, Queue<TrackingEventData>>();
             Integration.RegisterManager(this);
         }
 
         public virtual void Reset()
         {
-            Queue<Action> preservedActions = _pendingActions;
-            _pendingActions = new Queue<Action>();
+            Queue<TrackingEventData> preservedEvents = _pendingEvents;
+            _pendingEvents = new Queue<TrackingEventData>();
 
-            if (preservedActions != null && preservedActions.Count > 0)
+            if (preservedEvents != null && preservedEvents.Count > 0)
             {
-                while (preservedActions.Count > 0)
+                while (preservedEvents.Count > 0)
                 {
-                    _pendingActions.Enqueue(preservedActions.Dequeue());
+                    _pendingEvents.Enqueue(preservedEvents.Dequeue());
                 }
 
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Preserved {0} pending tracking event(s) across Reset().",
-                    _pendingActions.Count
+                    _pendingEvents.Count
                 );
             }
 
-            _providerPendingBuffers = new Dictionary<ITrackingProvider, Queue<Action>>();
+            _providerPendingBuffers = new Dictionary<ITrackingProvider, Queue<TrackingEventData>>();
             _providers = new List<ITrackingProvider>();
             _filteredTrackingIds = new HashSet<string>(filteredTrackingIds);
 
@@ -161,10 +161,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (Status != TrackingManagerStatus.Ready
                 && Status != TrackingManagerStatus.PartiallyReady) return;
 
-            while (_pendingActions.Count > 0)
+            while (_pendingEvents.Count > 0)
             {
-                Action action = _pendingActions.Dequeue();
-                action?.Invoke();
+                TrackingEventData evt = _pendingEvents.Dequeue();
+                DispatchTrackedEvent(evt);
             }
         }
         #endregion
@@ -317,7 +317,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (Status != TrackingManagerStatus.Ready
                 && Status != TrackingManagerStatus.PartiallyReady)
             {
-                _pendingActions.Enqueue(() => TrackScreen(screenId));
+                _pendingEvents.Enqueue(TrackingEventData.Screen(screenId));
                 return;
             }
 
@@ -325,7 +325,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized)
                 {
-                    EnqueueForProvider(provider, () => DispatchScreenToProvider(provider, screenId));
+                    EnqueueForProvider(provider, TrackingEventData.Screen(screenId));
                     continue;
                 }
 
@@ -356,7 +356,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (Status != TrackingManagerStatus.Ready
                 && Status != TrackingManagerStatus.PartiallyReady)
             {
-                _pendingActions.Enqueue(() => TrackAction(info));
+                _pendingEvents.Enqueue(TrackingEventData.Action(info));
                 return;
             }
 
@@ -391,7 +391,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized)
                 {
-                    EnqueueForProvider(provider, () => DispatchActionToProvider(provider, info));
+                    EnqueueForProvider(provider, TrackingEventData.Action(info));
                     continue;
                 }
 
@@ -442,7 +442,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     "Tracking manager is not ready. Queuing ad revenue tracking."
                 );
 
-                _pendingActions.Enqueue(() => TrackAdRevenue(info));
+                _pendingEvents.Enqueue(TrackingEventData.AdRevenue(info));
                 return;
             }
 
@@ -458,7 +458,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized)
                 {
-                    EnqueueForProvider(provider, () => DispatchAdRevenueToProvider(provider, info));
+                    EnqueueForProvider(provider, TrackingEventData.AdRevenue(info));
                     continue;
                 }
 
@@ -506,7 +506,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     "Tracking manager is not ready. Queuing purchase revenue tracking."
                 );
 
-                _pendingActions.Enqueue(() => TrackPurchaseRevenue(info));
+                _pendingEvents.Enqueue(TrackingEventData.PurchaseRevenue(info));
                 return;
             }
 
@@ -522,10 +522,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized)
                 {
-                    EnqueueForProvider(
-                        provider,
-                        () => DispatchPurchaseRevenueToProvider(provider, info)
-                    );
+                    EnqueueForProvider(provider, TrackingEventData.PurchaseRevenue(info));
                     continue;
                 }
 
@@ -557,21 +554,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready
-                && Status != TrackingManagerStatus.PartiallyReady)
-            {
-                _pendingActions.Enqueue(() => TrackTemplatedEvent(eventName, mask));
-                return;
-            }
-
-            if ((enabledFeatures & TrackingProviderFeatures.IngameAction) == 0)
-            {
-                QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Ingame action tracking is disabled in manager features. Skipping templated event '{0}'.",
-                    eventName);
-                return;
-            }
-
             TemplatedTrackingEvent eventDef = null;
             if (templatedEvents != null)
             {
@@ -593,6 +575,27 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 return;
             }
 
+            if (Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady)
+            {
+                var deferredParams = ResolveTemplatedParameters(eventDef);
+                _pendingEvents.Enqueue(TrackingEventData.Action(new TrackingActionInfo
+                {
+                    ActionId = eventName,
+                    ProviderMask = mask,
+                    Parameters = deferredParams
+                }));
+                return;
+            }
+
+            if ((enabledFeatures & TrackingProviderFeatures.IngameAction) == 0)
+            {
+                QuickLog.Warning<TrackingManagerBase<T>>(
+                    "Ingame action tracking is disabled in manager features. Skipping templated event '{0}'.",
+                    eventName);
+                return;
+            }
+
             var resolvedParams = ResolveTemplatedParameters(eventDef);
 
             TrackAction(new TrackingActionInfo
@@ -611,22 +614,22 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized) continue;
 
-                if (_providerPendingBuffers.TryGetValue(provider, out Queue<Action> buffer))
+                if (_providerPendingBuffers.TryGetValue(provider, out Queue<TrackingEventData> buffer))
                 {
                     while (buffer.Count > 0)
                     {
-                        Action action = buffer.Dequeue();
-                        action?.Invoke();
+                        TrackingEventData evt = buffer.Dequeue();
+                        DispatchEventToProvider(provider, evt);
                     }
                 }
             }
         }
 
-        private void EnqueueForProvider(ITrackingProvider provider, Action action)
+        private void EnqueueForProvider(ITrackingProvider provider, TrackingEventData evt)
         {
-            if (!_providerPendingBuffers.TryGetValue(provider, out Queue<Action> buffer))
+            if (!_providerPendingBuffers.TryGetValue(provider, out Queue<TrackingEventData> buffer))
             {
-                buffer = new Queue<Action>();
+                buffer = new Queue<TrackingEventData>();
                 _providerPendingBuffers[provider] = buffer;
             }
 
@@ -640,7 +643,45 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 buffer.Dequeue();
             }
 
-            buffer.Enqueue(action);
+            buffer.Enqueue(evt);
+        }
+
+        private void DispatchTrackedEvent(TrackingEventData evt)
+        {
+            switch (evt.Type)
+            {
+                case TrackingEventType.Screen:
+                    TrackScreen(((ScreenTrackingData)evt.Data).ScreenId);
+                    break;
+                case TrackingEventType.Action:
+                    TrackAction((TrackingActionInfo)evt.Data);
+                    break;
+                case TrackingEventType.AdRevenue:
+                    TrackAdRevenue((AdTrackingInfo)evt.Data);
+                    break;
+                case TrackingEventType.PurchaseRevenue:
+                    TrackPurchaseRevenue((PurchaseTrackingInfo)evt.Data);
+                    break;
+            }
+        }
+
+        private static void DispatchEventToProvider(ITrackingProvider provider, TrackingEventData evt)
+        {
+            switch (evt.Type)
+            {
+                case TrackingEventType.Screen:
+                    DispatchScreenToProvider(provider, ((ScreenTrackingData)evt.Data).ScreenId);
+                    break;
+                case TrackingEventType.Action:
+                    DispatchActionToProvider(provider, (TrackingActionInfo)evt.Data);
+                    break;
+                case TrackingEventType.AdRevenue:
+                    DispatchAdRevenueToProvider(provider, (AdTrackingInfo)evt.Data);
+                    break;
+                case TrackingEventType.PurchaseRevenue:
+                    DispatchPurchaseRevenueToProvider(provider, (PurchaseTrackingInfo)evt.Data);
+                    break;
+            }
         }
 
         private static void DispatchScreenToProvider(ITrackingProvider provider, string screenId)

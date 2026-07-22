@@ -11,7 +11,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         Critical = 3
     }
 
-    public struct TrackingActionInfo
+    public struct TrackingActionInfo : ITrackingData
     {
         public string ActionId { get; set; }
         public ActionSeverity Severity { get; set; }

@@ -2,7 +2,7 @@ using Com.Hapiga.Scheherazade.Common.Integration.Ads;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
-    public struct AdTrackingInfo
+    public struct AdTrackingInfo : ITrackingData
     {
         public IAdsServiceProvider Provider { get; set; }
         public AdsType AdType { get; set; }

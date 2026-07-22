@@ -155,6 +155,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackScreen(string screenId)
         {
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Start pushing screen event: {0}", screenId
+            );
+
             TrackAction(new TrackingActionInfo
             {
                 ActionId = Firebase.Analytics.FirebaseAnalytics.EventScreenView,
@@ -163,10 +167,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     { Firebase.Analytics.FirebaseAnalytics.ParameterScreenName, screenId }
                 }
             });
+
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Finished pushing screen event: {0}", screenId
+            );
         }
 
         public void TrackAction(TrackingActionInfo info)
         {
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Start pushing action event: {0}", info.ActionId
+            );
+
             List<Firebase.Analytics.Parameter> parameters = new List<Firebase.Analytics.Parameter>();
             CollectTrackingParameters(info, parameters);
 
@@ -181,6 +193,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     info.ActionId, ex.Message
                 );
             }
+
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Finished pushing action event: {0}", info.ActionId
+            );
         }
 
         private static void CollectTrackingParameters(
@@ -232,6 +248,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackAdRevenue(AdTrackingInfo info)
         {
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Start pushing ad revenue event: {0} ({1} {2})",
+                info.NetworkName, info.Revenue, info.RevenueUnit
+            );
+
             Dictionary<string, object> parameters = new Dictionary<string, object>
             {
                 {"ad_platform",     info.NetworkName},
@@ -258,10 +279,18 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                 });
             }
 
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Finished pushing ad revenue event: {0}", info.NetworkName
+            );
         }
 
         public void TrackPurchaseRevenue(PurchaseTrackingInfo info)
         {
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Start pushing purchase revenue event: {0} ({1} {2})",
+                info.ProductId, info.Price, info.Currency
+            );
+
             if (Integration.CurrencyConverter != null)
             {
                 TryConvertRevenueToUsd(ref info);
@@ -289,6 +318,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     Parameters = parameters
                 });
             }
+
+            QuickLog.Debug<FirebaseTrackingProvider>(
+                "Finished pushing purchase revenue event: {0}", info.ProductId
+            );
         }
 
         private void TryConvertRevenueToUsd(ref PurchaseTrackingInfo info)

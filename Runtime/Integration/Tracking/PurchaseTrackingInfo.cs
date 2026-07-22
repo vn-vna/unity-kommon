@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 {
-    public struct PurchaseTrackingInfo
+    public struct PurchaseTrackingInfo : ITrackingData
     {
         public string TransactionId { get; set; }
         public string ProductId { get; set; }

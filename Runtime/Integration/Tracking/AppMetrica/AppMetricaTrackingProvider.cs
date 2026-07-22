@@ -107,6 +107,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackAction(TrackingActionInfo info)
         {
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Start pushing action event: {0}", info.ActionId
+            );
+
             try
             {
                 AppMetrica.ReportEvent(info.ActionId, SerializeActionInfo(info));
@@ -118,6 +122,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     info.ActionId, ex.Message
                 );
             }
+
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Finished pushing action event: {0}", info.ActionId
+            );
         }
 
         private static string SerializeActionInfo(TrackingActionInfo info)
@@ -136,6 +144,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackAdRevenue(AdTrackingInfo info)
         {
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Start pushing ad revenue event: {0} ({1} {2})",
+                info.NetworkName, info.Revenue, info.RevenueUnit
+            );
+
             try
             {
                 var adrev = new AdRevenue(info.Revenue, "USD");
@@ -151,10 +164,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     info.RevenueUnit, ex.Message
                 );
             }
+
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Finished pushing ad revenue event: {0}", info.NetworkName
+            );
         }
 
         public void TrackPurchaseRevenue(PurchaseTrackingInfo info)
         {
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Start pushing purchase revenue event: {0} ({1} {2})",
+                info.ProductId, info.Price, info.Currency
+            );
+
             try
             {
                 Revenue purrev = AcquireRevenueInfo(ref info);
@@ -167,6 +189,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     info.ProductId, ex.Message
                 );
             }
+
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Finished pushing purchase revenue event: {0}", info.ProductId
+            );
         }
 
         private Revenue AcquireRevenueInfo(ref PurchaseTrackingInfo info)
@@ -196,6 +222,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
 
         public void TrackScreen(string screenId)
         {
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Start pushing screen event: {0}", screenId
+            );
+
             try
             {
                 ECommerceScreen screen = new ECommerceScreen() { Name = screenId };
@@ -208,6 +238,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
                     screenId, ex.Message
                 );
             }
+
+            QuickLog.Debug<AppMetricaTrackingProvider>(
+                "Finished pushing screen event: {0}", screenId
+            );
         }
 
         private void HandleAppMetricaAppActivated(AppMetricaConfig config)
