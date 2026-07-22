@@ -1,6 +1,7 @@
 #if FIREBASE_ANALYTICS
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Integration.Ads;
@@ -63,31 +64,93 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         [SerializeField]
         private int providerMaskNumber = 0;
 
+        [SerializeField]
+        private float initializationTimeout = 10f;
+
+        [SerializeField]
+        private int retryAttempt = 3;
+
+        [SerializeField]
+        private float retryDelay = 1.0f;
+
+        private int _initializationAttempts = 0;
+        private WaitForSeconds _waitForRetry;
+
         public ProviderIdentity ProviderIdentity => (ProviderIdentity)(1 << providerMaskNumber);
 
 
         public void Initialize()
         {
             IsInitialized = false;
-            Firebase.Analytics.FirebaseAnalytics
-                .GetSessionIdAsync()
-                .ContinueTaskOnMainThread(HandleFirebaseInitializedCompleted);
+            IsTrackingEnabled = false;
+            _waitForRetry = new WaitForSeconds(retryDelay);
+            _initializationAttempts = 0;
+            Dispatcher.DispatchCoroutine(InitializeInternal());
         }
 
         public void CleanUp()
         {
             IsInitialized = false;
             IsTrackingEnabled = false;
+            _initializationAttempts = 0;
         }
 
-        private void HandleFirebaseInitializedCompleted(Task<long> task)
+        private IEnumerator InitializeInternal()
         {
-            if (!task.IsCompletedSuccessfully) return;
-            IsInitialized = true;
-            IsTrackingEnabled = true;
+            if (_initializationAttempts++ > retryAttempt)
+            {
+                QuickLog.Error<FirebaseTrackingProvider>(
+                    "Firebase SDK initialization failed after multiple attempts."
+                );
+                yield break;
+            }
+
             QuickLog.Info<FirebaseTrackingProvider>(
-                "Firebase Tracking initialized successfully."
+                "Start Initializing Firebase SDK"
             );
+
+            bool succeed = false;
+            float initCountdown = initializationTimeout;
+
+            try
+            {
+                Firebase.Analytics.FirebaseAnalytics
+                    .GetSessionIdAsync()
+                    .ContinueTaskOnMainThread(task =>
+                    {
+                        succeed = task.IsCompletedSuccessfully;
+                        if (succeed)
+                        {
+                            IsInitialized = true;
+                            IsTrackingEnabled = true;
+                            QuickLog.Info<FirebaseTrackingProvider>(
+                                "Firebase Tracking initialized successfully."
+                            );
+                        }
+                    });
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Error<FirebaseTrackingProvider>(
+                    "Firebase SDK initialization error: {0}",
+                    ex.Message
+                );
+            }
+
+            while (initCountdown >= 0 && !succeed)
+            {
+                initCountdown -= Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            if (!succeed)
+            {
+                QuickLog.Warning<FirebaseTrackingProvider>(
+                    "Firebase SDK initialization timed out. Retrying..."
+                );
+                yield return _waitForRetry;
+                Dispatcher.DispatchCoroutine(InitializeInternal());
+            }
         }
 
         public void TrackScreen(string screenId)
