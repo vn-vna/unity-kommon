@@ -39,10 +39,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
         public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
-        public bool IsIntersitialAdsWillShow =>
-            _intervalTrackingMode == IntervalTrackingMode.DeltaTime
-                ? _interstitialTimer >= ShowInterstitialAdsInterval
-                : _isInterstitialReadyCached;
+        public bool IsIntersitialAdsWillShow => 
+            _intervalTrackingMode switch
+            {
+                IntervalTrackingMode.DeltaTime => _interstitialTimer >= ShowInterstitialAdsInterval,
+                IntervalTrackingMode.TimePoint => _isInterstitialReadyCached,
+                _ => throw new ArgumentException()
+            };
         #endregion
 
         #region Serialized Fields
@@ -85,59 +88,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             _checkIntervalAccumulator = 0.0f;
             _isInterstitialReadyCached = false;
 
-            if (overrideConfig != null)
-            {
-                OverrideConfiguration();
-            }
-
-            if (adServiceProvider != null)
-            {
-                IAdsServiceProvider provider = adServiceProvider as IAdsServiceProvider;
-                if (provider != null)
-                {
-                    RegisterProvider(provider);
-                }
-                else
-                {
-                    QuickLog.Error<AdsManagerBase<T>>(
-                        "Assigned ad service provider does not implement IAdsServiceProvider interface."
-                    );
-                }
-            }
+            OverrideConfiguration();
+            ResetProvider();
         }
 
         public void Tick(float deltaTime)
         {
-            if (_provider == null)
-            {
-                return;
-            }
-
+            if (_provider == null) return;
             _provider.LoadAds();
-
-            if (_intervalTrackingMode == IntervalTrackingMode.DeltaTime)
-            {
-                _interstitialTimer += deltaTime;
-                if (_verboseDebugging)
-                {
-                    QuickLog.Debug<AdsManagerBase<T>>(
-                        $"Tick(DeltaTime): dt={deltaTime:F3}s, timer={_interstitialTimer:F1}s/{ShowInterstitialAdsInterval}s");
-                }
-                return;
-            }
-
-            _checkIntervalAccumulator += deltaTime;
-            if (_checkIntervalAccumulator >= _timePointCheckInterval)
-            {
-                _checkIntervalAccumulator -= _timePointCheckInterval;
-                _isInterstitialReadyCached =
-                    (ChronoDirector.UtcNow - _lastAdShowTimePoint).TotalSeconds >= ShowInterstitialAdsInterval;
-                if (_verboseDebugging)
-                {
-                    QuickLog.Debug<AdsManagerBase<T>>(
-                        $"Tick(TimePoint): check, elapsed={GetInterstitialProgressFormatted():F1}s/{ShowInterstitialAdsInterval}s, ready={_isInterstitialReadyCached}");
-                }
-            }
+            ResolveInterstitialAdInterval(deltaTime);
         }
         #endregion
 
@@ -207,7 +166,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (_provider != null)
             {
                 QuickLog.Warning<AdsManagerBase<T>>(
-                    "AdsManager already has a provider registered. " + 
+                    "AdsManager already has a provider registered. " +
                     "Overriding the existing one."
                 );
             }
@@ -215,7 +174,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (_verboseDebugging)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    $"RegisterProvider: {provider?.GetType().Name}");
+                    "RegisterProvider: {0}", provider?.GetType().Name);
             }
         }
 
@@ -262,14 +221,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (_verboseDebugging)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    $"ShowInterstitialAds: placement={placement}, force={force}, ready={IsIntersitialAdsWillShow}");
+                    "ShowInterstitialAds: placement={0}, force={1}, ready={2}", placement, force, IsIntersitialAdsWillShow);
             }
 
             if (!IsIntersitialAdsWillShow && !force)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    $"Interstitial ad request ignored. Interval not met. " +
-                    $"{GetInterstitialProgressFormatted()} / {ShowInterstitialAdsInterval}s");
+                    "Interstitial ad request ignored. Interval not met. {0:F1} / {1}s",
+                    GetInterstitialProgressFormatted(), ShowInterstitialAdsInterval);
                 callback?.Invoke(false);
                 return;
             }
@@ -293,7 +252,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (_verboseDebugging)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    $"ShowRewardAds: placement={placement}");
+                    "ShowRewardAds: placement={0}", placement);
             }
 
             if (_provider != null)
@@ -315,7 +274,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (_verboseDebugging)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    $"ShowAppOpenAds: placement={placement}");
+                    "ShowAppOpenAds: placement={0}", placement);
             }
 
             if (_provider != null)
@@ -331,8 +290,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         #endregion
 
         #region Private Methods
+        private void ResetProvider()
+        {
+            if (adServiceProvider == null) return;
+
+            if (adServiceProvider is not IAdsServiceProvider provider)
+            {
+                QuickLog.Error<AdsManagerBase<T>>(
+                    "Assigned ad service provider does not implement IAdsServiceProvider interface."
+                );
+                return;
+            }
+
+            RegisterProvider(provider);
+        }
+
         private void OverrideConfiguration()
         {
+            if (!overrideConfig) return;
             ShowInterstitialAdsInterval = overrideConfig.ShowInterstitialAdsInterval;
         }
 
@@ -341,7 +316,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (!_verboseDebugging) return callback;
             return (success) =>
             {
-                QuickLog.Debug<AdsManagerBase<T>>($"{adType} result: success={success}, placement={placement}");
+                QuickLog.Debug<AdsManagerBase<T>>("{0} result: success={1}, placement={2}", adType, success, placement);
                 callback?.Invoke(success);
             };
         }
@@ -369,6 +344,50 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             _isInterstitialReadyCached = false;
         }
 
+        private void ResolveInterstitialAdInterval(float deltaTime)
+        {
+            switch (_intervalTrackingMode)
+            {
+                case IntervalTrackingMode.DeltaTime:
+                    ResolveInterstitialAdIntervalDeltatime(deltaTime);
+                    break;
+
+                case IntervalTrackingMode.TimePoint:
+                    ResolveInterstitialAdIntervalTimepoint(deltaTime);
+                    break;
+            }
+
+        }
+
+        private void ResolveInterstitialAdIntervalDeltatime(float deltaTime)
+        {
+            _interstitialTimer = Mathf.Min(_interstitialTimer + deltaTime, ShowInterstitialAdsInterval);
+            if (_verboseDebugging)
+            {
+                QuickLog.Debug<AdsManagerBase<T>>(
+                    "Tick(DeltaTime): dt={0:F3}s, timer={1:F1}s/{2}s",
+                    deltaTime, _interstitialTimer, ShowInterstitialAdsInterval
+                );
+            }
+        }
+
+        private void ResolveInterstitialAdIntervalTimepoint(float deltaTime)
+        {
+            _checkIntervalAccumulator += deltaTime;
+            if (_checkIntervalAccumulator < _timePointCheckInterval) return;
+
+            _checkIntervalAccumulator -= _timePointCheckInterval;
+            _isInterstitialReadyCached = (ChronoDirector.UtcNow - _lastAdShowTimePoint).TotalSeconds >= ShowInterstitialAdsInterval;
+
+            if (_verboseDebugging)
+            {
+                QuickLog.Debug<AdsManagerBase<T>>(
+                    "Tick(TimePoint): check, elapsed={0:F1}s/{1}s, ready={2}",
+                    (Func<object>)(() => GetInterstitialProgressFormatted()),
+                    ShowInterstitialAdsInterval, _isInterstitialReadyCached
+                );
+            }
+        }
         #endregion
 
     }
