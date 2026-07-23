@@ -4,6 +4,7 @@ using System.Linq;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 {
@@ -29,6 +30,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         [Tooltip("Hide the ticker GameObject in the hierarchy.")]
         private bool hideTickerGameObject = true;
 
+        internal string TickerGameObjectName => tickerGameObjectName;
+        internal bool HideTickerGameObject => hideTickerGameObject;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
         {
@@ -43,6 +47,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             config.Initialize();
+            AsyncResourceLoaderTicker.CreateFromConfig(config);
         }
 
         private void Initialize()
@@ -73,17 +78,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                     );
                 }
             }
-
-            // Spawn ticker for managers that need per-frame updates
-            var tickerGo = new GameObject(tickerGameObjectName);
-            UnityEngine.Object.DontDestroyOnLoad(tickerGo);
-            if (hideTickerGameObject)
-            {
-                tickerGo.hideFlags = HideFlags.HideInHierarchy;
-            }
-
-            var ticker = tickerGo.AddComponent<AsyncResourceLoaderTicker>();
-            ticker.Setup(this);
 
             QuickLog.Info<AsyncResourceLoadingConfiguration>(
                 "Async Resource Loader initialized with {0} manager(s).",
@@ -123,6 +117,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     {
         private AsyncResourceLoadingConfiguration _config;
         private ITickable[] _tickables;
+
+        internal static void CreateFromConfig(
+            AsyncResourceLoadingConfiguration config)
+        {
+            if (config == null) return;
+
+            var go = new GameObject(config.TickerGameObjectName);
+            Object.DontDestroyOnLoad(go);
+            if (config.HideTickerGameObject)
+            {
+                go.hideFlags = HideFlags.HideInHierarchy;
+            }
+
+            var ticker = go.AddComponent<AsyncResourceLoaderTicker>();
+            ticker._config = config;
+            ticker.RefreshTickables();
+        }
 
         internal void Setup(AsyncResourceLoadingConfiguration config)
         {

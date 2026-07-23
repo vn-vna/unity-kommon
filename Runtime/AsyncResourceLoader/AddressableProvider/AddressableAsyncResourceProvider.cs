@@ -1,5 +1,6 @@
 #if UNITY_ADDRESSABLES
 using System;
+using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
@@ -16,7 +17,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public class AddressableAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
-        IAddressableAsyncResourceProvider<ResourceType>
+        IAddressableAsyncResourceProvider<ResourceType>,
+        ICatalogAwareAsyncResourceProvider
         where ResourceType : UnityEngine.Object
     {
         public int Priority => priority;
@@ -29,9 +31,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         [SerializeField]
         private float timeout;
 
+        [SerializeField]
+        [Tooltip("When enabled, loads a catalog JSON file to determine which resources this provider can serve.")]
+        private CatalogConfig _catalogConfig = new CatalogConfig();
+
+        private CatalogData _catalogData;
+
         public void Initialize()
         {
             IsInitialized = false;
+
+            _catalogData = new CatalogData();
+            if (_catalogConfig.UseCatalog
+                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            {
+                _catalogData.LoadFromStreamingAssets(_catalogConfig.CatalogFileName);
+            }
 
             QuickLog.Debug<AddressableAsyncResourceProvider<ResourceType>>(
                 "Initializing Addressables system..."
@@ -165,6 +180,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 );
             }
         }
+
+        public IReadOnlyCollection<string> CatalogedIds =>
+            _catalogData?.CatalogedIds ?? Array.Empty<string>();
+
+        public bool HasResource(IAsyncResourceId resourceId)
+        {
+            if (_catalogData != null && _catalogData.IsLoaded)
+            {
+                return _catalogData.HasResource(resourceId.ResourceId);
+            }
+
+            return true;
+        }
+
+        public DataType GetDataType(string resourceId) =>
+            _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
     }
 }
 #endif

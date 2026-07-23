@@ -17,7 +17,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public abstract class DownloadableResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
-        IDownloadableResourceProvider<ResourceType>
+        IDownloadableResourceProvider<ResourceType>,
+        ICatalogAwareAsyncResourceProvider
         where ResourceType : UnityEngine.Object
     {
         [SerializeField]
@@ -47,8 +48,21 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         [SerializeField]
         private CustomDownloadHeader[] headers;
 
+        [SerializeField]
+        [Tooltip("Base URL prefix (e.g. \"https://cdn.example.com/\"). Combined with catalog RelativePath to form the download URL.")]
+        private string _baseUrl = "";
+
+        [SerializeField]
+        [Tooltip("Format string for resolving resource ID to a URL path when no catalog entry is found.\n{0} = ResourceId (e.g. \"puzzles/level_{0}.json\")")]
+        private string _urlFormat = "{0}";
+
+        [SerializeField]
+        [Tooltip("When enabled, loads a catalog JSON file to determine which resources this provider can serve.")]
+        private CatalogConfig _catalogConfig = new CatalogConfig();
+
         private volatile bool _isInitialized;
         private string _cachedDiskBasePath;
+        private CatalogData _catalogData;
         private readonly Dictionary<string, (byte[] data, DateTime timestamp)> _memoryCache = new();
         private readonly LinkedList<string> _lruList = new();
         private readonly Dictionary<string, ActiveDownload> _activeDownloads = new();
@@ -82,14 +96,26 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         public string CacheSubFolder => cacheSubFolder;
         public CacheBasePathType CacheBasePath => cacheBasePath;
         public CustomDownloadHeader[] Headers => headers;
+        public string BaseUrl => _baseUrl;
+        public string UrlFormat => _urlFormat;
 
         protected abstract ResourceType ConvertResource(byte[] data);
 
         public virtual void Initialize()
         {
+            _catalogData = new CatalogData();
+            if (_catalogConfig.UseCatalog
+                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            {
+                Dispatcher.DispatchCoroutine(
+                    LoadCatalogCoroutine(_catalogConfig.CatalogFileName)
+                );
+            }
+
             _cachedDiskBasePath = cacheBasePath == CacheBasePathType.PersistentDataPath
                 ? Application.persistentDataPath
                 : Application.temporaryCachePath;
+
             _isInitialized = true;
 
             QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
@@ -124,7 +150,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
-            string url = downloadableId.GetUrl(this);
+            string url = ResolveDownloadUrl(id.ResourceId, downloadableId);
             if (string.IsNullOrEmpty(url))
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -144,7 +170,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
             lock (_lock)
             {
-                if (_memoryCache.TryGetValue(resourceId, out var cached))
+                if (_memoryCache.TryGetValue(resourceId, out (byte[] data, DateTime timestamp) cached))
                 {
                     if (IsCacheValid(cached.timestamp))
                     {
@@ -168,7 +194,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
             lock (_lock)
             {
-                if (_activeDownloads.TryGetValue(resourceId, out var existing))
+                if (_activeDownloads.TryGetValue(resourceId, out ActiveDownload existing))
                 {
                     existing.Handlers.Add(handler);
                     return;
@@ -187,6 +213,71 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             StartDownload(url, resourceId, handler);
+        }
+
+        public IReadOnlyCollection<string> CatalogedIds =>
+            _catalogData?.CatalogedIds ?? Array.Empty<string>();
+
+        public bool HasResource(IAsyncResourceId resourceId)
+        {
+            return 
+                _catalogData != null && _catalogData.IsLoaded 
+                    ? _catalogData.HasResource(resourceId.ResourceId) 
+                    : true;
+        }
+
+        public DataType GetDataType(string resourceId) =>
+            _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
+
+        private string ResolveDownloadUrl(
+            string resourceId,
+            IDownloadableAsyncResourceId downloadableId)
+        {
+            if (_catalogData != null && _catalogData.IsLoaded)
+            {
+                string relativePath = _catalogData.GetRelativePath(resourceId);
+                if (!string.IsNullOrEmpty(relativePath))
+                {
+                    return _baseUrl + relativePath;
+                }
+            }
+
+            string fallback = downloadableId.GetUrl(this);
+            if (!string.IsNullOrEmpty(fallback))
+            {
+                return fallback;
+            }
+
+            return _baseUrl + string.Format(_urlFormat, resourceId);
+        }
+
+        private IEnumerator LoadCatalogCoroutine(string url)
+        {
+            using UnityWebRequest webRequest = UnityWebRequest.Get(url);
+            webRequest.downloadHandler = new DownloadHandlerBuffer();
+
+            if (headers != null)
+            {
+                foreach (CustomDownloadHeader header in headers)
+                {
+                    webRequest.SetRequestHeader(header.key, header.value);
+                }
+            }
+
+            yield return webRequest.SendWebRequest();
+
+            if (webRequest.result == UnityWebRequest.Result.Success)
+            {
+                byte[] data = webRequest.downloadHandler.data;
+                _catalogData.LoadFromBytes(data);
+            }
+            else
+            {
+                QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
+                    "Failed to download catalog from '{0}': {1}",
+                    url, webRequest.error ?? "Unknown error"
+                );
+            }
         }
 
         private bool IsCacheValid(DateTime timestamp)
@@ -468,7 +559,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 {
                     DownloadRequest request = _pendingQueue.Dequeue();
 
-                    if (_activeDownloads.TryGetValue(request.ResourceId, out var existing))
+                    if (_activeDownloads.TryGetValue(request.ResourceId, out ActiveDownload existing))
                     {
                         existing.Handlers.Add(request.Handler);
                         continue;

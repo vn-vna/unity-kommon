@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
@@ -16,7 +17,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public abstract class StreamingAssetProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
-        IStreamingAssetProvider<ResourceType>
+        IStreamingAssetProvider<ResourceType>,
+        ICatalogAwareAsyncResourceProvider
         where ResourceType : UnityEngine.Object
     {
         public int Priority => priority;
@@ -42,6 +44,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             + "within this duration.")]
         private float requestTimeout = 15f;
 
+        [SerializeField]
+        [Tooltip("When enabled, loads a catalog JSON file to determine which resources this provider can serve.")]
+        private CatalogConfig _catalogConfig = new CatalogConfig();
+
+        private CatalogData _catalogData;
+
         /// <summary>
         /// Override to convert raw bytes into the target resource type.
         /// </summary>
@@ -49,6 +57,13 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public virtual void Initialize()
         {
+            _catalogData = new CatalogData();
+            if (_catalogConfig.UseCatalog
+                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            {
+                _catalogData.LoadFromStreamingAssets(_catalogConfig.CatalogFileName);
+            }
+
             string fullPath = BuildBasePath();
             if (!Directory.Exists(fullPath))
             {
@@ -135,6 +150,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             LoadFromFileCoroutine(fullPath, handler)
                 .DispatchOnDispatcher();
         }
+
+        public IReadOnlyCollection<string> CatalogedIds =>
+            _catalogData?.CatalogedIds ?? Array.Empty<string>();
+
+        public bool HasResource(IAsyncResourceId resourceId)
+        {
+            if (_catalogData != null && _catalogData.IsLoaded)
+            {
+                return _catalogData.HasResource(resourceId.ResourceId);
+            }
+
+            return true;
+        }
+
+        public DataType GetDataType(string resourceId) =>
+            _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
 
         private IEnumerator LoadFromFileCoroutine(
             string fullPath,

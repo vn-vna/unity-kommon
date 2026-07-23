@@ -21,12 +21,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private const string ResourcesFolder = "Assets/Resources";
         private const string ProviderAssetFolder = "Assets/Resources/AsyncResourceLoader";
 
-        private static readonly string[] TabNames = { "Manager Config", "Providers" };
+        private static readonly string[] TabNames = { "Manager Config", "Providers", "Catalog" };
+
+        private CatalogBuilderConfig _catalogConfig;
 
         private Vector2 _scrollPosition;
         private readonly Dictionary<string, int> _tabIndices = new Dictionary<string, int>();
         private readonly Dictionary<string, bool> _expandedTypes = new Dictionary<string, bool>();
-        private readonly Dictionary<string, ProviderCreationWizard> _providerWizards
+        private static readonly Dictionary<string, ProviderCreationWizard> s_providerWizards
             = new Dictionary<string, ProviderCreationWizard>();
 
         private AsyncResourceLoaderSettingsProvider(
@@ -131,7 +133,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         #region Manager Card
 
-        private sealed class ConcreteManagerInfo
+        public sealed class ConcreteManagerInfo
         {
             public Type ConcreteType;
             public Type ResourceType;
@@ -172,6 +174,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                         break;
                     case 1:
                         DrawProviders(info, config);
+                        break;
+                    case 2:
+                        EnsureCatalogConfig();
+                        DrawCatalogConfig();
                         break;
                 }
             }
@@ -391,7 +397,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         #region Template Provider Card
 
-        private sealed class ProviderTemplateEntry
+        public sealed class ProviderTemplateEntry
         {
             public ResourceProviderAttribute Attribute;
             public Type OpenGenericType;
@@ -453,7 +459,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 EditorGUILayout.LabelField(tmpl.Attribute.Description,
                     EditorStyles.wordWrappedMiniLabel);
 
-                if (_providerWizards.TryGetValue(key, out var wizard)
+                if (s_providerWizards.TryGetValue(key, out var wizard)
                     && wizard.Active)
                 {
                     GUILayout.Space(6);
@@ -466,7 +472,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private void DrawTemplateCardActions(ProviderTemplateEntry tmpl,
             ConcreteManagerInfo info, Type resourceType, string key)
         {
-            bool inWizard = _providerWizards.TryGetValue(key, out var wizard)
+            bool inWizard = s_providerWizards.TryGetValue(key, out var wizard)
                 && wizard.Active;
 
             if (tmpl.IsInArray)
@@ -511,7 +517,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 if (!inWizard && DrawSmallButton("Create",
                         $"Generate concrete subclass + ScriptableObject asset"))
                 {
-                    _providerWizards[key] = new ProviderCreationWizard
+                    s_providerWizards[key] = new ProviderCreationWizard
                     {
                         Active = true,
                         ClassName = $"{resourceType.Name}{tmpl.OpenGenericType.Name}",
@@ -588,7 +594,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         #region Detached Provider Card
 
-        private sealed class DetachedProviderInfo
+        public sealed class DetachedProviderInfo
         {
             public Type ConcreteType;
             public ScriptableObject Asset;
@@ -640,7 +646,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             public string FolderPath = "Assets/";
         }
 
-        private void DrawProviderCreationWizard(ProviderCreationWizard wizard,
+        private static void DrawProviderCreationWizard(ProviderCreationWizard wizard,
             string key, ProviderTemplateEntry tmpl, ConcreteManagerInfo info,
             Type resourceType)
         {
@@ -671,20 +677,20 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
                 if (GUILayout.Button("Cancel", GUILayout.Width(70)))
                 {
-                    _providerWizards.Remove(key);
+                    s_providerWizards.Remove(key);
                 }
 
                 if (GUILayout.Button("Generate", GUILayout.Width(80)))
                 {
                     GenerateProviderSubclass(wizard, tmpl, info, resourceType);
-                    _providerWizards.Remove(key);
+                    s_providerWizards.Remove(key);
                 }
             }
 
             EditorGUILayout.EndVertical();
         }
 
-        private void GenerateProviderSubclass(ProviderCreationWizard wizard,
+        private static void GenerateProviderSubclass(ProviderCreationWizard wizard,
             ProviderTemplateEntry tmpl, ConcreteManagerInfo info,
             Type resourceType)
         {
@@ -1154,6 +1160,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             var results = new List<ConcreteManagerInfo>();
             foreach (var entry in s_cachedManagerEntries)
             {
+                // Skip managers hosted by another settings provider
+                if (HasHostAttribute(entry.ConcreteType))
+                {
+                    continue;
+                }
+
                 string[] guids = AssetDatabase.FindAssets(
                     "t:" + entry.ConcreteType.Name);
                 var existingAssets = new List<ScriptableObject>();
@@ -1187,6 +1199,169 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             return results;
         }
+
+        #region Public API
+
+        public static bool HasHostAttribute(Type type)
+        {
+            return type.GetCustomAttribute<AsyncResourceManagerHostAttribute>() != null;
+        }
+
+        public static string GetHostSettingsPath(Type type)
+        {
+            return type.GetCustomAttribute<AsyncResourceManagerHostAttribute>()?.SettingsPath;
+        }
+
+        public static ConcreteManagerInfo FindManagerInfo(
+            Type concreteType,
+            AsyncResourceLoadingConfiguration config)
+        {
+            EnsureCaches();
+
+            foreach (var entry in s_cachedManagerEntries)
+            {
+                if (entry.ConcreteType == concreteType)
+                {
+                    return BuildManagerInfo(entry, config);
+                }
+            }
+
+            return null;
+        }
+
+        public static void DrawProviderSection(
+            ConcreteManagerInfo info,
+            AsyncResourceLoadingConfiguration config)
+        {
+            if (info == null || config == null) return;
+
+            ScriptableObject manager = info.AttachedAsset;
+            if (manager == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "No manager asset available for provider configuration.",
+                    MessageType.Info);
+                return;
+            }
+
+            Type resourceType = info.ResourceType;
+
+            var templates = FindProviderTemplates(manager, resourceType);
+            if (templates.Count > 0)
+            {
+                EditorGUILayout.LabelField("Built-in Templates",
+                    EditorStyles.miniBoldLabel);
+                GUILayout.Space(2);
+
+                foreach (var tmpl in templates)
+                {
+                    DrawTemplateProviderCardStatic(tmpl, info, resourceType);
+                    GUILayout.Space(4);
+                }
+
+                GUILayout.Space(4);
+            }
+
+            SerializedObject serializedManager = new SerializedObject(manager);
+            var providersProp = serializedManager.FindProperty("initialProviders");
+            if (providersProp != null)
+            {
+                EditorGUILayout.LabelField("Enabled Providers",
+                    EditorStyles.miniBoldLabel);
+                GUILayout.Space(2);
+
+                for (int i = 0; i < providersProp.arraySize; i++)
+                {
+                    var element = providersProp.GetArrayElementAtIndex(i);
+                    ScriptableObject provider = element.objectReferenceValue
+                        as ScriptableObject;
+                    if (provider == null) continue;
+
+                    DrawEnabledProviderCardStatic(
+                        provider, i, providersProp, serializedManager, manager);
+                    GUILayout.Space(4);
+                }
+            }
+
+            var unattached = FindUnattachedProviders(info, resourceType);
+            if (unattached.Count > 0)
+            {
+                GUILayout.Space(4);
+                EditorGUILayout.LabelField("Detached Providers",
+                    EditorStyles.miniBoldLabel);
+                GUILayout.Space(2);
+
+                foreach (var provInfo in unattached)
+                {
+                    DrawDetachedProviderCardStatic(provInfo, info, resourceType);
+                    GUILayout.Space(4);
+                }
+            }
+
+            GUILayout.Space(8);
+            Rect div = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(div, new Color(0.5f, 0.5f, 0.5f, 0.3f));
+            GUILayout.Space(4);
+
+            if (GUILayout.Button("+ New Custom Provider", GUILayout.Height(24)))
+            {
+                ScriptTemplateGenerator.CreatePluginScript(
+                    null, "Assets/",
+                    typeof(IAsyncResourceProvider<>).MakeGenericType(resourceType),
+                    ScriptTemplateGenerator.GenerationMode.InterfaceImplementation);
+            }
+        }
+
+        private static ConcreteManagerInfo BuildManagerInfo(
+            ManagerTypeEntry entry,
+            AsyncResourceLoadingConfiguration config)
+        {
+            SerializedObject serializedConfig = new SerializedObject(config);
+            var listProp = serializedConfig.FindProperty("managerAssets");
+            ScriptableObject attachedAsset = null;
+            if (listProp != null)
+            {
+                for (int i = 0; i < listProp.arraySize; i++)
+                {
+                    ScriptableObject manager = listProp
+                        .GetArrayElementAtIndex(i).objectReferenceValue
+                        as ScriptableObject;
+                    if (manager != null && manager.GetType() == entry.ConcreteType)
+                    {
+                        attachedAsset = manager;
+                        break;
+                    }
+                }
+            }
+
+            string[] guids = AssetDatabase.FindAssets(
+                "t:" + entry.ConcreteType.Name);
+            var existingAssets = new List<ScriptableObject>();
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                ScriptableObject asset = AssetDatabase.LoadAssetAtPath(
+                    path, entry.ConcreteType) as ScriptableObject;
+                if (asset != null) existingAssets.Add(asset);
+            }
+
+            if (attachedAsset != null && !existingAssets.Contains(attachedAsset))
+            {
+                existingAssets.Insert(0, attachedAsset);
+            }
+
+            return new ConcreteManagerInfo
+            {
+                ConcreteType = entry.ConcreteType,
+                ResourceType = entry.ResourceType,
+                DisplayName =
+                    $"{entry.ConcreteType.Name} ({entry.ResourceType.Name})",
+                ExistingAssets = existingAssets,
+                AttachedAsset = attachedAsset
+            };
+        }
+
+        #endregion
 
         private static List<ProviderTemplateEntry> FindProviderTemplates(
             ScriptableObject manager, Type resourceType)
@@ -1353,6 +1528,92 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
 
             return null;
+        }
+
+        #endregion
+
+        #region Catalog Config
+
+        private void EnsureCatalogConfig()
+        {
+            if (_catalogConfig == null)
+            {
+                _catalogConfig = CatalogBuilderConfig.GetOrCreate();
+            }
+        }
+
+        private void DrawCatalogConfig()
+        {
+            if (_catalogConfig == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "CatalogBuilderConfig asset not found. Create one via the Catalog Builder window.",
+                    MessageType.Warning);
+                return;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Catalog Builder Settings",
+                    EditorStyles.miniBoldLabel);
+                GUILayout.Space(4);
+
+                EditorGUI.BeginChangeCheck();
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Output Folder", GUILayout.Width(100));
+                    _catalogConfig.OutputFolder = EditorGUILayout.TextField(
+                        _catalogConfig.OutputFolder);
+                    if (GUILayout.Button("...", EditorStyles.miniButton,
+                            GUILayout.Width(28)))
+                    {
+                        string selected = EditorUtility.OpenFolderPanel(
+                            "Select Output Folder", "Assets", "");
+                        if (!string.IsNullOrEmpty(selected))
+                        {
+                            string dataPath = Application.dataPath;
+                            if (selected.StartsWith(dataPath))
+                            {
+                                _catalogConfig.OutputFolder = "Assets"
+                                    + selected.Substring(dataPath.Length)
+                                        .Replace('\\', '/');
+                            }
+                        }
+                    }
+                }
+
+                _catalogConfig.SubfolderName = EditorGUILayout.TextField(
+                    "Subfolder Name", _catalogConfig.SubfolderName);
+                _catalogConfig.CatalogFileName = EditorGUILayout.TextField(
+                    "Catalog File", _catalogConfig.CatalogFileName);
+
+                int newVersion = EditorGUILayout.IntField(
+                    "Version", _catalogConfig.Version);
+                if (newVersion != _catalogConfig.Version)
+                {
+                    _catalogConfig.Version = newVersion;
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    EditorUtility.SetDirty(_catalogConfig);
+                    AssetDatabase.SaveAssets();
+                }
+
+                GUILayout.Space(4);
+
+                EditorGUILayout.LabelField(
+                    $"Staged Entries: {_catalogConfig.Entries.Count}",
+                    EditorStyles.miniLabel);
+            }
+
+            GUILayout.Space(8);
+
+            if (GUILayout.Button("Open Catalog Builder Window", GUILayout.Height(30)))
+            {
+                CatalogBuilderWindow.Open();
+            }
         }
 
         #endregion
@@ -1534,7 +1795,209 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 })
                 .ToArray();
         }
+        #endregion
+
+        #region Static Card Drawers (for Public API)
+
+        private static void DrawTemplateProviderCardStatic(
+            ProviderTemplateEntry tmpl,
+            ConcreteManagerInfo info,
+            Type resourceType)
+        {
+            string key = info.ConcreteType.FullName + "::"
+                + tmpl.OpenGenericType.FullName;
+
+            bool inWizard = s_providerWizards.TryGetValue(key, out var wizard)
+                && wizard.Active;
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        tmpl.Attribute.DisplayName, EditorStyles.boldLabel);
+
+                    if (tmpl.Attribute.RequiredDefines != null)
+                    {
+                        string[] missing = tmpl.Attribute.RequiredDefines
+                            .Where(d => !PlayerSettings
+                                .GetScriptingDefineSymbolsForGroup(
+                                    EditorUserBuildSettings.selectedBuildTargetGroup)
+                                .Contains(d))
+                            .ToArray();
+
+                        if (missing.Length > 0)
+                        {
+                            GUIStyle defStyle = new GUIStyle(EditorStyles.miniLabel)
+                            {
+                                normal =
+                                {
+                                    textColor = new Color(0.9f, 0.6f, 0.1f)
+                                }
+                            };
+                            EditorGUILayout.LabelField(
+                                $"Requires: {string.Join(", ", missing)}",
+                                defStyle);
+
+                            EditorGUILayout.EndHorizontal();
+                            EditorGUILayout.LabelField(
+                                tmpl.Attribute.Description,
+                                EditorStyles.wordWrappedMiniLabel);
+                            return;
+                        }
+                    }
+
+                    GUILayout.FlexibleSpace();
+
+                    if (tmpl.IsInArray)
+                    {
+                        if (DrawSmallButton("Disable", "Remove from provider array"))
+                        {
+                            RemoveProviderFromArray(
+                                info.AttachedAsset, tmpl.ArrayIndex);
+                        }
+
+                        if (DrawSmallButton("Delete", "Delete asset from disk"))
+                        {
+                            DeleteProviderAsset(tmpl.ExistingAsset);
+                        }
+                    }
+                    else if (tmpl.ConcreteType != null
+                        && tmpl.ExistingAsset != null)
+                    {
+                        if (DrawSmallButton("Enable", "Add to provider array"))
+                        {
+                            AppendProviderToArray(
+                                info.AttachedAsset, tmpl.ExistingAsset);
+                        }
+
+                        if (DrawSmallButton("Delete", "Delete asset from disk"))
+                        {
+                            DeleteProviderAsset(tmpl.ExistingAsset);
+                        }
+                    }
+                    else
+                    {
+                        if (!inWizard && DrawSmallButton("Create",
+                                "Generate concrete subclass + SO asset"))
+                        {
+                            s_providerWizards[key] = new ProviderCreationWizard
+                            {
+                                Active = true,
+                                ClassName = $"{resourceType.Name}{tmpl.OpenGenericType.Name}",
+                                Namespace = EditorSettings.projectGenerationRootNamespace
+                                    ?? "Scripts",
+                                FolderPath = "Assets/"
+                            };
+                        }
+                    }
+                }
+
+                EditorGUILayout.LabelField(tmpl.Attribute.Description,
+                    EditorStyles.wordWrappedMiniLabel);
+
+                if (s_providerWizards.TryGetValue(key, out var activeWizard)
+                    && activeWizard.Active)
+                {
+                    GUILayout.Space(6);
+                    DrawProviderCreationWizard(
+                        activeWizard, key, tmpl, info, resourceType);
+                }
+            }
+        }
+
+        private static void DrawEnabledProviderCardStatic(
+            ScriptableObject provider, int index,
+            SerializedProperty providersProp,
+            SerializedObject serializedManager,
+            ScriptableObject manager)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(provider.name,
+                        EditorStyles.boldLabel);
+
+                    bool canMoveUp = index > 0;
+                    bool canMoveDown = index < providersProp.arraySize - 1;
+
+                    if (canMoveUp && DrawSmallButton("\u25B2", "Move up"))
+                    {
+                        providersProp.MoveArrayElement(index, index - 1);
+                        serializedManager.ApplyModifiedProperties();
+                        EditorUtility.SetDirty(manager);
+                        AssetDatabase.SaveAssets();
+                        return;
+                    }
+
+                    if (canMoveDown && DrawSmallButton("\u25BC", "Move down"))
+                    {
+                        providersProp.MoveArrayElement(index, index + 1);
+                        serializedManager.ApplyModifiedProperties();
+                        EditorUtility.SetDirty(manager);
+                        AssetDatabase.SaveAssets();
+                        return;
+                    }
+
+                    GUILayout.FlexibleSpace();
+
+                    if (DrawSmallButton("Disable", "Remove from array"))
+                    {
+                        RemoveProviderFromArray(manager, index);
+                        return;
+                    }
+
+                    if (DrawSmallButton("Delete", "Delete asset from disk"))
+                    {
+                        DeleteProviderAsset(provider);
+                        return;
+                    }
+                }
+
+                GUILayout.Space(2);
+                DrawInlineInspector(
+                    provider,
+                    $"{PascalCaseToSpaced(provider.name).ToUpperInvariant()} PROVIDER"
+                );
+            }
+        }
+
+        private static void DrawDetachedProviderCardStatic(
+            DetachedProviderInfo provInfo,
+            ConcreteManagerInfo info,
+            Type resourceType)
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(provInfo.Asset.name,
+                        EditorStyles.boldLabel);
+
+                    Color prevColor = GUI.color;
+                    GUI.color = new Color(0.6f, 0.6f, 0.6f);
+                    EditorGUILayout.LabelField(
+                        $"({provInfo.ConcreteType.Name})",
+                        EditorStyles.miniLabel);
+                    GUI.color = prevColor;
+
+                    GUILayout.FlexibleSpace();
+
+                    if (DrawSmallButton("Enable", "Add to provider array"))
+                    {
+                        AppendProviderToArray(info.AttachedAsset, provInfo.Asset);
+                    }
+
+                    if (DrawSmallButton("Delete", "Delete from disk"))
+                    {
+                        DeleteProviderAsset(provInfo.Asset);
+                    }
+                }
+            }
+        }
 
         #endregion
+
     }
 }

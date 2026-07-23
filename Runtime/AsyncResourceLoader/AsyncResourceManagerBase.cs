@@ -23,6 +23,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         private List<IAsyncResourceProvider<ResourceType>> _providers;
 
+        protected IReadOnlyList<IAsyncResourceProvider<ResourceType>> Providers
+        {
+            get
+            {
+                _providers ??= new List<IAsyncResourceProvider<ResourceType>>();
+                return _providers;
+            }
+        }
+
         public void Initialize(float timeout = float.MaxValue)
         {
             if (Status == ResourceManagerStatus.Initialized)
@@ -110,6 +119,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             Status = ResourceManagerStatus.Uninitialized;
 
             _providers = new List<IAsyncResourceProvider<ResourceType>>();
+
+            if (initialProviders == null)
+            {
+                return;
+            }
+
             foreach (ScriptableObject providerCandidate in initialProviders)
             {
                 if (providerCandidate is not IAsyncResourceProvider<ResourceType> provider)
@@ -150,6 +165,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             foreach (IAsyncResourceProvider<ResourceType> provider in _providers)
             {
                 if (provider == null) continue;
+
+                if (
+                    provider is ICatalogAwareAsyncResourceProvider aware && 
+                    !aware.HasResource(id)
+                )
+                {
+                    continue;
+                }
 
                 ResourceLoadingHandler<ResourceType> providerResult =
                     new ResourceLoadingHandler<ResourceType>();

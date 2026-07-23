@@ -1,0 +1,16 @@
+{
+    "name": "Com.Hapiga.Scheherazade.PuzzleLevels",
+    "rootNamespace": "Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels",
+    "references": [
+        "Com.Hapiga.Scheherazade.Common"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
