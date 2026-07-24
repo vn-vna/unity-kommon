@@ -1,0 +1,247 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Com.Hapiga.Scheherazade.Common.Archetype;
+using UnityEngine;
+
+namespace Com.Hapiga.Scheherazade.Common.Archetype.Editor
+{
+    internal static class ArchetypeCodeGenerator
+    {
+        public sealed class GenerationResult
+        {
+            public string FilePath;
+            public string FileName;
+            public string ArchetypeName;
+            public bool Written;
+            public bool Failed;
+            public string ErrorMessage;
+        }
+
+        public static List<GenerationResult> GenerateAll(
+            List<ArchetypeCacheEntry> entries,
+            ArchetypeSettings settings)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                return new List<GenerationResult>();
+            }
+
+            string folder = settings.FullGeneratedFolder;
+
+            // Group entries by (archetypeName, interfaceType, archetypeField)
+            Dictionary<string, ArchetypeGroup> groups
+                = new Dictionary<string, ArchetypeGroup>();
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                ArchetypeCacheEntry entry = entries[i];
+                string key = entry.archetypeName;
+
+                if (!groups.TryGetValue(key, out ArchetypeGroup group))
+                {
+                    group = new ArchetypeGroup
+                    {
+                        archetypeName = entry.archetypeName,
+                        archetypeField = entry.archetypeField,
+                        interfaceTypeFullName = entry.interfaceTypeFullName
+                    };
+                    groups[key] = group;
+                }
+
+                group.concreteTypeNames.Add(entry.concreteTypeFullName);
+            }
+
+            List<GenerationResult> results = new List<GenerationResult>();
+
+            foreach (KeyValuePair<string, ArchetypeGroup> kvp in groups)
+            {
+                GenerationResult result = GenerateOne(
+                    kvp.Value, folder, settings.namespaceOverride);
+                results.Add(result);
+            }
+
+            return results;
+        }
+
+        private static GenerationResult GenerateOne(
+            ArchetypeGroup group,
+            string folder,
+            string namespaceOverride)
+        {
+            GenerationResult result = new GenerationResult
+            {
+                ArchetypeName = group.archetypeName,
+                FileName = group.archetypeName + ".g.cs",
+                FilePath = folder + "/" + group.archetypeName + ".g.cs"
+            };
+
+            try
+            {
+                string content = GenerateClassSource(group, namespaceOverride);
+                bool changed = WriteIfChanged(result.FilePath, content);
+                result.Written = changed;
+            }
+            catch (Exception ex)
+            {
+                result.Failed = true;
+                result.ErrorMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        private static bool WriteIfChanged(string path, string newContent)
+        {
+            try
+            {
+                string dir = System.IO.Path.GetDirectoryName(path);
+                if (!System.IO.Directory.Exists(dir))
+                {
+                    System.IO.Directory.CreateDirectory(dir);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    $"[Archetype] Failed to create directory for '{path}'. "
+                    + $"Error: {ex.Message}"
+                );
+                return false;
+            }
+
+            string existing = null;
+            if (System.IO.File.Exists(path))
+            {
+                existing = System.IO.File.ReadAllText(path, Encoding.UTF8);
+            }
+
+            if (existing == newContent)
+            {
+                return false; // no change needed
+            }
+
+            System.IO.File.WriteAllText(path, newContent, Encoding.UTF8);
+            return true;
+        }
+
+        private static string GenerateClassSource(
+            ArchetypeGroup group,
+            string namespaceOverride)
+        {
+            // Resolve type names
+            string interfaceTypeName = ResolveTypeName(
+                group.interfaceTypeFullName);
+
+            List<string> concreteTypeNames
+                = new List<string>(group.concreteTypeNames.Count);
+
+            for (int i = 0; i < group.concreteTypeNames.Count; i++)
+            {
+                concreteTypeNames.Add(
+                    ResolveTypeName(group.concreteTypeNames[i]));
+            }
+
+            bool hasNamespace = !string.IsNullOrEmpty(namespaceOverride);
+            string indent = hasNamespace ? "    " : "";
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("// <auto-generated />");
+            sb.AppendLine("// Archetype: " + group.archetypeName);
+            sb.AppendLine("// Generated: " + DateTime.UtcNow.ToString("s"));
+            sb.AppendLine();
+
+            if (hasNamespace)
+            {
+                sb.AppendLine($"namespace {namespaceOverride}");
+                sb.AppendLine("{");
+            }
+
+            sb.AppendLine($"{indent}public static class {group.archetypeName}");
+            sb.AppendLine($"{indent}{{");
+
+            sb.AppendLine(
+                $"{indent}    public static {interfaceTypeName} "
+                + $"{group.archetypeField} {{ get; private set; }}");
+            sb.AppendLine();
+
+            // Register method
+            sb.AppendLine(
+                $"{indent}    public static void Register<T>(T instance) "
+                + $"where T : class, {interfaceTypeName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        switch (instance)");
+            sb.AppendLine($"{indent}        {{");
+
+            for (int i = 0; i < concreteTypeNames.Count; i++)
+            {
+                sb.AppendLine(
+                    $"{indent}            case {concreteTypeNames[i]} t: "
+                    + $"{group.archetypeField} = t; break;");
+            }
+
+            if (concreteTypeNames.Count == 0)
+            {
+                sb.AppendLine(
+                    $"{indent}            default: "
+                    + $"{group.archetypeField} = instance; break;");
+            }
+
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+
+            // Unregister method
+            sb.AppendLine(
+                $"{indent}    public static void Unregister<T>(T instance) "
+                + $"where T : class, {interfaceTypeName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        switch (instance)");
+            sb.AppendLine($"{indent}        {{");
+
+            for (int i = 0; i < concreteTypeNames.Count; i++)
+            {
+                sb.AppendLine(
+                    $"{indent}            case {concreteTypeNames[i]} t "
+                    + $"when ReferenceEquals(t, {group.archetypeField}): "
+                    + $"{group.archetypeField} = null; break;");
+            }
+
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine($"{indent}    }}");
+
+            sb.AppendLine($"{indent}}}");
+
+            if (hasNamespace)
+            {
+                sb.AppendLine("}");
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Returns the fully qualified type name for use in generated code.
+        /// Generated .g.cs files have no using directives, so we must use
+        /// full names to avoid CS0246 errors.
+        /// </summary>
+        private static string ResolveTypeName(string fullTypeName)
+        {
+            if (string.IsNullOrEmpty(fullTypeName))
+            {
+                return "object";
+            }
+
+            return fullTypeName;
+        }
+
+        private sealed class ArchetypeGroup
+        {
+            public string archetypeName;
+            public string archetypeField;
+            public string interfaceTypeFullName;
+            public List<string> concreteTypeNames = new List<string>();
+        }
+    }
+}

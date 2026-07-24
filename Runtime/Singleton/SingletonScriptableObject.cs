@@ -1,3 +1,5 @@
+using System;
+using Com.Hapiga.Scheherazade.Common.Archetype;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Singleton
@@ -36,7 +38,65 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
             if (_instance == null)
             {
                 _instance = this as T;
+                AutoRegisterArchetypes();
             }
+        }
+
+        protected virtual void OnDisable()
+        {
+            if (_instance == this)
+            {
+                AutoUnregisterArchetypes();
+                _instance = null;
+            }
+        }
+
+        protected void AutoRegisterArchetypes()
+        {
+            ArchetypeAttribute[] attributes;
+            try
+            {
+                object[] attrs = GetType().GetCustomAttributes(
+                    typeof(ArchetypeAttribute), inherit: false);
+                attributes = Array.ConvertAll(attrs, a => (ArchetypeAttribute)a);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (attributes == null || attributes.Length == 0)
+            {
+                return;
+            }
+
+            ArchetypeReflectionHelper.TryRegister(
+                this,
+                attributes);
+        }
+
+        protected void AutoUnregisterArchetypes()
+        {
+            ArchetypeAttribute[] attributes;
+            try
+            {
+                object[] attrs = GetType().GetCustomAttributes(
+                    typeof(ArchetypeAttribute), inherit: false);
+                attributes = Array.ConvertAll(attrs, a => (ArchetypeAttribute)a);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (attributes == null || attributes.Length == 0)
+            {
+                return;
+            }
+
+            ArchetypeReflectionHelper.TryUnregister(
+                this,
+                attributes);
         }
 
 #if UNITY_EDITOR
