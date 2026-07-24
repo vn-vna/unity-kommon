@@ -18,10 +18,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             "Assets/Resources";
         private const string ManagerAssetPath =
             "Assets/Resources/PuzzleLevelManager.asset";
-        private const string PreloaderConfigDefaultFolder =
-            "Assets/Resources";
-        private const string PreloaderConfigAssetName =
-            "PuzzleLevelPreloaderConfig";
         private const string OverrideConfigDefaultFolder =
             "Assets/Resources";
         private const string OverrideConfigAssetName =
@@ -30,7 +26,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             "Assets/Resources";
 
         private static readonly string[] TabNames =
-            { "Manager", "Providers", "Preloader", "Overrides" };
+            { "Manager", "Providers", "Overrides" };
 
         private AsyncResourceLoadingConfiguration _config;
         private AsyncResourceLoaderSettingsProvider.ConcreteManagerInfo _managerInfo;
@@ -102,9 +98,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                         DrawProvidersTab();
                         break;
                     case 2:
-                        DrawPreloaderTab();
-                        break;
-                    case 3:
                         DrawOverridesTab();
                         break;
                 }
@@ -188,10 +181,21 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 return;
             }
 
-            DrawInlineInspector(
-                _managerInfo.AttachedAsset,
-                "MANAGER CONFIGURATION"
-            );
+            if (!_cachedEditors.TryGetValue(
+                    _managerInfo.AttachedAsset, out UnityEditor.Editor editor)
+                || editor == null)
+            {
+                editor = UnityEditor.Editor.CreateEditor(
+                    _managerInfo.AttachedAsset);
+                _cachedEditors[_managerInfo.AttachedAsset] = editor;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "MANAGER CONFIGURATION", EditorStyles.miniBoldLabel);
+                editor.OnInspectorGUI();
+            }
         }
 
         private void DrawCreateManagerSection()
@@ -694,214 +698,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         #endregion
 
-        #region Preloader Tab
-
-        private void DrawPreloaderTab()
-        {
-            bool hasManager = _managerInfo != null
-                && _managerInfo.IsAttached;
-
-            if (!hasManager)
-            {
-                EditorGUILayout.HelpBox(
-                    "Create a PuzzleLevelManager in the Manager tab "
-                    + "before configuring the preloader.",
-                    MessageType.Info);
-                return;
-            }
-
-            PuzzleLevelPreloaderConfig currentConfig
-                = GetManagerConfigValue<PuzzleLevelPreloaderConfig>(
-                    "_preloaderConfig");
-
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField(
-                    "Preloader Configuration",
-                    EditorStyles.miniBoldLabel);
-                GUILayout.Space(4);
-
-                EditorGUI.BeginChangeCheck();
-                PuzzleLevelPreloaderConfig newConfig
-                    = (PuzzleLevelPreloaderConfig)EditorGUILayout.ObjectField(
-                        "Config Asset",
-                        currentConfig,
-                        typeof(PuzzleLevelPreloaderConfig),
-                        false);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    SetManagerConfigValue("_preloaderConfig", newConfig);
-                    currentConfig = newConfig;
-                }
-
-                GUILayout.Space(4);
-
-                EditorGUI.BeginDisabledGroup(EditorApplication.isCompiling);
-
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    if (currentConfig == null)
-                    {
-                        if (GUILayout.Button(
-                                "Create Preloader Config",
-                                GUILayout.Height(30)))
-                        {
-                            CreateAndBindPreloaderConfig();
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        if (GUILayout.Button(
-                                "Reveal in Project",
-                                GUILayout.Width(130), GUILayout.Height(24)))
-                        {
-                            EditorGUIUtility.PingObject(currentConfig);
-                        }
-
-                        GUILayout.FlexibleSpace();
-
-                        if (GUILayout.Button(
-                                "Unbind",
-                                GUILayout.Width(60), GUILayout.Height(24)))
-                        {
-                            SetManagerConfigValue(
-                                "_preloaderConfig", null);
-                            currentConfig = null;
-                        }
-                    }
-                }
-
-                EditorGUI.EndDisabledGroup();
-            }
-
-            if (currentConfig == null)
-            {
-                EditorGUILayout.HelpBox(
-                    "No preloader configuration assigned. "
-                    + "Create one to configure preloading behavior.",
-                    MessageType.Info);
-                return;
-            }
-
-            GUILayout.Space(8);
-
-            DrawPreloaderConfigFields(currentConfig);
-
-            GUILayout.Space(8);
-
-            DrawRuntimeSetupSection(currentConfig);
-        }
-
-        private void CreateAndBindPreloaderConfig()
-        {
-            string filePath = EditorUtility.SaveFilePanelInProject(
-                "Create Preloader Config",
-                PreloaderConfigAssetName,
-                "asset",
-                "Choose a folder for the preloader configuration.",
-                PreloaderConfigDefaultFolder);
-
-            if (string.IsNullOrEmpty(filePath))
-            {
-                return;
-            }
-
-            PuzzleLevelPreloaderConfig config
-                = ScriptableObject.CreateInstance<
-                    PuzzleLevelPreloaderConfig>();
-            AssetDatabase.CreateAsset(config, filePath);
-
-            SetManagerConfigValue("_preloaderConfig", config);
-
-            AssetDatabase.SaveAssets();
-
-            Selection.activeObject = config;
-            EditorGUIUtility.PingObject(config);
-
-            Debug.Log(
-                $"[PuzzleLevelSettings] Created preloader config at "
-                + $"'{filePath}'.");
-        }
-
-        private static void DrawRuntimeSetupSection(
-            PuzzleLevelPreloaderConfig currentConfig)
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField(
-                    "Runtime Setup",
-                    EditorStyles.miniBoldLabel);
-
-                EditorGUILayout.HelpBox(
-                    "The preloader is automatically created at startup "
-                    + "using the config bound to this manager. You can "
-                    + "also pre-create one in the current scene for "
-                    + "testing.",
-                    MessageType.Info);
-
-                GUILayout.Space(4);
-
-                PuzzleLevelPreloaderSetup existingSetup
-                    = Object.FindObjectOfType<
-                        PuzzleLevelPreloaderSetup>();
-
-                if (existingSetup != null)
-                {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField(
-                            "Scene Setup:",
-                            GUILayout.Width(80));
-                        EditorGUILayout.ObjectField(
-                            existingSetup,
-                            typeof(PuzzleLevelPreloaderSetup),
-                            true);
-                    }
-                }
-                else
-                {
-                    EditorGUI.BeginDisabledGroup(
-                        currentConfig == null
-                        || Application.isPlaying
-                        || EditorApplication.isCompiling);
-
-                    if (GUILayout.Button(
-                            "Add Preloader Setup to Scene",
-                            GUILayout.Height(26)))
-                    {
-                        AddPreloaderSetupToScene(currentConfig);
-                    }
-
-                    EditorGUI.EndDisabledGroup();
-                }
-            }
-        }
-
-        private static void AddPreloaderSetupToScene(
-            PuzzleLevelPreloaderConfig config)
-        {
-            GameObject go = new GameObject("[PuzzleLevelPreloaderSetup]");
-            PuzzleLevelPreloaderSetup setup
-                = go.AddComponent<PuzzleLevelPreloaderSetup>();
-
-            if (config != null)
-            {
-                SerializedObject serializedSetup
-                    = new SerializedObject(setup);
-                SerializedProperty configProp
-                    = serializedSetup.FindProperty("_config");
-                configProp.objectReferenceValue = config;
-                serializedSetup.ApplyModifiedProperties();
-            }
-
-            Selection.activeGameObject = go;
-            EditorGUIUtility.PingObject(go);
-        }
-
-        #endregion
-
         #region Overrides Tab
 
         private void DrawOverridesTab()
@@ -1157,27 +953,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             }
         }
 
-        private void DrawPreloaderConfigFields(
-            PuzzleLevelPreloaderConfig config)
-        {
-            if (config == null) return;
-
-            using (SerializedObject so = new SerializedObject(config))
-            {
-                so.Update();
-
-                DrawConfigIntField(so, "_lookaheadCount", "Lookahead Count");
-                DrawConfigIntField(so, "_maxCachedLevels", "Max Cached Levels");
-                DrawConfigEnumField(so, "_mode", "Trigger Mode");
-                DrawConfigFloatField(so, "_pollingInterval", "Polling Interval (s)");
-                DrawConfigIntField(so, "_burstLoadLimit", "Burst Load Limit");
-                DrawConfigFloatField(so, "_retryDelay", "Retry Delay (s)");
-                DrawConfigIntField(so, "_maxConcurrentFetch", "Max Concurrent Fetch");
-
-                so.ApplyModifiedProperties();
-            }
-        }
-
         private void DrawOverrideEntriesList(
             PuzzleLevelOverrideConfig config)
         {
@@ -1282,23 +1057,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             if (!Mathf.Approximately(value, prop.floatValue))
             {
                 prop.floatValue = value;
-            }
-        }
-
-        private static void DrawConfigEnumField(
-            SerializedObject so, string name, string label)
-        {
-            SerializedProperty prop = so.FindProperty(name);
-            if (prop == null) return;
-
-            int currentValue = prop.intValue;
-            var enumValue = (PreloadTriggerMode)currentValue;
-            var newValue = (PreloadTriggerMode)EditorGUILayout.EnumFlagsField(
-                label, enumValue);
-            int newIntValue = (int)(object)newValue;
-            if (newIntValue != prop.intValue)
-            {
-                prop.intValue = newIntValue;
             }
         }
 
