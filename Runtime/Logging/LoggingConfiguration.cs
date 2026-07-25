@@ -2,6 +2,13 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Logging
 {
+    public enum LogModificationBehavior
+    {
+        Default,
+        WarningAsError,
+        ErrorAsWarning
+    }
+
     [CreateAssetMenu(fileName = "LoggingConfiguration", menuName = "Scheherazade/Logging/Logging Configuration")]
     public class LoggingConfiguration
         : ScriptableObject
@@ -13,6 +20,6 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
         public Color criticalColor = Color.magenta;
 
         public LogLevel minimumLogLevel = LogLevel.Debug;
-        public bool forceUsingWarningAsError = false;
+        public LogModificationBehavior modificationBehavior = LogModificationBehavior.Default;
     }
 }

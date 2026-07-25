@@ -46,18 +46,22 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
         [HideInCallstack]
         private void LogMessage(string message, string tag = null, LogLevel level = LogLevel.Info)
         {
-            string color = "";
-            string et = "";
-
+            string msg;
 #if UNITY_EDITOR
-            color = $"<color=#{ColorUtility.ToHtmlStringRGBA(GetDebugColor(level)).ToLower()}>";
-            et = "</color>";
-#endif
-            string msg = string.Format(
-                "{0}[{1}]{2} {3}",
-                color, tag, et, message
+            string color = $"<color=#{ColorUtility.ToHtmlStringRGBA(GetDebugColor(level)).ToLower()}>";
+            msg = string.Format(
+                "{0}[{1}]</color> {2}",
+                color, tag, message
             );
-            switch (level)
+#else
+            string severity = GetSeverityPrefix(level);
+            msg = string.Format(
+                "{0}[{1}] {2}",
+                severity, tag, message
+            );
+#endif
+            LogLevel effectiveLevel = GetEffectiveLogLevel(level);
+            switch (effectiveLevel)
             {
                 case LogLevel.Debug:
                 case LogLevel.Info:
@@ -68,16 +72,41 @@ namespace Com.Hapiga.Scheherazade.Common.Logging
                     break;
                 case LogLevel.Error:
                 case LogLevel.Critical:
-                    if (Configuration.forceUsingWarningAsError)
-                    {
-                        UnityEngine.Debug.LogWarning(msg);
-                    }
-                    else
-                    {
-                        UnityEngine.Debug.LogError(msg);
-                    }
+                    UnityEngine.Debug.LogError(msg);
                     break;
             }
+        }
+
+        private static string GetSeverityPrefix(LogLevel level)
+        {
+            return level switch
+            {
+                LogLevel.Debug => "[DEBUG]",
+                LogLevel.Info => "[INFO]",
+                LogLevel.Warning => "[WARN]",
+                LogLevel.Error => "[ERROR]",
+                LogLevel.Critical => "[CRITICAL]",
+                _ => "[LOG]",
+            };
+        }
+
+        private LogLevel GetEffectiveLogLevel(LogLevel level)
+        {
+            if (!Configuration)
+            {
+                return level;
+            }
+
+            switch (Configuration.modificationBehavior)
+            {
+                case LogModificationBehavior.WarningAsError:
+                    if (level == LogLevel.Warning) return LogLevel.Error;
+                    break;
+                case LogModificationBehavior.ErrorAsWarning:
+                    if (level == LogLevel.Error || level == LogLevel.Critical) return LogLevel.Warning;
+                    break;
+            }
+            return level;
         }
 
 

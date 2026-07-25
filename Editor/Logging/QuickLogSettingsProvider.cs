@@ -12,7 +12,7 @@ namespace Com.Hapiga.Scheherazade.Common.Logging.Editor
         private const string SettingsAssetPath = "Assets/Resources/LoggingConfiguration.asset";
         private const string ResourcesFolder = "Assets/Resources";
         private const string HeaderLabel = "Quick Log Settings";
-        private const string LogLevelsSectionLabel = "Log Levels";
+        private const string CustomizedLogSectionLabel = "Customized Log";
         private const string ColorsSectionLabel = "Colors";
 
         private static readonly ColorPalette[] Palettes = new ColorPalette[]
@@ -54,8 +54,6 @@ namespace Com.Hapiga.Scheherazade.Common.Logging.Editor
 
         #region Private Fields
         private SerializedObject _serializedSettings;
-        private bool _logLevelsSectionExpanded = true;
-        private bool _colorsSectionExpanded = true;
         private int _selectedPaletteIndex = -1;
         #endregion
 
@@ -161,42 +159,29 @@ namespace Com.Hapiga.Scheherazade.Common.Logging.Editor
 
         private void DrawLogLevelsSection()
         {
-            _logLevelsSectionExpanded = EditorGUILayout.Foldout(
-                _logLevelsSectionExpanded,
-                LogLevelsSectionLabel,
-                true);
-
-            if (!_logLevelsSectionExpanded)
-                return;
-
-            EditorGUI.indentLevel++;
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(CustomizedLogSectionLabel, EditorStyles.boldLabel);
+            EditorGUILayout.Space(4);
             DrawProperty("minimumLogLevel", "Minimum Log Level");
-            DrawProperty("forceUsingWarningAsError", "Force Warnings as Errors");
-            EditorGUI.indentLevel--;
+            DrawProperty("modificationBehavior", "Custom Behaviour");
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawColorsSection()
         {
-            _colorsSectionExpanded = EditorGUILayout.Foldout(
-                _colorsSectionExpanded,
-                ColorsSectionLabel,
-                true);
-
-            if (!_colorsSectionExpanded)
-                return;
-
-            EditorGUI.indentLevel++;
-
-            DrawPaletteSelector();
+            EditorGUILayout.Space(6);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(ColorsSectionLabel, EditorStyles.boldLabel);
             EditorGUILayout.Space(4);
-
+            DrawPaletteSelector();
+            EditorGUILayout.Space(2);
+            EditorGUILayout.LabelField("Custom Colors", EditorStyles.miniBoldLabel);
             DrawColorProperty("debugColor", "Debug");
             DrawColorProperty("infoColor", "Info");
             DrawColorProperty("warningColor", "Warning");
             DrawColorProperty("errorColor", "Error");
             DrawColorProperty("criticalColor", "Critical");
-
-            EditorGUI.indentLevel--;
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawPaletteSelector()
