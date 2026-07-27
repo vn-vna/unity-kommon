@@ -21,6 +21,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
         private const string ProviderAssetFolder =
             "Assets/Resources/Integration";
 
+        private const string TabPrefKey =
+            "DataSyncSettingsProvider_SelectedTab";
+
+        private const string AdapterSubTabPrefKey =
+            "DataSyncSettingsProvider_AdapterSubTab";
+
         private static readonly string[] TabNames =
             { "Director", "Translators", "Adapters", "Preview" };
 
@@ -44,7 +50,11 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
             string path,
             SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords) { }
+        ) : base(path, scopes, keywords)
+        {
+            _selectedTabIndex = EditorPrefs.GetInt(TabPrefKey, 0);
+            _adapterSubTabIndex = EditorPrefs.GetInt(AdapterSubTabPrefKey, 0);
+        }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
@@ -78,9 +88,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
             DrawStatusBar(settings);
 
             EditorGUILayout.Space();
-            _selectedTabIndex = GUILayout.Toolbar(
+            int newTab = GUILayout.Toolbar(
                 _selectedTabIndex, TabNames
             );
+            if (newTab != _selectedTabIndex)
+            {
+                _selectedTabIndex = newTab;
+                EditorPrefs.SetInt(TabPrefKey, _selectedTabIndex);
+            }
             EditorGUILayout.Space();
 
             Rect dividerRect = EditorGUILayout.GetControlRect(
@@ -111,6 +126,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
         public override void OnDeactivate()
         {
             base.OnDeactivate();
+            EditorPrefs.SetInt(TabPrefKey, _selectedTabIndex);
+            EditorPrefs.SetInt(AdapterSubTabPrefKey, _adapterSubTabIndex);
             DestroyInlineEditors();
             _cachedTranslatorTypes = null;
             _cachedAdapterTypes = null;
@@ -361,9 +378,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
 
         private void DrawAdaptersTab()
         {
-            _adapterSubTabIndex = GUILayout.Toolbar(
+            int newAdapterSubTab = GUILayout.Toolbar(
                 _adapterSubTabIndex, AdapterSubTabNames
             );
+            if (newAdapterSubTab != _adapterSubTabIndex)
+            {
+                _adapterSubTabIndex = newAdapterSubTab;
+                EditorPrefs.SetInt(AdapterSubTabPrefKey, _adapterSubTabIndex);
+            }
             EditorGUILayout.Space();
 
             switch (_adapterSubTabIndex)

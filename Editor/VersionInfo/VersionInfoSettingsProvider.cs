@@ -412,23 +412,52 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 return;
             }
 
-            DrawConsumerRow(
-                "Default Canvas Consumer",
-                typeof(DefaultCanvasConsumer),
-                consumersProp
-            );
+            List<Type> consumerTypes = GetConsumerTypes();
 
-            GUILayout.Space(4);
+            if (consumerTypes.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "No IVersionInfoConsumer implementations found.",
+                    MessageType.Info
+                );
+                return;
+            }
 
-            DrawConsumerRow(
-                "Prefab Consumer",
-                typeof(PrefabVersionInfoConsumer),
-                consumersProp
-            );
+            foreach (Type type in consumerTypes)
+            {
+                DrawConsumerRow(type.Name, type, consumersProp);
+                GUILayout.Space(4);
+            }
 
             DrawCreateCustomButton(
                 "New Custom Consumer",
                 typeof(IVersionInfoConsumer));
+        }
+
+        private List<Type> GetConsumerTypes()
+        {
+            if (_cachedConsumerTypes != null)
+            {
+                return _cachedConsumerTypes;
+            }
+
+            _cachedConsumerTypes = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .SelectMany(a =>
+                {
+                    try { return a.GetTypes(); }
+                    catch { return Type.EmptyTypes; }
+                })
+                .Where(t =>
+                    !t.IsAbstract
+                    && !t.IsInterface
+                    && !t.IsGenericTypeDefinition
+                    && typeof(IVersionInfoConsumer).IsAssignableFrom(t)
+                    && typeof(ScriptableObject).IsAssignableFrom(t))
+                .OrderBy(t => t.Name)
+                .ToList();
+
+            return _cachedConsumerTypes;
         }
 
         private void DrawConsumerRow(
@@ -583,6 +612,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
 
         #region Tab — Placeholders
         private List<Type> _cachedPlaceholderProviderTypes;
+
+        private List<Type> _cachedConsumerTypes;
 
         private void DrawPlaceholdersTab(VersionInfoConfiguration settings)
         {

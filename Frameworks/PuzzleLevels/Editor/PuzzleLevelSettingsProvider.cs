@@ -25,6 +25,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private const string ProviderDefaultFolder =
             "Assets/Resources";
 
+        private const string TabPrefKey =
+            "PuzzleLevelSettingsProvider_TabIndex";
+
         private static readonly string[] TabNames =
             { "Manager", "Providers", "Overrides" };
 
@@ -45,7 +48,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private PuzzleLevelSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
-        ) : base(path, scopes, keywords) { }
+        ) : base(path, scopes, keywords)
+        {
+            _tabIndex = EditorPrefs.GetInt(TabPrefKey, 0);
+        }
 
         [SettingsProvider]
         public static SettingsProvider CreateSettingsProvider()
@@ -79,7 +85,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 DrawManagerCardHeader();
                 GUILayout.Space(4);
 
-                _tabIndex = GUILayout.Toolbar(_tabIndex, TabNames);
+                int newTab = GUILayout.Toolbar(_tabIndex, TabNames);
+                if (newTab != _tabIndex)
+                {
+                    _tabIndex = newTab;
+                    EditorPrefs.SetInt(TabPrefKey, _tabIndex);
+                }
                 GUILayout.Space(4);
 
                 Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);

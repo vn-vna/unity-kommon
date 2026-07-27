@@ -23,8 +23,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private static float ClampH(float h) => Mathf.Min(MaxH, Mathf.Max(130f, h));
 
-
-
         public static PopupWindowContent CreateSceneSetDropdown(
             NoBuildSettings s,
             Action<SceneSet> onSet,
@@ -56,6 +54,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             Action<BuildExecutor.DeviceOption, string> onSelected)
         {
             return new DeviceSelectContent(onSelected);
+        }
+
+        public static PopupWindowContent CreateBuildConfirmPopup(
+            BuildProfile profile, NoBuildSettings settings,
+            Action onBuild,
+            Action<BuildExecutor.DeviceOption, string> onBuildAndRun)
+        {
+            return new BuildConfirmContent(profile, settings, onBuild, onBuildAndRun);
         }
 
         // ══════════════════════════════════════════════════
@@ -192,7 +198,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     editorWindow.Close();
                 }
             }
-
         }
 
         // ══════════════════════════════════════════════════
@@ -547,6 +552,101 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     }
                     EditorGUILayout.EndHorizontal();
                 }
+            }
+        }
+
+        // ══════════════════════════════════════════════════
+        // ── Build Confirm Popup
+        // ══════════════════════════════════════════════════
+
+        private sealed class BuildConfirmContent : PopupWindowContent
+        {
+            private readonly BuildProfile _profile;
+            private readonly NoBuildSettings _settings;
+            private readonly Action _onBuild;
+            private readonly Action<BuildExecutor.DeviceOption, string> _onBuildAndRun;
+
+            public BuildConfirmContent(
+                BuildProfile profile, NoBuildSettings settings,
+                Action onBuild,
+                Action<BuildExecutor.DeviceOption, string> onBuildAndRun)
+            {
+                _profile = profile;
+                _settings = settings;
+                _onBuild = onBuild;
+                _onBuildAndRun = onBuildAndRun;
+            }
+
+            public override Vector2 GetWindowSize()
+            {
+                bool hasRun = _profile.buildConfiguration.platform
+                    == BuildTarget.Android;
+                return new Vector2(340f, hasRun ? 220f : 170f);
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                EditorGuiLayout.DrawHeaderBox(
+                    "Build", "Confirm build settings.");
+                GUILayout.Space(4);
+
+                EditorGUILayout.LabelField(
+                    "Profile", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    "  " + _profile.profileName,
+                    EditorStyles.wordWrappedLabel);
+                GUILayout.Space(4);
+
+                string folder = BuildNameResolver.Resolve(
+                    _profile.buildFolder?.template ?? "",
+                    _profile, _settings);
+                string fileName = BuildNameResolver.Resolve(
+                    _profile.buildNameTemplate?.template
+                    ?? "{app-version}", _profile, _settings);
+
+                EditorGUILayout.LabelField(
+                    "Output", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    "  " + folder + "/" + fileName,
+                    EditorStyles.miniLabel);
+                GUILayout.Space(8);
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                GUI.backgroundColor =
+                    new Color(0.3f, 0.7f, 0.3f);
+                if (GUILayout.Button(
+                        "  Build  ", GUILayout.Height(28)))
+                {
+                    _onBuild?.Invoke();
+                    editorWindow.Close();
+                }
+                GUI.backgroundColor = Color.white;
+
+                if (_profile.buildConfiguration.platform
+                    == BuildTarget.Android)
+                {
+                    GUILayout.Space(6);
+                    GUI.backgroundColor =
+                        new Color(0.3f, 0.5f, 0.9f);
+                    if (GUILayout.Button(
+                            "Build && Run",
+                            GUILayout.Height(28)))
+                    {
+                        Rect runBtnRect =
+                            GUILayoutUtility.GetLastRect();
+                        runBtnRect.position +=
+                            editorWindow.position.position;
+                        PopupWindow.Show(
+                            runBtnRect,
+                            CreateDeviceSelectPopup(
+                                _onBuildAndRun));
+                        editorWindow.Close();
+                    }
+                    GUI.backgroundColor = Color.white;
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
             }
         }
 

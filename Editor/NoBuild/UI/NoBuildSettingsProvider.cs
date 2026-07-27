@@ -69,9 +69,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             };
             _badgeStyle = new GUIStyle(GUI.skin.box)
             {
-                fixedHeight = 18, fixedWidth = 22,
-                alignment = TextAnchor.MiddleCenter, fontSize = 10,
-                padding = new RectOffset(), margin = new RectOffset(2, 4, 2, 2)
+                fixedHeight = 18,
+                fixedWidth = 22,
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 10,
+                padding = new RectOffset(),
+                margin = new RectOffset(2, 4, 2, 2)
             };
 
             _tabStyleInactive = new GUIStyle(GUI.skin.button)
@@ -206,17 +209,21 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             switch (_tab)
             {
-                case 0: DrawSidebarList(s.sceneSets.Select(x => x.setName).ToList(),
+                case 0:
+                    DrawSidebarList(s.sceneSets.Select(x => x.setName).ToList(),
                     s.activeSceneSetIndex, ref _selSet); break;
-                case 1: DrawSidebarList(s.scriptDefinitionSets.Select(x => x.setName).ToList(),
+                case 1:
+                    DrawSidebarList(s.scriptDefinitionSets.Select(x => x.setName).ToList(),
                     s.activeScriptDefinitionSetIndex, ref _selDef); break;
-                case 2: DrawSidebarList(s.buildProfiles.Select(x =>
+                case 2:
+                    DrawSidebarList(s.buildProfiles.Select(x =>
                     x.profileName).ToList(),
                     -1, ref _selBuild,
                     s.buildProfiles.Select(x =>
                         (BuildTarget?)x.buildConfiguration.platform)
                          .ToList()); break;
-                case 4: DrawSidebarList(
+                case 4:
+                    DrawSidebarList(
                     s.flagDefinitions.Select((x, i) =>
                         FlagDisplayName(x, i, s)).ToList(),
                     -1, ref _selFlag); break;
@@ -270,7 +277,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 if (isAct)
                 {
-                    bgColor    = new Color(0.15f, 0.5f, 0.15f, 0.45f);
+                    bgColor = new Color(0.15f, 0.5f, 0.15f, 0.45f);
                     borderColor = isSel
                         ? new Color(0.35f, 0.65f, 0.9f, 1f)
                         : new Color(0.2f, 0.55f, 0.2f, 0.7f);
@@ -278,13 +285,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 }
                 else if (isSel)
                 {
-                    bgColor    = new Color(0.22f, 0.42f, 0.7f, 0.35f);
+                    bgColor = new Color(0.22f, 0.42f, 0.7f, 0.35f);
                     borderColor = new Color(0.35f, 0.55f, 0.85f, 0.9f);
                     borderW = 2f;
                 }
                 else
                 {
-                    bgColor    = new Color(0.25f, 0.25f, 0.25f, 0.15f);
+                    bgColor = new Color(0.25f, 0.25f, 0.25f, 0.15f);
                     borderColor = new Color(0.4f, 0.4f, 0.4f, 0.4f);
                     borderW = 1f;
                 }
@@ -341,22 +348,26 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             switch (_tab)
             {
-                case 0: _sceneSets.arraySize++; _so.ApplyModifiedProperties();
+                case 0:
+                    _sceneSets.arraySize++; _so.ApplyModifiedProperties();
                     _selSet = _sceneSets.arraySize - 1;
                     _sceneSets.GetArrayElementAtIndex(_selSet)
                         .FindPropertyRelative("setName").stringValue = "Scene Set " + _sceneSets.arraySize;
                     break;
-                case 1: _defineSets.arraySize++; _so.ApplyModifiedProperties();
+                case 1:
+                    _defineSets.arraySize++; _so.ApplyModifiedProperties();
                     _selDef = _defineSets.arraySize - 1;
                     _defineSets.GetArrayElementAtIndex(_selDef)
                         .FindPropertyRelative("setName").stringValue = "Define Set " + _defineSets.arraySize;
                     break;
-                case 2: _buildProfiles.arraySize++; _so.ApplyModifiedProperties();
+                case 2:
+                    _buildProfiles.arraySize++; _so.ApplyModifiedProperties();
                     _selBuild = _buildProfiles.arraySize - 1;
                     _buildProfiles.GetArrayElementAtIndex(_selBuild)
                         .FindPropertyRelative("profileName").stringValue = "Build Profile " + _buildProfiles.arraySize;
                     break;
-                case 4: _flagDefs.arraySize++; _so.ApplyModifiedProperties();
+                case 4:
+                    _flagDefs.arraySize++; _so.ApplyModifiedProperties();
                     _selFlag = _flagDefs.arraySize - 1;
                     _flagDefs.GetArrayElementAtIndex(_selFlag)
                         .FindPropertyRelative("name").stringValue = "Flag " + _flagDefs.arraySize;
@@ -459,11 +470,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             // Clone BuildNameTemplates
             var cloneNameTpl = new BuildNameTemplate
-            { template = source.buildNameTemplate?.template
-                ?? "" };
+            {
+                template = source.buildNameTemplate?.template
+                ?? ""
+            };
             var cloneFolder = new BuildNameTemplate
-            { template = source.buildFolder?.template
-                ?? "" };
+            {
+                template = source.buildFolder?.template
+                ?? ""
+            };
 
             var clone = new BuildProfile
             {
@@ -561,11 +576,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             { s.activeSceneSetIndex = _selSet; EditorUtility.SetDirty(s); }
             GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
-            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
-                { _sceneSets.DeleteArrayElementAtIndex(_selSet); _so.ApplyModifiedProperties();
-                  if (s.activeSceneSetIndex == _selSet) s.activeSceneSetIndex = -1;
-                  if (s.activeSceneSetIndex > _selSet) s.activeSceneSetIndex--;
-                  _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return; } }
+            {
+                if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                {
+                    _sceneSets.DeleteArrayElementAtIndex(_selSet); _so.ApplyModifiedProperties();
+                    if (s.activeSceneSetIndex == _selSet) s.activeSceneSetIndex = -1;
+                    if (s.activeSceneSetIndex > _selSet) s.activeSceneSetIndex--;
+                    _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return;
+                }
+            }
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
@@ -623,7 +642,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 nc.FindPropertyRelative("name").stringValue = "Combo " + combosP.arraySize;
                 nc.FindPropertyRelative("enabled").boolValue = true;
             }
-            }
+        }
 
         private void DrawSceneReorderableList(SerializedProperty scenesP)
         {
@@ -780,16 +799,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUI.contentColor = oldC; GUILayout.FlexibleSpace();
             if (!active && GUILayout.Button("Apply", GUILayout.Width(60)))
-            { s.activeScriptDefinitionSetIndex = _selDef; EditorUtility.SetDirty(s);
+            {
+                s.activeScriptDefinitionSetIndex = _selDef; EditorUtility.SetDirty(s);
                 _so.ApplyModifiedProperties();
-                ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]); }
+                ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]);
+            }
             GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
-            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
-                { _defineSets.DeleteArrayElementAtIndex(_selDef); _so.ApplyModifiedProperties();
-                  if (s.activeScriptDefinitionSetIndex == _selDef) s.activeScriptDefinitionSetIndex = -1;
-                  if (s.activeScriptDefinitionSetIndex > _selDef) s.activeScriptDefinitionSetIndex--;
-                  _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return; } }
+            {
+                if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                {
+                    _defineSets.DeleteArrayElementAtIndex(_selDef); _so.ApplyModifiedProperties();
+                    if (s.activeScriptDefinitionSetIndex == _selDef) s.activeScriptDefinitionSetIndex = -1;
+                    if (s.activeScriptDefinitionSetIndex > _selDef) s.activeScriptDefinitionSetIndex--;
+                    _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return;
+                }
+            }
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
@@ -840,8 +865,26 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             GUILayout.FlexibleSpace();
             GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
             if (GUILayout.Button("\u25B6 Build", GUILayout.Width(70)))
-            { _so.ApplyModifiedProperties();
-                BuildExecutor.Build(s.buildProfiles[_selBuild]); }
+            {
+                _so.ApplyModifiedProperties();
+                Rect btnRect = GUILayoutUtility.GetLastRect();
+                btnRect.position =
+                    GUIUtility.GUIToScreenPoint(
+                        btnRect.position);
+                var profile = s.buildProfiles[_selBuild];
+                PopupWindow.Show(btnRect,
+                    NoBuildDropdowns.CreateBuildConfirmPopup(
+                        profile, s,
+                        () => BuildExecutor.Build(profile),
+                        (option, serial) =>
+                            BuildExecutor
+                                .BuildAndRunWithOptions(
+                                    profile, option,
+                                    serial
+                                )
+                        )
+                    );
+            }
             GUI.backgroundColor = Color.white;
             if (s.buildProfiles[_selBuild].buildConfiguration.platform == BuildTarget.Android)
             {
@@ -869,9 +912,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
             GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
-            { if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
-                { _buildProfiles.DeleteArrayElementAtIndex(_selBuild); _so.ApplyModifiedProperties();
-                  _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1); return; } }
+            {
+                if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
+                {
+                    _buildProfiles.DeleteArrayElementAtIndex(_selBuild); _so.ApplyModifiedProperties();
+                    _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1); return;
+                }
+            }
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
@@ -1033,11 +1080,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             GUILayout.Space(4);
 
             // Name
-            nameP.stringValue = LblTxt("Name",
-                nameP.stringValue);
+            nameP.stringValue = LblTxt("Name", nameP.stringValue);
             var idP = fp.FindPropertyRelative("id");
-            idP.stringValue = LblTxt("Id",
-                idP.stringValue);
+            idP.stringValue = LblTxt("Id", idP.stringValue);
             GUILayout.Space(4);
 
             // Type button group
@@ -1076,34 +1121,24 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         && setIdxP.intValue
                         < s.scriptDefinitionSets.Count)
                     {
-                        ScriptDefinitionSet selectedSet =
-                            s.scriptDefinitionSets[
-                                setIdxP.intValue];
-                        string[] slotNames =
-                            selectedSet.slots
-                                .Select(sl =>
-                                    sl.defineSymbol
-                                    ?? "(empty)")
-                                .ToArray();
+                        ScriptDefinitionSet selectedSet = s.scriptDefinitionSets[setIdxP.intValue];
+                        string[] slotNames = selectedSet.slots.Select(sl => sl.defineSymbol ?? "(empty)").ToArray();
 
                         if (slotNames.Length > 0)
                         {
-                            var slotIdxP =
-                                fp.FindPropertyRelative(
-                                    "scriptDefinitionSlotIndex");
+                            var slotIdxP = fp.FindPropertyRelative("scriptDefinitionSlotIndex");
                             slotIdxP.intValue = LPopup(
-                                "Symbol",
-                                slotIdxP.intValue + 1,
-                                new[] { "(None)" }
-                                    .Concat(slotNames)
-                                    .ToArray()) - 1;
+                                "Symbol", slotIdxP.intValue + 1,
+                                new[] { "(None)" }.Concat(slotNames).ToArray()
+                            ) - 1;
                         }
                         else
                         {
                             EditorGUILayout.LabelField(
                                 "Symbol",
                                 "(set has no symbols)",
-                                EditorStyles.miniLabel);
+                                EditorStyles.miniLabel
+                            );
                         }
                     }
                 }

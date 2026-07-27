@@ -31,6 +31,8 @@ namespace Com.Hapiga.Scheherazade.Integration
         private int _selectedTabIndex;
         private int _featureFilter;
 
+        private string TabPrefKey => GetType().Name + "_Tab";
+
         internal BaseIntegrationSettingsProvider(
             string path,
             SettingsScope scopes,
@@ -45,6 +47,7 @@ namespace Com.Hapiga.Scheherazade.Integration
             _managerLabel = managerLabel;
             _tabs = tabs;
             _filterFlagsEnumType = filterFlagsEnumType;
+            _selectedTabIndex = EditorPrefs.GetInt(TabPrefKey, 0);
         }
 
         public override void OnGUI(string searchContext)
@@ -60,6 +63,8 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             Type[] concreteTypes = IntegrationSettingsDrawingUtils.FindConcreteManagerTypes<TInterface>();
 
+            int oldTab = _selectedTabIndex;
+
             IntegrationSettingsDrawingUtils.DrawManagerSettings<TInterface>(
                 _sectionName,
                 _managerLabel,
@@ -71,6 +76,11 @@ namespace Com.Hapiga.Scheherazade.Integration
                 ref _featureFilter,
                 _filterFlagsEnumType
             );
+
+            if (_selectedTabIndex != oldTab)
+            {
+                EditorPrefs.SetInt(TabPrefKey, _selectedTabIndex);
+            }
 
             DrawExtraContent(manager);
         }
@@ -153,7 +163,11 @@ namespace Com.Hapiga.Scheherazade.Integration
     {
         private static readonly string[] TemplateSubTabNames = { "Parameter Providers", "Templated Events" };
 
-        private static int _templateSubTabIndex;
+        private const string TrackingTemplateSubTabPrefKey =
+            "TrackingIntegrationSettingsProvider_TemplateSubTab";
+
+        private static int _templateSubTabIndex = EditorPrefs.GetInt(
+            "TrackingIntegrationSettingsProvider_TemplateSubTab", 0);
         private static Vector2 _templateProvidersScrollPos;
         private static Vector2 _templateEventsScrollPos;
         private static int _selectedParamIndex;
@@ -230,7 +244,12 @@ namespace Com.Hapiga.Scheherazade.Integration
         private static void DrawTemplateTrackingTab(ScriptableObject manager)
         {
             GUILayout.Space(4);
-            _templateSubTabIndex = GUILayout.Toolbar(_templateSubTabIndex, TemplateSubTabNames);
+            int newTemplateSubTab = GUILayout.Toolbar(_templateSubTabIndex, TemplateSubTabNames);
+            if (newTemplateSubTab != _templateSubTabIndex)
+            {
+                _templateSubTabIndex = newTemplateSubTab;
+                EditorPrefs.SetInt(TrackingTemplateSubTabPrefKey, _templateSubTabIndex);
+            }
 
             Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);
             EditorGUI.DrawRect(dividerRect, new Color(0.5f, 0.5f, 0.5f, 0.3f));
