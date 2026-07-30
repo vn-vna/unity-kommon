@@ -16,10 +16,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 #if UNITY_EDITOR
         [Tooltip(
             "Format string for resolving PuzzleLevelId to a table key.\n"
-            + "{0} = ResourceId (e.g. \"level_{0}\")")]
+            + "{id} = ResourceId (e.g. \"level_{id}\")")]
 #endif
         [SerializeField]
-        private string _keyFormat = "{0}";
+        private string _keyFormat = "{id}";
 
         public override IAsyncResourceReferenceTable<TextAsset> ReferenceTable
             => _table;

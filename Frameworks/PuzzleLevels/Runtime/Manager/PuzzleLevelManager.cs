@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
@@ -33,6 +34,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         [SerializeField]
         private PuzzleLevelOverrideConfig _overrideConfig;
 
+#if UNITY_EDITOR
+        [Tooltip(
+            "Custom tags for interpolating provider format strings. "
+            + "Use {key} placeholders in provider path/url/key formats.")]
+#endif
+        [SerializeField]
+        private CustomTagEntry[] _customTags = new CustomTagEntry[0];
+
         #endregion
 
         #region Private Fields
@@ -46,6 +55,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         private readonly Dictionary<string, ResourceLoadingHandler<IPuzzleLevelData>> _pendingLoads
             = new Dictionary<string, ResourceLoadingHandler<IPuzzleLevelData>>();
 
+        private Dictionary<string, string> _customTagLookup
+            = new Dictionary<string, string>();
+
         #endregion
 
         #region Properties
@@ -55,6 +67,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         public IReadOnlyCollection<string> CachedLevelIds
             => _lruOrder;
+
+        public IReadOnlyDictionary<string, string> CustomTags
+            => _customTagLookup;
 
         #endregion
 
@@ -126,7 +141,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         protected override void OnEnable()
         {
             base.OnEnable();
+            SyncCustomTags();
+            PropagateInterpolationTagsToProviders();
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            SyncCustomTags();
+        }
+#endif
 
         #endregion
 
@@ -136,8 +160,56 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         {
             return LoadResouceAsync(new PuzzleLevelId()
             {
-                ResourceId = v.ToString()
+                ResourceId = v.ToString(),
+                CustomTags = _customTagLookup
             });
+        }
+
+        public void SetCustomTag(string key, string value)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                return;
+            }
+
+            _customTagLookup[key] = value;
+            PropagateInterpolationTagsToProviders();
+        }
+
+        public void SetCustomTags(
+            IReadOnlyDictionary<string, string> tags)
+        {
+            if (tags == null)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<string, string> kvp in tags)
+            {
+                if (!string.IsNullOrEmpty(kvp.Key))
+                {
+                    _customTagLookup[kvp.Key] = kvp.Value;
+                }
+            }
+
+            PropagateInterpolationTagsToProviders();
+        }
+
+        public void RemoveCustomTag(string key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                return;
+            }
+
+            _customTagLookup.Remove(key);
+            PropagateInterpolationTagsToProviders();
+        }
+
+        public void ClearCustomTags()
+        {
+            _customTagLookup.Clear();
+            PropagateInterpolationTagsToProviders();
         }
 
         public void InitializeManager(float timeout = float.MaxValue)
@@ -199,7 +271,42 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
             LogVerbose(
                 this,
-                "Preloader cache cleared.");
+                "Preloader cache cleared."
+            );
+        }
+
+        public void RefreshCatalogs(
+            CatalogInvalidationMode mode
+            = CatalogInvalidationMode.Aggressive)
+        {
+            string[] cachedIds = _lruOrder.Count > 0
+                ? _lruOrder.ToArray()
+                : Array.Empty<string>();
+
+            ClearCache();
+            InvalidateProviderCatalogs(mode);
+
+            foreach (string id in cachedIds)
+            {
+                PreloadLevel(id);
+            }
+        }
+
+        public IEnumerator RefreshCatalogsCoroutine(
+            CatalogInvalidationMode mode
+            = CatalogInvalidationMode.Aggressive)
+        {
+            string[] cachedIds = _lruOrder.Count > 0
+                ? _lruOrder.ToArray()
+                : Array.Empty<string>();
+
+            ClearCache();
+            yield return InvalidateProviderCatalogsCoroutine(mode);
+
+            foreach (string id in cachedIds)
+            {
+                PreloadLevel(id);
+            }
         }
 
         #endregion
@@ -306,7 +413,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         {
             IAsyncResourceId resourceId = new PuzzleLevelId
             {
-                ResourceId = levelId
+                ResourceId = levelId,
+                CustomTags = _customTagLookup
             };
             ResourceLoadingHandler<TextAsset> assetHandler
                 = LoadResouceAsync(resourceId);
@@ -342,7 +450,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 if (
                     provider is ICatalogAwareAsyncResourceProvider catalogProvider &&
                     catalogProvider.HasResource(
-                        new PuzzleLevelId { ResourceId = levelId })
+                        new PuzzleLevelId
+                        {
+                            ResourceId = levelId,
+                            CustomTags = _customTagLookup
+                        })
                 )
                 {
                     return catalogProvider.GetDataType(levelId);
@@ -423,6 +535,49 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         #region Private Methods — Logging
 
+        private void SyncCustomTags()
+        {
+            if (_customTagLookup == null)
+            {
+                _customTagLookup = new Dictionary<string, string>();
+                return;
+            }
+
+            _customTagLookup.Clear();
+
+            if (_customTags == null)
+            {
+                return;
+            }
+
+            foreach (CustomTagEntry entry in _customTags)
+            {
+                if (string.IsNullOrEmpty(entry.key))
+                {
+                    continue;
+                }
+
+                _customTagLookup[entry.key] = entry.value ?? string.Empty;
+            }
+        }
+
+        private void PropagateInterpolationTagsToProviders()
+        {
+            if (_customTagLookup == null)
+            {
+                return;
+            }
+
+            foreach (IAsyncResourceProvider<TextAsset> provider in Providers)
+            {
+                if (provider is DownloadableResourceProvider<TextAsset> dlProvider)
+                {
+                    dlProvider.SetCatalogInterpolationTags(
+                        _customTagLookup);
+                }
+            }
+        }
+
         private static void LogVerbose(
             PuzzleLevelManager self,
             string message,
@@ -436,6 +591,22 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         #endregion
 
         #region Nested Types
+
+        [System.Serializable]
+        internal struct CustomTagEntry
+        {
+#if UNITY_EDITOR
+            [Tooltip("Tag key used in format strings as {key}.")]
+#endif
+            [SerializeField]
+            public string key;
+
+#if UNITY_EDITOR
+            [Tooltip("Value that replaces {key} in provider paths/URLs.")]
+#endif
+            [SerializeField]
+            public string value;
+        }
 
         #endregion
     }

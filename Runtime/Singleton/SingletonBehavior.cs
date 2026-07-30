@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Archetype;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
@@ -214,56 +213,6 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
             {
                 AutoRegister(autoRegisterAttribute);
             }
-
-            AutoRegisterArchetypes();
-        }
-
-        private void AutoRegisterArchetypes()
-        {
-            ArchetypeAttribute[] attributes;
-            try
-            {
-                object[] attrs = GetType().GetCustomAttributes(
-                    typeof(ArchetypeAttribute), inherit: false);
-                attributes = Array.ConvertAll(attrs, a => (ArchetypeAttribute)a);
-            }
-            catch
-            {
-                return;
-            }
-
-            if (attributes == null || attributes.Length == 0)
-            {
-                return;
-            }
-
-            ArchetypeReflectionHelper.TryRegister(
-                (T)(object)this,
-                attributes);
-        }
-
-        private void AutoUnregisterArchetypes()
-        {
-            ArchetypeAttribute[] attributes;
-            try
-            {
-                object[] attrs = GetType().GetCustomAttributes(
-                    typeof(ArchetypeAttribute), inherit: false);
-                attributes = Array.ConvertAll(attrs, a => (ArchetypeAttribute)a);
-            }
-            catch
-            {
-                return;
-            }
-
-            if (attributes == null || attributes.Length == 0)
-            {
-                return;
-            }
-
-            ArchetypeReflectionHelper.TryUnregister(
-                (T)(object)this,
-                attributes);
         }
 
         private void AutoRegister(AutoRegisterGlobalAttribute autoRegisterAttribute)
@@ -304,7 +253,6 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
         protected virtual void OnDestroy()
         {
             if (_instance == null || _instance != this) return;
-            AutoUnregisterArchetypes();
             Unregister();
             _instance = null;
         }

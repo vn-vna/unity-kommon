@@ -14,10 +14,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 #if UNITY_EDITOR
         [Tooltip(
             "Format string for resolving PuzzleLevelId to an addressable key.\n"
-            + "{0} = ResourceId (e.g. \"puzzle_level_{0}\")")]
+            + "{id} = ResourceId (e.g. \"puzzle_level_{id}\")")]
 #endif
         [SerializeField]
-        private string _keyFormat = "{0}";
+        private string _keyFormat = "{id}";
 
         internal string KeyFormat => _keyFormat;
     }

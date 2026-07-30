@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
@@ -45,35 +44,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
             try
             {
-                if (PlayGamesPlatform.Instance == null)
-                {
-                    Debug.LogWarning(
-                        $"[{AdapterId}] PlayGamesPlatform not found. "
-                        + "Not available."
-                    );
-                    return false;
-                }
-
-                if (Client == null)
-                {
-                    Debug.LogWarning(
-                        $"[{AdapterId}] SavedGame client not found. "
-                        + "Not available."
-                    );
-                    return false;
-                }
-
-                if (!PlayGamesPlatform.Instance.IsAuthenticated())
-                {
-                    Debug.LogWarning(
-                        $"[{AdapterId}] Not authenticated. "
-                        + "Adapter unavailable until login."
-                    );
-                    return false;
-                }
-
-                IsAvailable = true;
-                return true;
+                return InitializeInternal();
             }
             catch (Exception ex)
             {
@@ -86,6 +57,40 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 #endif
         }
 
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+        private bool InitializeInternal()
+        {
+            if (PlayGamesPlatform.Instance == null)
+            {
+                Debug.LogWarning(
+                    $"[{AdapterId}] PlayGamesPlatform not found. "
+                    + "Not available."
+                );
+                return false;
+            }
+
+            if (Client == null)
+            {
+                Debug.LogWarning(
+                    $"[{AdapterId}] SavedGame client not found. "
+                    + "Not available."
+                );
+                return false;
+            }
+
+            if (!PlayGamesPlatform.Instance.IsAuthenticated())
+            {
+                Debug.LogWarning(
+                    $"[{AdapterId}] Not authenticated. "
+                    + "Adapter unavailable until login."
+                );
+                return false;
+            }
+
+            IsAvailable = true;
+            return true;
+        }
+#endif
         public void Reset()
         {
             IsAvailable = false;

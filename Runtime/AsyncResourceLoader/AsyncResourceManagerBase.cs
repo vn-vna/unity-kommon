@@ -113,6 +113,40 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             return handler;
         }
 
+        protected void InvalidateProviderCatalogs(
+            CatalogInvalidationMode mode)
+        {
+            if (_providers == null)
+            {
+                return;
+            }
+
+            foreach (IAsyncResourceProvider<ResourceType> provider in _providers)
+            {
+                if (provider is IInvalidatableCatalog inv)
+                {
+                    inv.InvalidateCatalog(mode);
+                }
+            }
+        }
+
+        protected IEnumerator InvalidateProviderCatalogsCoroutine(
+            CatalogInvalidationMode mode)
+        {
+            if (_providers == null)
+            {
+                yield break;
+            }
+
+            foreach (IAsyncResourceProvider<ResourceType> provider in _providers)
+            {
+                if (provider is IInvalidatableCatalog inv)
+                {
+                    yield return inv.InvalidateCatalogCoroutine(mode);
+                }
+            }
+        }
+
 
         public void Reset()
         {

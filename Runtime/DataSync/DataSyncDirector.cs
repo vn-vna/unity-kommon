@@ -260,7 +260,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             if (successes.Length > 0)
             {
                 QuickLog.Info<DataSyncDirector>(
-                    "Saved key '{0}' → {1}/{2} group(s): [{3}]",
+                    "Saved key '{0}' -> {1}/{2} group(s): [{3}]",
                     key,
                     successes.Length,
                     groupCount,

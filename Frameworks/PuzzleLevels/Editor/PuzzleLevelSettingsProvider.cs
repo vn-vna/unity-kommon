@@ -57,7 +57,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         public static SettingsProvider CreateSettingsProvider()
         {
             return new PuzzleLevelSettingsProvider(
-                "Project/Tools/Puzzle Levels",
+                "Project/Frameworks/Puzzle Levels",
                 SettingsScope.Project,
                 new[] { "puzzle", "level", "preload", "override", "catalog" }
             );

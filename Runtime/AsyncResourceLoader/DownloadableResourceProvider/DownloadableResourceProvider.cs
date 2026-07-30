@@ -18,7 +18,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
         IDownloadableResourceProvider<ResourceType>,
-        ICatalogAwareAsyncResourceProvider
+        ICatalogAwareAsyncResourceProvider,
+        IInvalidatableCatalog
         where ResourceType : UnityEngine.Object
     {
         [SerializeField]
@@ -57,8 +58,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private string _urlFormat = "{0}";
 
         [SerializeField]
-        [Tooltip("When enabled, loads a catalog JSON file to determine which resources this provider can serve.")]
-        private CatalogConfig _catalogConfig = new CatalogConfig();
+        [Tooltip(
+            "When enabled, loads a catalog JSON file to determine which "
+            + "resources this provider can serve.")]
+        private bool _useCatalog;
+
+        [SerializeField]
+        [Tooltip(
+            "File name or relative path of the catalog JSON file. "
+            + "Combined with the base URL to form the full catalog URL.")]
+        private string _catalogFileName;
+
+        [SerializeField]
+        [Tooltip(
+            "When enabled with a catalog, the provider rejects ALL resource "
+            + "requests until the catalog is fully loaded. HasResource returns "
+            + "false and TryLoadResource fails immediately.")]
+        private bool _forceRequiredCatalog;
 
         private volatile bool _isInitialized;
         private string _cachedDiskBasePath;
@@ -68,6 +84,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private readonly Dictionary<string, ActiveDownload> _activeDownloads = new();
         private readonly Queue<DownloadRequest> _pendingQueue = new();
         private readonly object _lock = new();
+        private IReadOnlyDictionary<string, string> _catalogInterpolationTags;
+        private uint _catalogGeneration;
+        private UnityWebRequest _activeCatalogRequest;
 
         private class DownloadRequest
         {
@@ -96,7 +115,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         public string CacheSubFolder => cacheSubFolder;
         public CacheBasePathType CacheBasePath => cacheBasePath;
         public CustomDownloadHeader[] Headers => headers;
-        public string BaseUrl => _baseUrl;
+        public string BaseUrl => AcquireBaseUrl();
         public string UrlFormat => _urlFormat;
 
         protected abstract ResourceType ConvertResource(byte[] data);
@@ -104,11 +123,18 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         public virtual void Initialize()
         {
             _catalogData = new CatalogData();
-            if (_catalogConfig.UseCatalog
-                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
             {
+                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
+                uint gen = ++_catalogGeneration;
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog load dispatched [gen={0}] URL: {1}",
+                    gen, catalogUrl
+                );
+
                 Dispatcher.DispatchCoroutine(
-                    LoadCatalogCoroutine(_catalogConfig.CatalogFileName)
+                    LoadCatalogCoroutine(catalogUrl, gen)
                 );
             }
 
@@ -135,6 +161,20 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 handler.ProviderSource = GetType().Name;
                 handler.Exception = new InvalidOperationException(
                     "Downloadable resource provider is not initialized."
+                );
+                return;
+            }
+
+            if (_forceRequiredCatalog
+                && (_catalogData == null || !_catalogData.IsLoaded))
+            {
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.ProviderSource = GetType().Name;
+                handler.Exception = new InvalidOperationException(
+                    "Catalog is required but not loaded. "
+                    + "All resource requests are rejected until the catalog "
+                    + "is available."
                 );
                 return;
             }
@@ -220,25 +260,130 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public bool HasResource(IAsyncResourceId resourceId)
         {
-            return 
-                _catalogData != null && _catalogData.IsLoaded 
-                    ? _catalogData.HasResource(resourceId.ResourceId) 
-                    : true;
+            if (_catalogData == null || !_catalogData.IsLoaded)
+            {
+                return !_forceRequiredCatalog;
+            }
+
+            return _catalogData.HasResource(resourceId.ResourceId);
         }
 
         public DataType GetDataType(string resourceId) =>
             _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
 
-        private string ResolveDownloadUrl(
+        public void SetCatalogInterpolationTags(
+            IReadOnlyDictionary<string, string> tags)
+        {
+            _catalogInterpolationTags = tags;
+        }
+
+        public void InvalidateCatalog(CatalogInvalidationMode mode)
+        {
+            QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                "Catalog invalidation requested [mode={0}].",
+                mode
+            );
+
+            _catalogData?.Reset();
+
+            if (_activeCatalogRequest != null)
+            {
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Aborting in-flight catalog request."
+                );
+                try { _activeCatalogRequest.Abort(); } catch { }
+                _activeCatalogRequest = null;
+            }
+
+            if (mode == CatalogInvalidationMode.Aggressive)
+            {
+                lock (_lock)
+                {
+                    _memoryCache.Clear();
+                    _lruList.Clear();
+                }
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Aggressive mode — memory cache cleared."
+                );
+            }
+
+            uint gen = ++_catalogGeneration;
+            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
+            {
+                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog re-fetch dispatched [gen={0}] URL: {1}",
+                    gen, catalogUrl
+                );
+
+                Dispatcher.DispatchCoroutine(
+                    LoadCatalogCoroutine(catalogUrl, gen)
+                );
+            }
+        }
+
+        public IEnumerator InvalidateCatalogCoroutine(
+            CatalogInvalidationMode mode)
+        {
+            QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                "Catalog invalidation (coroutine) requested [mode={0}].",
+                mode
+            );
+
+            _catalogData?.Reset();
+
+            if (_activeCatalogRequest != null)
+            {
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Aborting in-flight catalog request."
+                );
+                try { _activeCatalogRequest.Abort(); } catch { }
+                _activeCatalogRequest = null;
+            }
+
+            if (mode == CatalogInvalidationMode.Aggressive)
+            {
+                lock (_lock)
+                {
+                    _memoryCache.Clear();
+                    _lruList.Clear();
+                }
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Aggressive mode — memory cache cleared."
+                );
+            }
+
+            uint gen = ++_catalogGeneration;
+            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
+            {
+                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog re-fetch dispatched [gen={0}] URL: {1}",
+                    gen, catalogUrl
+                );
+
+                yield return LoadCatalogCoroutine(catalogUrl, gen);
+            }
+        }
+
+        protected virtual string AcquireBaseUrl()
+            => _baseUrl;
+
+        protected virtual string ResolveDownloadUrl(
             string resourceId,
-            IDownloadableAsyncResourceId downloadableId)
+            IDownloadableAsyncResourceId downloadableId
+        )
         {
             if (_catalogData != null && _catalogData.IsLoaded)
             {
                 string relativePath = _catalogData.GetRelativePath(resourceId);
                 if (!string.IsNullOrEmpty(relativePath))
                 {
-                    return _baseUrl + relativePath;
+                    return AcquireBaseUrl() + relativePath;
                 }
             }
 
@@ -248,13 +393,47 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return fallback;
             }
 
-            return _baseUrl + string.Format(_urlFormat, resourceId);
+            return AcquireBaseUrl() + string.Format(_urlFormat, resourceId);
         }
+
+        protected virtual string ResolveCatalogUrl(
+            string catalogFileName,
+            string baseUrl)
+        {
+            string url = baseUrl + catalogFileName;
+
+            if (_catalogInterpolationTags != null
+                && _catalogInterpolationTags.Count > 0)
+            {
+                foreach (
+                    KeyValuePair<string, string> kvp
+                    in _catalogInterpolationTags)
+                {
+                    url = url.Replace(
+                        $"{{{kvp.Key}}}", kvp.Value);
+                }
+            }
+
+            return url;
+        }
+
 
         private IEnumerator LoadCatalogCoroutine(string url)
         {
+            uint gen = ++_catalogGeneration;
+            yield return LoadCatalogCoroutine(url, gen);
+        }
+
+        private IEnumerator LoadCatalogCoroutine(string url, uint generation)
+        {
+            QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                "Catalog download started [gen={0}] URL: {1}",
+                generation, url
+            );
+
             using UnityWebRequest webRequest = UnityWebRequest.Get(url);
             webRequest.downloadHandler = new DownloadHandlerBuffer();
+            _activeCatalogRequest = webRequest;
 
             if (headers != null)
             {
@@ -265,17 +444,39 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             yield return webRequest.SendWebRequest();
+            _activeCatalogRequest = null;
+
+            if (generation != _catalogGeneration)
+            {
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog load aborted superseded by newer request. [gen={0}]",
+                    generation
+                );
+                yield break;
+            }
 
             if (webRequest.result == UnityWebRequest.Result.Success)
             {
                 byte[] data = webRequest.downloadHandler.data;
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog downloaded successfully [gen={0}], {1} bytes.",
+                    generation, data?.Length ?? 0
+                );
+
                 _catalogData.LoadFromBytes(data);
+
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog parsed [gen={0}] — {1} entries loaded.",
+                    generation,
+                    _catalogData?.CatalogedIds?.Count ?? 0
+                );
             }
             else
             {
                 QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
-                    "Failed to download catalog from '{0}': {1}",
-                    url, webRequest.error ?? "Unknown error"
+                    "Failed to download catalog [gen={0}] from '{1}': {2}",
+                    generation, url, webRequest.error ?? "Unknown error"
                 );
             }
         }

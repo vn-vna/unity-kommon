@@ -210,55 +210,65 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
                 return;
             }
 
-            switch (property.PropertyType)
+            try
             {
-                case Type t when t == typeof(int):
-                    if (TryAcquireValueFromProvider(attribute.Key, out int intValue))
-                    {
-                        property.SetValue(_configData, intValue);
-                    }
-                    else
-                    {
-                        property.SetValue(_configData, (int)attribute.DefaultValue);
-                    }
-                    break;
+                switch (property.PropertyType)
+                {
+                    case Type t when t == typeof(int):
+                        if (TryAcquireValueFromProvider(attribute.Key, out int intValue))
+                        {
+                            property.SetValue(_configData, intValue);
+                        }
+                        else
+                        {
+                            property.SetValue(_configData, (int)attribute.DefaultValue);
+                        }
+                        break;
 
-                case Type t when t == typeof(float):
-                    if (TryAcquireValueFromProvider(attribute.Key, out float floatValue))
-                    {
-                        property.SetValue(_configData, floatValue);
-                    }
-                    else
-                    {
-                        property.SetValue(_configData, (float)attribute.DefaultValue);
-                    }
-                    break;
+                    case Type t when t == typeof(float):
+                        if (TryAcquireValueFromProvider(attribute.Key, out float floatValue))
+                        {
+                            property.SetValue(_configData, floatValue);
+                        }
+                        else
+                        {
+                            property.SetValue(_configData, (float)attribute.DefaultValue);
+                        }
+                        break;
 
-                case Type t when t == typeof(bool):
-                    if (TryAcquireValueFromProvider(attribute.Key, out bool boolValue))
-                    {
-                        property.SetValue(_configData, boolValue);
-                    }
-                    else
-                    {
-                        property.SetValue(_configData, (bool)attribute.DefaultValue);
-                    }
-                    break;
+                    case Type t when t == typeof(bool):
+                        if (TryAcquireValueFromProvider(attribute.Key, out bool boolValue))
+                        {
+                            property.SetValue(_configData, boolValue);
+                        }
+                        else
+                        {
+                            property.SetValue(_configData, (bool)attribute.DefaultValue);
+                        }
+                        break;
 
-                case Type t when t == typeof(string):
-                    if (TryAcquireValueFromProvider(attribute.Key, out string stringValue))
-                    {
-                        property.SetValue(_configData, stringValue);
-                    }
-                    else
-                    {
-                        property.SetValue(_configData, (string)attribute.DefaultValue);
-                    }
-                    break;
+                    case Type t when t == typeof(string):
+                        if (TryAcquireValueFromProvider(attribute.Key, out string stringValue))
+                        {
+                            property.SetValue(_configData, stringValue);
+                        }
+                        else
+                        {
+                            property.SetValue(_configData, (string)attribute.DefaultValue);
+                        }
+                        break;
 
-                default:
-                    Debug.LogError($"Unsupported property type {property.PropertyType} for RemoteConfigAttribute on property {property.Name}.");
-                    break;
+                    default:
+                        Debug.LogError($"Unsupported property type {property.PropertyType} for RemoteConfigAttribute on property {property.Name}.");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Critical<RemoteConfigManagerBase<T, Self>>(
+                    "Acquire remote config property failed for property [{0}]: {1}",
+                    property.Name, ex
+                );
             }
         }
 

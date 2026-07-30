@@ -1839,31 +1839,70 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     public class RemoteConfigIntegrationSettingsProvider : BaseIntegrationSettingsProvider<IRemoteConfigManager>
     {
-        private static readonly SettingsTab[] Tabs =
+        /// <summary>
+        /// Hardcoded base descriptors for providers that carry metadata
+        /// (e.g. required defines) which cannot be inferred from the type alone.
+        /// Dynamically discovered types are merged at construction time.
+        /// </summary>
+        private static readonly ProviderDescriptor[] BaseDescriptors =
         {
-            new SettingsTab(
-                "Providers",
-                new ProviderDescriptor[]
-                {
-                    new ProviderDescriptor(
-                        "Firebase Remote Config",
-                        "initialProviders",
-                        ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
-                        new[] { "FIREBASE_REMOTE" },
-                        new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" },
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.IRemoteConfigProvider"
-                    )
-                }
+            new ProviderDescriptor(
+                "Firebase Remote Config",
+                "initialProviders",
+                ProviderBindingMode.Collection,
+                "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
+                new[] { "FIREBASE_REMOTE" },
+                new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" },
+                customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.IRemoteConfigProvider"
             )
         };
+
+        private static SettingsTab[] BuildTabs()
+        {
+            HashSet<string> existingTypeNames = new HashSet<string>(
+                BaseDescriptors.Select(d => d.ProviderTypeName));
+
+            Type providerInterfaceType = typeof(IRemoteConfigProvider);
+
+            ProviderDescriptor[] discovered = IntegrationSettingsDrawingUtils
+                .GetAllTypes()
+                .Where(t => t.IsClass
+                            && !t.IsAbstract
+                            && typeof(ScriptableObject).IsAssignableFrom(t)
+                            && providerInterfaceType.IsAssignableFrom(t)
+                            && !existingTypeNames.Contains(t.FullName))
+                .Select(t => new ProviderDescriptor(
+                    InferDisplayName(t),
+                    "initialProviders",
+                    ProviderBindingMode.Collection,
+                    t.FullName,
+                    customProviderBaseTypeName: providerInterfaceType.FullName))
+                .OrderBy(d => d.DisplayName)
+                .ToArray();
+
+            return new SettingsTab[]
+            {
+                new SettingsTab(
+                    "Providers",
+                    BaseDescriptors.Concat(discovered).ToArray())
+            };
+        }
+
+        private static string InferDisplayName(Type type)
+        {
+            string name = type.Name;
+            name = Regex.Replace(name, "RemoteConfig$", "");
+            name = Regex.Replace(name, "Provider$", "");
+            name = Regex.Replace(name, "([a-z])([A-Z])", "$1 $2");
+            return name.Trim();
+        }
 
         private RemoteConfigIntegrationSettingsProvider(
             string path, SettingsScope scopes,
             IEnumerable<string> keywords = null
         ) : base(path, scopes, "Remote Config Manager Configuration",
             "Remote Config Manager Asset",
-            Tabs, keywords)
+            BuildTabs(), keywords)
         { }
 
         protected override void DrawExtraContent(ScriptableObject manager)

@@ -13,10 +13,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 #if UNITY_EDITOR
         [Tooltip(
             "Format string for resolving PuzzleLevelId to a resource path.\n"
-            + "{0} = ResourceId (e.g. \"levels/level_{0}\")")]
+            + "{id} = ResourceId (e.g. \"levels/level_{id}\")")]
 #endif
         [SerializeField]
-        private string _pathFormat = "{0}";
+        private string _pathFormat = "{id}";
 
         internal string PathFormat => _pathFormat;
     }
