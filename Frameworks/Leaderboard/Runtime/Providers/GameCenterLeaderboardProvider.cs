@@ -78,6 +78,20 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 "Game Center leaderboard integration is not yet implemented.");
         }
 
+        public Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
+            string leaderboardId,
+            int radius,
+            LeaderboardType type,
+            CancellationToken ct = default)
+        {
+            QuickLog.Warning<GameCenterLeaderboardProvider>(
+                "Game Center FetchLeaderboardAroundPlayer is a stub. "
+                + "id='{0}', radius={1}",
+                leaderboardId, radius);
+            throw new NotImplementedException(
+                "Game Center leaderboard integration is not yet implemented.");
+        }
+
         public Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
             LeaderboardType type,

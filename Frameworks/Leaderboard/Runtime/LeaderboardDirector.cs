@@ -11,13 +11,12 @@ using UnityEngine.Events;
 
 namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 {
-    [AddComponentMenu("Scheherazade/Leaderboard Director")]
-    [DontDestroyOnLoad]
+    [AddComponentMenu("")] // Hide Component
     public class LeaderboardDirector : SingletonBehavior<LeaderboardDirector>
     {
         #region Events & Delegates
 
-        public event Action<string, long, string, ScoreSubmissionMode> ScoreReported;
+        public event Action<string, long, string, LeaderboardScoreSubmissionMode> ScoreReported;
         public event Action<string, LeaderboardResult> LeaderboardFetched;
         public event Action<string, LeaderboardEntry> PlayerEntryFetched;
         public event Action<string, string> ErrorOccurred;
@@ -63,6 +62,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             var go = new GameObject("[Scheherazade Leaderboard Director]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<LeaderboardDirector>();
+            go.AddComponent<KeepAliveComponent>();
         }
 
         #endregion
@@ -75,20 +75,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             try
             {
-                _config = LeaderboardConfiguration.Instance;
-
-                if (_config != null)
-                {
-                    _activeProvider = _config.Provider;
-
-                    if (_activeProvider == null)
-                    {
-                        QuickLog.Info<LeaderboardDirector>(
-                            "Leaderboard director created but no provider is configured. "
-                            + "Call Initialize() after assigning a provider."
-                        );
-                    }
-                }
+                LoadConfiguration();
 
                 Status = LeaderboardManagerStatus.Uninitialized;
 
@@ -103,6 +90,20 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 );
                 Status = LeaderboardManagerStatus.Uninitialized;
             }
+        }
+
+        private void LoadConfiguration()
+        {
+            _config = LeaderboardConfiguration.Instance;
+
+            if (_config == null) return;
+            _activeProvider = _config.Provider;
+            if (_activeProvider != null) return;
+
+            QuickLog.Info<LeaderboardDirector>(
+                "Leaderboard director created but no provider is configured. "
+                + "Call Initialize() after assigning a provider."
+            );
         }
 
         #endregion
@@ -148,23 +149,25 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                     "Leaderboard initialized successfully with provider '{0}'.",
                     _activeProvider.ProviderId
                 );
+                yield break;
             }
-            else if (timer >= timeOut)
+
+            if (timer >= timeOut)
             {
                 QuickLog.Error<LeaderboardDirector>(
                     "Leaderboard initialization timed out after {0:F1}s.",
                     timeOut
                 );
                 Status = LeaderboardManagerStatus.Uninitialized;
+                yield break;
             }
-            else
-            {
-                QuickLog.Error<LeaderboardDirector>(
-                    "Leaderboard initialization failed for provider '{0}'.",
-                    _activeProvider.ProviderId
-                );
-                Status = LeaderboardManagerStatus.Uninitialized;
-            }
+
+            QuickLog.Error<LeaderboardDirector>(
+                "Leaderboard initialization failed for provider '{0}'.",
+                _activeProvider.ProviderId
+            );
+
+            Status = LeaderboardManagerStatus.Uninitialized;
         }
 
         public async Task<bool> InitializeAsync(float timeOut = float.MaxValue)
@@ -187,44 +190,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             try
             {
-                Task<bool> initTask = _activeProvider.InitializeAsync();
-
-                using (var cts = new CancellationTokenSource())
-                {
-                    Task timeoutTask = Task.Delay(
-                        TimeSpan.FromSeconds(timeOut), cts.Token);
-
-                    Task completed = await Task.WhenAny(initTask, timeoutTask);
-
-                    if (completed == initTask)
-                    {
-                        cts.Cancel();
-
-                        if (_activeProvider.IsInitialized)
-                        {
-                            Status = LeaderboardManagerStatus.Ready;
-                            QuickLog.Info<LeaderboardDirector>(
-                                "Leaderboard initialized successfully with provider '{0}'.",
-                                _activeProvider.ProviderId
-                            );
-                            return true;
-                        }
-
-                        QuickLog.Error<LeaderboardDirector>(
-                            "Leaderboard initialization failed for provider '{0}'.",
-                            _activeProvider.ProviderId
-                        );
-                        Status = LeaderboardManagerStatus.Uninitialized;
-                        return false;
-                    }
-
-                    QuickLog.Error<LeaderboardDirector>(
-                        "Leaderboard initialization timed out after {0:F1}s.",
-                        timeOut
-                    );
-                    Status = LeaderboardManagerStatus.Uninitialized;
-                    return false;
-                }
+                return await InitializeInternalAsyncUnsafe(timeOut);
             }
             catch (Exception ex)
             {
@@ -235,6 +201,44 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 Status = LeaderboardManagerStatus.Uninitialized;
                 return false;
             }
+        }
+
+        private async Task<bool> InitializeInternalAsyncUnsafe(float timeOut)
+        {
+            Task<bool> initTask = _activeProvider.InitializeAsync();
+
+            using CancellationTokenSource cts = new CancellationTokenSource();
+            Task timeoutTask = Task.Delay(TimeSpan.FromSeconds(timeOut), cts.Token);
+            Task completed = await Task.WhenAny(initTask, timeoutTask);
+
+            if (completed != initTask)
+            {
+                QuickLog.Error<LeaderboardDirector>(
+                    "Leaderboard initialization timed out after {0:F1}s.",
+                    timeOut
+                );
+                Status = LeaderboardManagerStatus.Uninitialized;
+                return false;
+            }
+
+            cts.Cancel();
+
+            if (_activeProvider.IsInitialized)
+            {
+                Status = LeaderboardManagerStatus.Ready;
+                QuickLog.Info<LeaderboardDirector>(
+                    "Leaderboard initialized successfully with provider '{0}'.",
+                    _activeProvider.ProviderId
+                );
+                return true;
+            }
+
+            QuickLog.Error<LeaderboardDirector>(
+                "Leaderboard initialization failed for provider '{0}'.",
+                _activeProvider.ProviderId
+            );
+            Status = LeaderboardManagerStatus.Uninitialized;
+            return false;
         }
 
         public void Shutdown()
@@ -250,18 +254,17 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         #region Public Methods
 
         public async Task ReportScoreAsync(
-            string leaderboardId,
-            long score,
+            string leaderboardId, long score,
             string metadata = null,
-            ScoreSubmissionMode mode = ScoreSubmissionMode.Best,
-            CancellationToken ct = default)
+            LeaderboardScoreSubmissionMode mode = LeaderboardScoreSubmissionMode.Best,
+            CancellationToken ct = default
+        )
         {
             EnsureReady();
 
             if (_activeProvider == null)
             {
-                FireError("ReportScore",
-                    "No leaderboard provider available");
+                FireError("ReportScore", "No leaderboard provider available");
                 return;
             }
 
@@ -269,12 +272,12 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             try
             {
-                await _activeProvider.ReportScoreAsync(
-                    leaderboardId, score, metadata, type, mode, ct);
+                await _activeProvider.ReportScoreAsync(leaderboardId, score, metadata, type, mode, ct);
 
                 QuickLog.Info<LeaderboardDirector>(
                     "Score reported: id='{0}', score={1}, mode={2}, type={3}",
-                    leaderboardId, score, mode, type);
+                    leaderboardId, score, mode, type
+                );
 
                 ScoreReported?.Invoke(leaderboardId, score, metadata, mode);
             }
@@ -286,12 +289,14 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             {
                 QuickLog.Error<LeaderboardDirector>(
                     "ReportScore failed: id='{0}', score={1}, error={2}",
-                    leaderboardId, score, ex.Message);
+                    leaderboardId, score, ex.Message
+                );
 
-                var wrapped = new ScoreSubmissionException(
+                ScoreSubmissionException wrapped = new ScoreSubmissionException(
                     leaderboardId, score,
                     $"Score submission failed via '{_activeProvider.ProviderId}'",
-                    ex);
+                    ex
+                );
 
                 ErrorOccurred?.Invoke("ReportScore", ex.Message);
                 throw wrapped;
@@ -299,17 +304,15 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         public async Task<LeaderboardResult> FetchLeaderboardAsync(
-            string leaderboardId,
-            int index,
-            int size,
-            CancellationToken ct = default)
+            string leaderboardId, int index, int size,
+            CancellationToken ct = default
+        )
         {
             EnsureReady();
 
             if (_activeProvider == null)
             {
-                FireError("FetchLeaderboard",
-                    "No leaderboard provider available");
+                FireError("FetchLeaderboard", "No leaderboard provider available");
                 return LeaderboardResult.Empty;
             }
 
@@ -317,15 +320,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             try
             {
-                LeaderboardResult result =
-                    await _activeProvider.FetchLeaderboardAsync(
-                        leaderboardId, index, size, type, ct);
+                LeaderboardResult result = await _activeProvider
+                    .FetchLeaderboardAsync(leaderboardId, index, size, type, ct);
 
                 QuickLog.Info<LeaderboardDirector>(
-                    "Fetched leaderboard: id='{0}', index={1}, size={2}, "
-                    + "entries={3}, total={4}",
-                    leaderboardId, index, size,
-                    result.Entries.Length, result.TotalPlayers);
+                    "Fetched leaderboard: id='{0}', index={1}, size={2}, entries={3}, total={4}",
+                    leaderboardId, index, size, result.Entries.Length, result.TotalPlayers
+                );
 
                 LeaderboardFetched?.Invoke(leaderboardId, result);
                 return result;
@@ -337,9 +338,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             catch (Exception ex)
             {
                 QuickLog.Error<LeaderboardDirector>(
-                    "FetchLeaderboard failed: id='{0}', index={1}, size={2}, "
-                    + "error={3}",
-                    leaderboardId, index, size, ex.Message);
+                    "FetchLeaderboard failed: id='{0}', index={1}, size={2}, error={3}",
+                    leaderboardId, index, size, ex.Message
+                );
 
                 ErrorOccurred?.Invoke("FetchLeaderboard", ex.Message);
                 throw;
@@ -355,63 +356,24 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             if (_activeProvider == null)
             {
-                FireError("FetchLeaderboardAroundPlayer",
-                    "No leaderboard provider available");
+                FireError("FetchLeaderboardAroundPlayer", "No leaderboard provider available");
                 return LeaderboardResult.Empty;
             }
 
             LeaderboardType type = ResolveLeaderboardType(leaderboardId);
-            int fetchSize = (radius * 2) + 1;
 
             try
             {
-                LeaderboardEntry playerEntry =
-                    await _activeProvider.FetchPlayerEntryAsync(
-                        leaderboardId, type, ct);
-
-                int playerRank = playerEntry.Rank;
-
-                if (playerRank <= 0)
-                {
-                    QuickLog.Debug<LeaderboardDirector>(
-                        "AroundPlayer: player has no rank for id='{0}'. "
-                        + "Falling back to top {1}.",
-                        leaderboardId, fetchSize
-                    );
-
-                    LeaderboardResult topResult = await _activeProvider
-                        .FetchLeaderboardAsync(leaderboardId, 0, fetchSize, type, ct);
-
-                    LeaderboardFetched?.Invoke(leaderboardId, topResult);
-                    return topResult;
-                }
-
-                int index = Math.Max(0, playerRank - radius - 1);
-
-                QuickLog.Debug<LeaderboardDirector>(
-                    "AroundPlayer: playerRank={0}, fetching index={1}, "
-                    + "size={2} for id='{3}'",
-                    playerRank, index, fetchSize, leaderboardId);
-
-                LeaderboardResult rangeResult =
-                    await _activeProvider.FetchLeaderboardAsync(
-                        leaderboardId, index, fetchSize, type, ct);
-
-                int localIndex = playerRank - index - 1;
-                LeaderboardResult patched = new LeaderboardResult(
-                    rangeResult.Entries,
-                    rangeResult.TotalPlayers,
-                    localIndex,
-                    playerRank);
+                LeaderboardResult result = await _activeProvider
+                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius, type, ct);
 
                 QuickLog.Info<LeaderboardDirector>(
-                    "Fetched around player: id='{0}', radius={1}, "
-                    + "entries={2}, playerIndex={3}",
-                    leaderboardId, radius,
-                    patched.Entries.Length, patched.PlayerEntryIndex);
+                    "Fetched around player: id='{0}', radius={1}, entries={2}, playerIndex={3}",
+                    leaderboardId, radius, result.Entries.Length, result.PlayerEntryIndex
+                );
 
-                LeaderboardFetched?.Invoke(leaderboardId, patched);
-                return patched;
+                LeaderboardFetched?.Invoke(leaderboardId, result);
+                return result;
             }
             catch (LeaderboardException)
             {
@@ -420,9 +382,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             catch (Exception ex)
             {
                 QuickLog.Error<LeaderboardDirector>(
-                    "FetchLeaderboardAroundPlayer failed: id='{0}', "
-                    + "radius={1}, error={2}",
-                    leaderboardId, radius, ex.Message);
+                    "FetchLeaderboardAroundPlayer failed: id='{0}', radius={1}, error={2}",
+                    leaderboardId, radius, ex.Message
+                );
 
                 ErrorOccurred?.Invoke("FetchLeaderboardAroundPlayer", ex.Message);
                 throw;
@@ -431,14 +393,14 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public async Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
-            CancellationToken ct = default)
+            CancellationToken ct = default
+        )
         {
             EnsureReady();
 
             if (_activeProvider == null)
             {
-                FireError("FetchPlayerEntry",
-                    "No leaderboard provider available");
+                FireError("FetchPlayerEntry", "No leaderboard provider available");
                 return default;
             }
 
@@ -446,13 +408,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             try
             {
-                LeaderboardEntry entry =
-                    await _activeProvider.FetchPlayerEntryAsync(
-                        leaderboardId, type, ct);
+                LeaderboardEntry entry = await _activeProvider
+                    .FetchPlayerEntryAsync(leaderboardId, type, ct);
 
                 QuickLog.Info<LeaderboardDirector>(
                     "Fetched player entry: id='{0}', rank={1}, score={2}",
-                    leaderboardId, entry.Rank, entry.Score);
+                    leaderboardId, entry.Rank, entry.Score
+                );
 
                 PlayerEntryFetched?.Invoke(leaderboardId, entry);
                 return entry;
@@ -465,7 +427,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             {
                 QuickLog.Error<LeaderboardDirector>(
                     "FetchPlayerEntry failed: id='{0}', error={1}",
-                    leaderboardId, ex.Message);
+                    leaderboardId, ex.Message
+                );
 
                 ErrorOccurred?.Invoke("FetchPlayerEntry", ex.Message);
                 throw;
@@ -478,10 +441,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         private void EnsureReady()
         {
-            if (Status != LeaderboardManagerStatus.Ready)
-            {
-                throw new LeaderboardNotInitializedException();
-            }
+            if (Status == LeaderboardManagerStatus.Ready) return;
+            throw new LeaderboardNotInitializedException();
         }
 
         private void FireError(string operation, string message)
@@ -491,21 +452,17 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         private LeaderboardType ResolveLeaderboardType(string leaderboardId)
         {
-            if (_config != null)
-            {
-                LeaderboardDefinition def = _config.Leaderboards
-                    .FirstOrDefault(d => d != null && d.Id == leaderboardId);
+            if (_config == null) return LeaderboardType.Point;
 
-                if (def != null)
-                {
-                    return def.Type;
-                }
+            LeaderboardDefinition def = _config.Leaderboards
+                .FirstOrDefault(d => d != null && d.Id == leaderboardId);
 
-                QuickLog.Warning<LeaderboardDirector>(
-                    "No definition found for leaderboard '{0}'. "
-                    + "Defaulting to Point type.",
-                    leaderboardId);
-            }
+            if (def != null) return def.Type;
+
+            QuickLog.Warning<LeaderboardDirector>(
+                "No definition found for leaderboard '{0}'. Defaulting to Point type.",
+                leaderboardId
+            );
 
             return LeaderboardType.Point;
         }

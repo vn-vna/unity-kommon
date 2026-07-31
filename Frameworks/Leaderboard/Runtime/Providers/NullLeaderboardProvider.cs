@@ -36,7 +36,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             long score,
             string metadata,
             LeaderboardType type,
-            ScoreSubmissionMode mode,
+            LeaderboardScoreSubmissionMode mode,
             CancellationToken ct = default)
         {
             QuickLog.Debug<NullLeaderboardProvider>(
@@ -55,6 +55,18 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             QuickLog.Debug<NullLeaderboardProvider>(
                 "Null FetchLeaderboard: id='{0}', index={1}, size={2}, type={3}",
                 leaderboardId, index, size, type);
+            return Task.FromResult(LeaderboardResult.Empty);
+        }
+
+        public Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
+            string leaderboardId,
+            int radius,
+            LeaderboardType type,
+            CancellationToken ct = default)
+        {
+            QuickLog.Debug<NullLeaderboardProvider>(
+                "Null FetchLeaderboardAroundPlayer: id='{0}', radius={1}, type={2}",
+                leaderboardId, radius, type);
             return Task.FromResult(LeaderboardResult.Empty);
         }
 

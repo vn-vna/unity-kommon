@@ -1,9 +1,9 @@
 namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 {
-    public enum ScoreSubmissionMode
+    public enum LeaderboardScoreSubmissionMode
     {
         Best,
-        Latest,
+        Latest, 
         Increment,
         Cumulative
     }

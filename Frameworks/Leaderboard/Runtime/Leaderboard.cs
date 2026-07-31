@@ -12,18 +12,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         private static void EnsureReady()
         {
-            LeaderboardDirector director = LeaderboardDirector.Instance;
-            if (director == null)
-            {
-                throw new LeaderboardNotInitializedException(
-                    "Leaderboard director is not available. " +
-                    "Ensure a LeaderboardConfiguration exists with a provider.");
-            }
+            LeaderboardDirector director = LeaderboardDirector.Instance
+                ?? throw new LeaderboardNotInitializedException(
+                    "Leaderboard director is not available. Ensure a LeaderboardConfiguration exists with a provider."
+                );
 
-            if (director.Status != LeaderboardDirector.LeaderboardManagerStatus.Ready)
-            {
-                throw new LeaderboardNotInitializedException();
-            }
+            if (director.Status == LeaderboardDirector.LeaderboardManagerStatus.Ready) return;
+            throw new LeaderboardNotInitializedException();
         }
 
         private static async Task EnsureReadyAsync()
@@ -40,7 +35,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             long score,
             string metadata = null,
-            ScoreSubmissionMode mode = ScoreSubmissionMode.Best,
+            LeaderboardScoreSubmissionMode mode = LeaderboardScoreSubmissionMode.Best,
             CancellationToken ct = default
         )
         {
@@ -51,9 +46,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         public static async Task<LeaderboardResult> FetchLeaderboardAsync(
-            string leaderboardId,
-            int index,
-            int size,
+            string leaderboardId, int index, int size,
             CancellationToken ct = default
         )
         {
@@ -63,11 +56,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 .FetchLeaderboardAsync(leaderboardId, index, size, ct);
         }
 
-        public static async Task<LeaderboardResult>
-            FetchLeaderboardAroundPlayerAsync(
-                string leaderboardId,
-                int radius,
-                CancellationToken ct = default)
+        public static async Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
+            string leaderboardId, int radius, CancellationToken ct = default
+        )
         {
             await EnsureReadyAsync();
             return await LeaderboardDirector
@@ -93,7 +84,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             long score,
             string metadata = null,
-            ScoreSubmissionMode mode = ScoreSubmissionMode.Best)
+            LeaderboardScoreSubmissionMode mode = LeaderboardScoreSubmissionMode.Best
+        )
         {
             try
             {
@@ -112,10 +104,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         public static async void FetchLeaderboard(
-            string leaderboardId,
-            int index,
-            int size,
-            Action<LeaderboardResult> onFetched)
+            string leaderboardId, int index, int size,
+            Action<LeaderboardResult> onFetched
+        )
         {
             try
             {
@@ -135,17 +126,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         public static async void FetchLeaderboardAroundPlayer(
-            string leaderboardId,
-            int radius,
-            Action<LeaderboardResult> onFetched)
+            string leaderboardId, int radius,
+            Action<LeaderboardResult> onFetched
+        )
         {
             try
             {
                 await EnsureReadyAsync();
-                LeaderboardResult result =
-                    await LeaderboardDirector
-                        .Instance.FetchLeaderboardAroundPlayerAsync(
-                            leaderboardId, radius);
+                LeaderboardResult result = await LeaderboardDirector
+                    .Instance
+                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius);
                 onFetched?.Invoke(result);
             }
             catch (Exception ex)
@@ -182,4 +172,5 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         #endregion
     }
+
 }

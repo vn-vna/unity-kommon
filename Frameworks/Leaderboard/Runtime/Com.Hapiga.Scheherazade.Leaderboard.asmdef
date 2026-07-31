@@ -1,0 +1,19 @@
+{
+    "name": "Com.Hapiga.Scheherazade.Leaderboard",
+    "rootNamespace": "",
+    "references": [
+        "Com.Hapiga.Scheherazade.Common",
+        "Google.Play.Core",
+        "Google.Play.Common",
+        "Google.Play.Games"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

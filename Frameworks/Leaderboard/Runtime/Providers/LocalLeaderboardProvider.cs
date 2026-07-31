@@ -47,7 +47,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             long score,
             string metadata,
             LeaderboardType type,
-            ScoreSubmissionMode mode,
+            LeaderboardScoreSubmissionMode mode,
             CancellationToken ct = default)
         {
             var entries = LoadEntries(leaderboardId);
@@ -131,6 +131,88 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             return Task.FromResult(new LeaderboardResult(
                 sliced, totalPlayers, playerEntryIndex, playerRank));
+        }
+
+        public Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
+            string leaderboardId,
+            int radius,
+            LeaderboardType type,
+            CancellationToken ct = default)
+        {
+            var entries = LoadEntries(leaderboardId);
+            string playerId = SystemInfo.deviceUniqueIdentifier;
+
+            List<LeaderboardEntry> aggregated =
+                AggregateBest(entries, type);
+
+            bool isAscending = type == LeaderboardType.Duration;
+            var sorted = isAscending
+                ? aggregated.OrderBy(e => e.Score).ToList()
+                : aggregated.OrderByDescending(e => e.Score).ToList();
+
+            // Assign ranks
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                LeaderboardEntry entry = sorted[i];
+                sorted[i] = new LeaderboardEntry(
+                    i + 1,
+                    entry.PlayerId,
+                    entry.PlayerName,
+                    entry.Score,
+                    entry.Timestamp,
+                    entry.Metadata
+                );
+            }
+
+            // Find player rank
+            int playerRank = 0;
+            for (int i = 0; i < sorted.Count; i++)
+            {
+                if (sorted[i].PlayerId == playerId)
+                {
+                    playerRank = i + 1;
+                    break;
+                }
+            }
+
+            int fetchSize = (radius * 2) + 1;
+            int totalPlayers = sorted.Count;
+
+            if (playerRank <= 0)
+            {
+                // Player has no rank — fall back to top entries
+                int clampedIndex = 0;
+                int endIndex = Math.Min(fetchSize, totalPlayers);
+                var sliced = new LeaderboardEntry[endIndex - clampedIndex];
+
+                for (int i = clampedIndex; i < endIndex; i++)
+                {
+                    sliced[i - clampedIndex] = sorted[i];
+                }
+
+                return Task.FromResult(new LeaderboardResult(
+                    sliced, totalPlayers, -1, null));
+            }
+
+            int startIndex = Math.Max(0, playerRank - radius - 1);
+            int endIdx = Math.Min(startIndex + fetchSize, totalPlayers);
+
+            var window = new LeaderboardEntry[endIdx - startIndex];
+            int playerLocalIndex = -1;
+
+            for (int i = startIndex; i < endIdx; i++)
+            {
+                int pos = i - startIndex;
+                window[pos] = sorted[i];
+
+                if (window[pos].PlayerId == playerId)
+                {
+                    playerLocalIndex = pos;
+                }
+            }
+
+            return Task.FromResult(new LeaderboardResult(
+                window, totalPlayers, playerLocalIndex, playerRank));
         }
 
         public Task<LeaderboardEntry> FetchPlayerEntryAsync(

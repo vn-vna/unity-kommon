@@ -1,6 +1,6 @@
 namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 {
-    public enum SortOrder
+    public enum LeaderboardSortingOrder
     {
         Ascending,
         Descending

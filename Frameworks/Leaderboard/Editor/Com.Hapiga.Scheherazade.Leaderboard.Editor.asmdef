@@ -1,0 +1,20 @@
+{
+    "name": "Com.Hapiga.Scheherazade.Leaderboard.Editor",
+    "rootNamespace": "",
+    "references": [
+        "Com.Hapiga.Scheherazade.Leaderboard",
+        "Com.Hapiga.Scheherazade.Common",
+        "Com.Hapiga.Scheherazade.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

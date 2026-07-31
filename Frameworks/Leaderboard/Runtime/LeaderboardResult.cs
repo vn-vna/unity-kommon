@@ -23,5 +23,6 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             PlayerEntryIndex = playerEntryIndex;
             PlayerRank = playerRank;
         }
+
     }
 }

@@ -16,7 +16,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             long score,
             string metadata,
             LeaderboardType type,
-            ScoreSubmissionMode mode,
+            LeaderboardScoreSubmissionMode mode,
             CancellationToken ct = default
         );
 
@@ -24,6 +24,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             int index,
             int size,
+            LeaderboardType type,
+            CancellationToken ct = default
+        );
+
+        Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
+            string leaderboardId,
+            int radius,
             LeaderboardType type,
             CancellationToken ct = default
         );

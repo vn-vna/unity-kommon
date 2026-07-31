@@ -26,13 +26,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         [Tooltip("Sort direction for ranking")]
 #endif
         [SerializeField]
-        private SortOrder _sortOrder = SortOrder.Descending;
+        private LeaderboardSortingOrder _sortOrder = LeaderboardSortingOrder.Descending;
 
 #if UNITY_EDITOR
         [Tooltip("How often leaderboard scores reset")]
 #endif
         [SerializeField]
-        private ResetCadence _resetCadence = ResetCadence.None;
+        private LeaderboardCadence _resetCadence = LeaderboardCadence.None;
 
         public string Id
         {
@@ -52,13 +52,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             set => _type = value;
         }
 
-        public SortOrder SortOrder
+        public LeaderboardSortingOrder SortOrder
         {
             get => _sortOrder;
             set => _sortOrder = value;
         }
 
-        public ResetCadence ResetCadence
+        public LeaderboardCadence ResetCadence
         {
             get => _resetCadence;
             set => _resetCadence = value;
