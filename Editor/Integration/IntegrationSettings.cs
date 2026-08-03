@@ -142,6 +142,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                         customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Ads.IAdsServiceProvider"
                     )
                 }
+            ),
+            new SettingsTab(
+                "Tracking Events",
+                customRenderer: ApplovinMaxTrackingEventsTab.DrawTab
             )
         };
 
@@ -2923,17 +2927,23 @@ namespace Com.Hapiga.Scheherazade.Integration
         private static void TryDrawingInlineInspector(ScriptableObject asset, string header)
         {
             EditorGUILayout.LabelField(header, EditorStyles.miniBoldLabel);
+
+            // Editor.CreateEditor resolves the drawer in priority order:
+            //   custom [CustomEditor] drawer -> Odin fallback editor -> Unity default drawer.
             UnityEditor.Editor editor = UnityEditor.Editor.CreateEditor(asset);
             try
             {
 #if ODIN_INSPECTOR
-                if (editor is Sirenix.OdinInspector.Editor.OdinEditor odinEditor)
+                // Odin fallback editor: let Odin render its own inspector.
+                if (editor is Sirenix.OdinInspector.Editor.OdinEditor odinInspector)
                 {
-                    editor.DrawDefaultInspector();
+                    odinInspector.DrawUnityInspector();
+                    return;
                 }
-#else
-                editor.OnInspectorGUI();
 #endif
+
+                // Custom editor (if any) or Unity default drawer.
+                editor.OnInspectorGUI();
             }
             finally
             {

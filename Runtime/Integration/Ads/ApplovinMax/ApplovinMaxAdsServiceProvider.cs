@@ -1,7 +1,6 @@
 #if APPLOVIN_MAX
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
@@ -84,6 +83,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private Lazy<MappedList<AdsType, ApplovinMaxAdsUnitId>> _unitIdsMapping;
 
+        public MappedList<ApplovinMaxAdsTrackingEventType, ApplovinMaxAdsTrackingEventConfig> TrackingEventsMapping
+        {
+            get
+            {
+                if (_trackingEventsMapping == null)
+                {
+                    _trackingEventsMapping = new Lazy<MappedList<ApplovinMaxAdsTrackingEventType, ApplovinMaxAdsTrackingEventConfig>>(ConstructTrackingEventsMappedList);
+                }
+                return _trackingEventsMapping.Value;
+            }
+        }
+
+        private Lazy<MappedList<ApplovinMaxAdsTrackingEventType, ApplovinMaxAdsTrackingEventConfig>> _trackingEventsMapping;
+
         [SerializeField]
         private bool isTestAds;
 
@@ -101,6 +114,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         [SerializeField]
         private Color bannerBackgroundColor = Color.black;
+
+        [SerializeField]
+        private ApplovinMaxAdsTrackingEventConfig[] trackingEvents;
 
         [SerializeField]
         private RetryStrategyConfig openAppRetryConfig = new()
@@ -147,6 +163,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 unitIds, (uid) => uid.Type
             );
 
+        private MappedList<ApplovinMaxAdsTrackingEventType, ApplovinMaxAdsTrackingEventConfig> ConstructTrackingEventsMappedList()
+            => new MappedList<ApplovinMaxAdsTrackingEventType, ApplovinMaxAdsTrackingEventConfig>(
+                trackingEvents ?? Array.Empty<ApplovinMaxAdsTrackingEventConfig>(),
+                (config) => config.Type
+            );
+
 #if UNITY_EDITOR
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void EditorRefreshOnLoad()
@@ -159,6 +181,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             foreach (var config in configurations)
             {
                 config._unitIdsMapping = null;
+                config._trackingEventsMapping = null;
             }
         }
 #endif
@@ -366,7 +389,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     unitId.UnitId,
                     placement
                 );
-                SendAdsCallShowTrackingEvent(AdsType.Interstitial, placement);
+                SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.InterCallShow, placement);
             }
             catch (Exception ex)
             {
@@ -412,7 +435,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
                 if (called)
                 {
-                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
+                    SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallShow, placement);
                     return true;
                 }
             }
@@ -439,7 +462,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
                 if (called)
                 {
-                    SendAdsCallShowTrackingEvent(AdsType.Rewarded, placement);
+                    SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallShow, placement);
                     return true;
                 }
             }
@@ -455,39 +478,77 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #region Private Methods
 
-        private static void SendAdsCallShowTrackingEvent(AdsType format, string placement)
+        private void SendTrackingEvent(
+            ApplovinMaxAdsTrackingEventType type,
+            params (string key, object value)[] parameters)
         {
-            if (string.IsNullOrEmpty(placement))
+            if (!TryResolveTrackingEvent(type, out string actionId, out ActionSeverity severity))
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
-                    "Placement for AdsReward_CallShow tracking is null or empty."
-                );
-                return;
-            }
-
-            if (Integration.TrackingManager == null)
-            {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
-                    "TrackingManager is not available for tracking."
-                );
                 return;
             }
 
             Integration.TrackingManager
                 ?.TrackAction(new TrackingActionInfo
                 {
-                    ActionId = format switch
-                    {
-                        AdsType.Rewarded => "AdsReward_CallShow",
-                        AdsType.Interstitial => "AdsInter_CallShow",
-                        AdsType.OpenApp => "AdsAppOpen_CallShow",
-                        _ => null
-                    },
-                    Parameters = new Dictionary<string, object> {
-                        { "placement", placement }
-                    },
-                    Severity = ActionSeverity.Debug
+                    ActionId = actionId,
+                    Parameters = parameters.Length > 0
+                        ? TrackingActionInfo.CreateParametersDictionary(parameters)
+                        : null,
+                    Severity = severity
                 });
+        }
+
+        private bool TryResolveTrackingEvent(
+            ApplovinMaxAdsTrackingEventType type,
+            out string actionId,
+            out ActionSeverity severity)
+        {
+            if (TrackingEventsMapping.TryGetValue(type, out var config))
+            {
+                if (!config.IsEnabled)
+                {
+                    actionId = null;
+                    severity = default;
+                    return false;
+                }
+
+                actionId = string.IsNullOrEmpty(config.ActionId)
+                    ? ApplovinMaxAdsTrackingEventDefaults.Get(type).ActionId
+                    : config.ActionId;
+                severity = config.Severity;
+                return true;
+            }
+
+            if (ApplovinMaxAdsTrackingEventDefaults.TryGet(type, out var defaults))
+            {
+                actionId = defaults.ActionId;
+                severity = defaults.Severity;
+                return true;
+            }
+
+            QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                "No tracking configuration or default found for event '{0}'.",
+                type
+            );
+
+            actionId = null;
+            severity = default;
+            return false;
+        }
+
+        private void SendAdsCallShowTrackingEvent(
+            ApplovinMaxAdsTrackingEventType type,
+            string placement)
+        {
+            if (string.IsNullOrEmpty(placement))
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "Placement for CallShow tracking is null or empty."
+                );
+                return;
+            }
+
+            SendTrackingEvent(type, ("placement", placement));
         }
 
         private void InvokeAdsCallbackOnce(ref Action<bool> callback, bool param)
@@ -623,7 +684,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             try
             {
                 MaxSdk.LoadAppOpenAd(UnitIdsMapping[AdsType.OpenApp].UnitId);
-                SendTrackingAction("AdsAppOpen", "CallLoad");
+                SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenCallLoad);
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Open App Ad");
             }
             catch (Exception ex)
@@ -653,7 +714,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             try
             {
                 MaxSdk.LoadInterstitial(UnitIdsMapping[AdsType.Interstitial].UnitId);
-                SendTrackingAction("AdsInter", "CallLoad");
+                SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterCallLoad);
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Interstitial Ad");
             }
             catch (Exception ex)
@@ -683,7 +744,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             try
             {
                 MaxSdk.LoadRewardedAd(UnitIdsMapping[AdsType.Rewarded].UnitId);
-                SendTrackingAction("AdsReward", "CallLoad");
+                SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallLoad);
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Rewarded Ad");
             }
             catch (Exception ex)
@@ -723,7 +784,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 MaxSdk.LoadBanner(bannerUnitId.UnitId);
                 MaxSdk.StartBannerAutoRefresh(bannerUnitId.UnitId);
                 _bannerAutoRefreshing = true;
-                SendTrackingAction("AdsBanner", "CallLoad");
+                SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerCallLoad);
                 QuickLog.Info<ApplovinMaxAdsServiceProvider>("Loading Banner Ad");
             }
             catch (Exception ex)
@@ -733,16 +794,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     ex.Message
                 );
             }
-        }
-
-        private void SendTrackingAction(string kind, string action)
-        {
-            Integration.TrackingManager
-                ?.TrackAction(new TrackingActionInfo
-                {
-                    ActionId = $"{kind}_{action}",
-                    Severity = ActionSeverity.Debug,
-                });
         }
 
         private void SendRevenueTracking(MaxSdkBase.AdInfo info, AdsType type)
@@ -781,50 +832,50 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleRewardedAdReceivedReward(string arg1, MaxSdkBase.Reward reward, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "RewardReceived");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardRewardReceived);
             _rewardFulfilled = true;
         }
 
         private void HandleRewardedAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "Hidden");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardHidden);
             InvokeAdsCallbackOnce(ref _rewardedCallback, _rewardFulfilled);
         }
 
         private void HandleRewardedAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
-            SendTrackingAction("AdsReward", "DisplayFailed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardDisplayFailed);
             InvokeAdsCallbackOnce(ref _rewardedCallback, false);
         }
 
         private void HandleRewardedAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "Displayed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardDisplayed);
             _rewardFulfilled = false;
             _rewardedHandle.Execute();
         }
 
         private void HandleRewardedAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "Clicked");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardClicked);
         }
 
         private void HandleRewardedAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsReward", "RevenuePaid");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardRevenuePaid);
             SendRevenueTracking(info, AdsType.Rewarded);
         }
 
         private void HandleRewardedAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
             _rewardedHandle.Fail(_rewardedLoadGen);
-            SendTrackingAction("AdsReward", "FailedToLoad");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardFailedToLoad);
         }
 
         private void HandleRewardedAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
             _rewardedHandle.Complete(_rewardedLoadGen);
-            SendTrackingAction("AdsReward", "Loaded");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Rewarded Ad is loaded and ready to be shown."
             );
@@ -836,32 +887,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleInterstitialAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsInter", "Hidden");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterHidden);
             InvokeAdsCallbackOnce(ref _interstitialCallback, _interstitialFulfilled);
         }
 
         private void HandleInterstitialAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
-            SendTrackingAction("AdsInter", "DisplayFailed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterDisplayFailed);
             InvokeAdsCallbackOnce(ref _interstitialCallback, false);
         }
 
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsInter", "Displayed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterDisplayed);
             _interstitialFulfilled = true;
             _interstitialHandle.Execute();
         }
 
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsInter", "Clicked");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterClicked);
             _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsInter", "RevenuePaid");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterRevenuePaid);
             SendRevenueTracking(info, AdsType.Interstitial);
             _interstitialFulfilled = true;
         }
@@ -869,13 +920,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
             _interstitialHandle.Fail(_interstitialLoadGen);
-            SendTrackingAction("AdsInter", "FailedToLoad");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterFailedToLoad);
         }
 
         private void HandleInterstitialAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
             _interstitialHandle.Complete(_interstitialLoadGen);
-            SendTrackingAction("AdsInter", "Loaded");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Interstitial Ad is loaded and ready to be shown."
             );
@@ -887,21 +938,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleBannerAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsBanner", "RevenuePaid");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerRevenuePaid);
             SendRevenueTracking(info, AdsType.Banner);
         }
 
         private void HandleBannerAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
             _bannerAutoRefreshing = false;
-            SendTrackingAction("AdsBanner", "FailedToLoad");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerFailedToLoad);
             IsBannerAvailable = false;
             _bannerHandle.Fail(_bannerLoadGen);
         }
 
         private void HandleBannerAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsBanner", "Loaded");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerLoaded);
             IsBannerAvailable = true;
             _bannerHandle.Complete(_bannerLoadGen);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
@@ -915,41 +966,41 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleAppOpenAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsAppOpen", "Hidden");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenHidden);
             _openAppHandle.Execute();
         }
 
         private void HandleAppOpenAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
-            SendTrackingAction("AdsAppOpen", "DisplayFailed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenDisplayFailed);
         }
 
         private void HandleAppOpenAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsAppOpen", "Displayed");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenDisplayed);
         }
 
         private void HandleAppOpenAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsAppOpen", "Clicked");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenClicked);
         }
 
         private void HandleAppOpenAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
-            SendTrackingAction("AdsAppOpen", "RevenuePaid");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenRevenuePaid);
             SendRevenueTracking(info, AdsType.OpenApp);
         }
 
         private void HandleAppOpenAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
             _openAppHandle.Fail(_openAppLoadGen);
-            SendTrackingAction("AdsAppOpen", "FailedToLoad");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenFailedToLoad);
         }
 
         private void HandleAppOpenAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
             _openAppHandle.Complete(_openAppLoadGen);
-            SendTrackingAction("AdsAppOpen", "Loaded");
+            SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Open App Ad is loaded and ready to be shown."
             );
