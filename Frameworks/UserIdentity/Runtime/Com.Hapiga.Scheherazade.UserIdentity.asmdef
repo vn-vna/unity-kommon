@@ -1,0 +1,19 @@
+{
+    "name": "Com.Hapiga.Scheherazade.UserIdentity",
+    "rootNamespace": "",
+    "references": [
+        "Com.Hapiga.Scheherazade.Common",
+        "Google.Play.Games",
+        "Apple.Core",
+        "Apple.GameKit"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
