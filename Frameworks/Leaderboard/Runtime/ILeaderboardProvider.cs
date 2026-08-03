@@ -9,6 +9,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         bool IsAvailable { get; }
         bool IsInitialized { get; }
 
+        /// <summary>
+        /// Bitmask of features this provider supports. Query with
+        /// <c>Leaderboard.Supports(LeaderboardProviderFeatures.TimeFrameWeekly)</c>
+        /// or <c>Leaderboard.SupportsTimeframe(LeaderboardTimeframe)</c>.
+        /// </summary>
+        LeaderboardProviderFeatures Features { get; }
+
         Task<bool> InitializeAsync();
 
         Task ReportScoreAsync(
@@ -25,20 +32,23 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             int index,
             int size,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         );
 
         Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
             string leaderboardId,
             int radius,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         );
 
         Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         );
     }
 }

@@ -5,7 +5,9 @@
         "Com.Hapiga.Scheherazade.Common",
         "Google.Play.Core",
         "Google.Play.Common",
-        "Google.Play.Games"
+        "Google.Play.Games",
+        "Apple.Core",
+        "Apple.GameKit"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

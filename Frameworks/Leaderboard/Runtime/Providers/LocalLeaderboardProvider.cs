@@ -36,6 +36,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public bool IsAvailable => true;
         public bool IsInitialized => true;
 
+        public LeaderboardProviderFeatures Features => LeaderboardProviderFeatures.AllFeatures;
+
         public Task<bool> InitializeAsync()
         {
             EnsureDirectory();
@@ -72,9 +74,11 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             int index,
             int size,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
-            var entries = LoadEntries(leaderboardId);
+            List<LeaderboardEntry> entries = LoadEntries(leaderboardId);
+            entries = FilterByTimeframe(entries, timeframe);
             string playerId = SystemInfo.deviceUniqueIdentifier;
 
             List<LeaderboardEntry> aggregated =
@@ -137,9 +141,11 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             int radius,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
-            var entries = LoadEntries(leaderboardId);
+            List<LeaderboardEntry> entries = LoadEntries(leaderboardId);
+            entries = FilterByTimeframe(entries, timeframe);
             string playerId = SystemInfo.deviceUniqueIdentifier;
 
             List<LeaderboardEntry> aggregated =
@@ -218,9 +224,11 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
-            var entries = LoadEntries(leaderboardId);
+            List<LeaderboardEntry> entries = LoadEntries(leaderboardId);
+            entries = FilterByTimeframe(entries, timeframe);
             string playerId = SystemInfo.deviceUniqueIdentifier;
 
             var playerEntries = entries
@@ -270,6 +278,29 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         #endregion
 
         #region Private Methods — Aggregation
+
+        private static List<LeaderboardEntry> FilterByTimeframe(
+            List<LeaderboardEntry> entries,
+            LeaderboardTimeframe timeframe)
+        {
+            if (timeframe == LeaderboardTimeframe.AllTime) return entries;
+
+            DateTime cutoff = DateTime.UtcNow;
+            switch (timeframe)
+            {
+                case LeaderboardTimeframe.Daily:
+                    cutoff = cutoff.AddDays(-1);
+                    break;
+                case LeaderboardTimeframe.Weekly:
+                    cutoff = cutoff.AddDays(-7);
+                    break;
+                case LeaderboardTimeframe.Monthly:
+                    cutoff = cutoff.AddDays(-30);
+                    break;
+            }
+
+            return entries.Where(e => e.Timestamp >= cutoff).ToList();
+        }
 
         private static List<LeaderboardEntry> AggregateBest(
             List<LeaderboardEntry> entries,

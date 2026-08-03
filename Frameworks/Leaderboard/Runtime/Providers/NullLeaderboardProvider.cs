@@ -24,6 +24,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public bool IsAvailable => true;
         public bool IsInitialized => true;
 
+        public LeaderboardProviderFeatures Features => LeaderboardProviderFeatures.None;
+
         public Task<bool> InitializeAsync()
         {
             QuickLog.Info<NullLeaderboardProvider>(
@@ -50,11 +52,12 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             int index,
             int size,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
             QuickLog.Debug<NullLeaderboardProvider>(
-                "Null FetchLeaderboard: id='{0}', index={1}, size={2}, type={3}",
-                leaderboardId, index, size, type);
+                "Null FetchLeaderboard: id='{0}', index={1}, size={2}, type={3}, tf={4}",
+                leaderboardId, index, size, type, timeframe);
             return Task.FromResult(LeaderboardResult.Empty);
         }
 
@@ -62,22 +65,24 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             int radius,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
             QuickLog.Debug<NullLeaderboardProvider>(
-                "Null FetchLeaderboardAroundPlayer: id='{0}', radius={1}, type={2}",
-                leaderboardId, radius, type);
+                "Null FetchAroundPlayer: id='{0}', radius={1}, type={2}, tf={3}",
+                leaderboardId, radius, type, timeframe);
             return Task.FromResult(LeaderboardResult.Empty);
         }
 
         public Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
             LeaderboardType type,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
             QuickLog.Debug<NullLeaderboardProvider>(
-                "Null FetchPlayerEntry: id='{0}', type={1}",
-                leaderboardId, type);
+                "Null FetchPlayerEntry: id='{0}', type={1}, tf={2}",
+                leaderboardId, type, timeframe);
             return Task.FromResult(default(LeaderboardEntry));
         }
 

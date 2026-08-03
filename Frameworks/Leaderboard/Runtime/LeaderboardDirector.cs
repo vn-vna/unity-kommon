@@ -27,6 +27,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public LeaderboardManagerStatus Status { get; private set; } = LeaderboardManagerStatus.Uninitialized;
 
+        public LeaderboardProviderFeatures ActiveProviderFeatures =>
+            _activeProvider?.Features ?? LeaderboardProviderFeatures.None;
+
         #endregion
 
         #region Private Fields
@@ -305,7 +308,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public async Task<LeaderboardResult> FetchLeaderboardAsync(
             string leaderboardId, int index, int size,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             EnsureReady();
@@ -317,15 +321,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             }
 
             LeaderboardType type = ResolveLeaderboardType(leaderboardId);
+            timeframe = ResolveTimeframe(timeframe);
 
             try
             {
                 LeaderboardResult result = await _activeProvider
-                    .FetchLeaderboardAsync(leaderboardId, index, size, type, ct);
+                    .FetchLeaderboardAsync(leaderboardId, index, size, type, ct, timeframe);
 
                 QuickLog.Info<LeaderboardDirector>(
-                    "Fetched leaderboard: id='{0}', index={1}, size={2}, entries={3}, total={4}",
-                    leaderboardId, index, size, result.Entries.Length, result.TotalPlayers
+                    "Fetched leaderboard: id='{0}', index={1}, size={2}, tf={3}, entries={4}, total={5}",
+                    leaderboardId, index, size, timeframe, result.Entries.Length, result.TotalPlayers
                 );
 
                 LeaderboardFetched?.Invoke(leaderboardId, result);
@@ -338,8 +343,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             catch (Exception ex)
             {
                 QuickLog.Error<LeaderboardDirector>(
-                    "FetchLeaderboard failed: id='{0}', index={1}, size={2}, error={3}",
-                    leaderboardId, index, size, ex.Message
+                    "FetchLeaderboard failed: id='{0}', index={1}, size={2}, tf={3}, error={4}",
+                    leaderboardId, index, size, timeframe, ex.Message
                 );
 
                 ErrorOccurred?.Invoke("FetchLeaderboard", ex.Message);
@@ -350,7 +355,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public async Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
             string leaderboardId,
             int radius,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
             EnsureReady();
 
@@ -361,15 +367,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             }
 
             LeaderboardType type = ResolveLeaderboardType(leaderboardId);
+            timeframe = ResolveTimeframe(timeframe);
 
             try
             {
                 LeaderboardResult result = await _activeProvider
-                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius, type, ct);
+                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius, type, ct, timeframe);
 
                 QuickLog.Info<LeaderboardDirector>(
-                    "Fetched around player: id='{0}', radius={1}, entries={2}, playerIndex={3}",
-                    leaderboardId, radius, result.Entries.Length, result.PlayerEntryIndex
+                    "Fetched around player: id='{0}', radius={1}, tf={2}, entries={3}, playerIndex={4}",
+                    leaderboardId, radius, timeframe, result.Entries.Length, result.PlayerEntryIndex
                 );
 
                 LeaderboardFetched?.Invoke(leaderboardId, result);
@@ -382,8 +389,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             catch (Exception ex)
             {
                 QuickLog.Error<LeaderboardDirector>(
-                    "FetchLeaderboardAroundPlayer failed: id='{0}', radius={1}, error={2}",
-                    leaderboardId, radius, ex.Message
+                    "FetchLeaderboardAroundPlayer failed: id='{0}', radius={1}, tf={2}, error={3}",
+                    leaderboardId, radius, timeframe, ex.Message
                 );
 
                 ErrorOccurred?.Invoke("FetchLeaderboardAroundPlayer", ex.Message);
@@ -393,7 +400,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public async Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             EnsureReady();
@@ -405,15 +413,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             }
 
             LeaderboardType type = ResolveLeaderboardType(leaderboardId);
+            timeframe = ResolveTimeframe(timeframe);
 
             try
             {
                 LeaderboardEntry entry = await _activeProvider
-                    .FetchPlayerEntryAsync(leaderboardId, type, ct);
+                    .FetchPlayerEntryAsync(leaderboardId, type, ct, timeframe);
 
                 QuickLog.Info<LeaderboardDirector>(
-                    "Fetched player entry: id='{0}', rank={1}, score={2}",
-                    leaderboardId, entry.Rank, entry.Score
+                    "Fetched player entry: id='{0}', tf={1}, rank={2}, score={3}",
+                    leaderboardId, timeframe, entry.Rank, entry.Score
                 );
 
                 PlayerEntryFetched?.Invoke(leaderboardId, entry);
@@ -426,13 +435,35 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             catch (Exception ex)
             {
                 QuickLog.Error<LeaderboardDirector>(
-                    "FetchPlayerEntry failed: id='{0}', error={1}",
-                    leaderboardId, ex.Message
+                    "FetchPlayerEntry failed: id='{0}', tf={1}, error={2}",
+                    leaderboardId, timeframe, ex.Message
                 );
 
                 ErrorOccurred?.Invoke("FetchPlayerEntry", ex.Message);
                 throw;
             }
+        }
+
+        #endregion
+
+        #region Feature Query
+
+        /// <summary>
+        /// Returns <c>true</c> if the active provider supports the given feature.
+        /// Safe to call before initialization (queries the provider instance directly).
+        /// </summary>
+        public bool SupportsFeature(LeaderboardProviderFeatures feature)
+        {
+            return (ActiveProviderFeatures & feature) == feature;
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> if the active provider natively supports the given timeframe.
+        /// See <see cref="LeaderboardProviderFeatures.TimeFrameDaily"/> etc.
+        /// </summary>
+        public bool SupportsTimeframe(LeaderboardTimeframe timeframe)
+        {
+            return SupportsFeature(FeatureForTimeframe(timeframe));
         }
 
         #endregion
@@ -443,6 +474,38 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         {
             if (Status == LeaderboardManagerStatus.Ready) return;
             throw new LeaderboardNotInitializedException();
+        }
+
+        private LeaderboardTimeframe ResolveTimeframe(
+            LeaderboardTimeframe requested)
+        {
+            if (requested == LeaderboardTimeframe.AllTime) return LeaderboardTimeframe.AllTime;
+            if (SupportsTimeframe(requested)) return requested;
+
+            QuickLog.Warning<LeaderboardDirector>(
+                "Provider '{0}' does not natively support timeframe {1}. "
+                + "Falling back to AllTime.",
+                _activeProvider?.ProviderId ?? "none",
+                requested
+            );
+
+            return LeaderboardTimeframe.AllTime;
+        }
+
+        private static LeaderboardProviderFeatures FeatureForTimeframe(
+            LeaderboardTimeframe timeframe)
+        {
+            switch (timeframe)
+            {
+                case LeaderboardTimeframe.Daily:
+                    return LeaderboardProviderFeatures.TimeFrameDaily;
+                case LeaderboardTimeframe.Weekly:
+                    return LeaderboardProviderFeatures.TimeFrameWeekly;
+                case LeaderboardTimeframe.Monthly:
+                    return LeaderboardProviderFeatures.TimeFrameMonthly;
+                default:
+                    return LeaderboardProviderFeatures.TimeFrameAllTime;
+            }
         }
 
         private void FireError(string operation, string message)

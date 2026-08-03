@@ -22,6 +22,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         private const int DefaultPageSize = 25;
         private const int MaxPaginationSteps = 20;
+        private const string TimeframePrefix = "__tf_";
         private const string AroundPlayerCacheSuffix = "__around_player";
         private const string PlayerEntryCacheSuffix = "__player_entry";
 
@@ -32,6 +33,25 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public string ProviderId => providerId;
         public bool IsAvailable { get; private set; }
         public bool IsInitialized => _isInitialized;
+
+        public LeaderboardProviderFeatures Features
+        {
+            get
+            {
+#if UNITY_ANDROID
+                return
+                    LeaderboardProviderFeatures.ReportScore
+                    | LeaderboardProviderFeatures.FetchTopScores
+                    | LeaderboardProviderFeatures.FetchAroundPlayer
+                    | LeaderboardProviderFeatures.FetchPlayerEntry
+                    | LeaderboardProviderFeatures.TimeFrameDaily
+                    | LeaderboardProviderFeatures.TimeFrameWeekly
+                    | LeaderboardProviderFeatures.TimeFrameAllTime;
+#else
+                return LeaderboardProviderFeatures.None;
+#endif
+            }
+        }
 
         #endregion
 
@@ -167,18 +187,19 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             int index,
             int size,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             QuickLog.Debug<GoogleServiceLeaderboardProvider>(
-                "[{0}] FetchLeaderboard: id='{1}', index={2}, size={3}",
-                providerId, leaderboardId, index, size);
+                "[{0}] FetchLeaderboard: id='{1}', index={2}, size={3}, tf={4}",
+                providerId, leaderboardId, index, size, timeframe);
 
             if (index < 0) index = 0;
             if (size <= 0) size = 1;
 
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
-            return await FetchLeaderboardInternal(leaderboardId, index, size, ct);
+            return await FetchLeaderboardInternal(leaderboardId, index, size, timeframe, ct);
 #else
             await Task.CompletedTask;
             return LeaderboardResult.Empty;
@@ -189,17 +210,18 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string leaderboardId,
             int radius,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             QuickLog.Debug<GoogleServiceLeaderboardProvider>(
-                "[{0}] FetchLeaderboardAroundPlayer: id='{1}', radius={2}",
-                providerId, leaderboardId, radius);
+                "[{0}] FetchLeaderboardAroundPlayer: id='{1}', radius={2}, tf={3}",
+                providerId, leaderboardId, radius, timeframe);
 
             if (radius < 0) radius = 0;
 
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
-            return await FetchLeaderboardAroundPlayerInternal(leaderboardId, radius, ct);
+            return await FetchLeaderboardAroundPlayerInternal(leaderboardId, radius, timeframe, ct);
 #else
             await Task.CompletedTask;
             return LeaderboardResult.Empty;
@@ -209,15 +231,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         public async Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
             LeaderboardType type,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             QuickLog.Debug<GoogleServiceLeaderboardProvider>(
-                "[{0}] FetchPlayerEntry: id='{1}'",
-                providerId, leaderboardId);
+                "[{0}] FetchPlayerEntry: id='{1}', tf={2}",
+                providerId, leaderboardId, timeframe);
 
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
-            return await FetchPlayerEntryInternal(leaderboardId, ct);
+            return await FetchPlayerEntryInternal(leaderboardId, timeframe, ct);
 #else
             await Task.CompletedTask;
             return default;
@@ -303,20 +326,30 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 }
                 else
                 {
-                    string mainKey = leaderboardId;
-                    string aroundKey = leaderboardId + AroundPlayerCacheSuffix;
-                    string playerKey = leaderboardId + PlayerEntryCacheSuffix;
+                    // Remove every key whose prefix matches this leaderboard ID
+                    // (covers all timeframe variants: {id}, {id}__tf_daily, etc.)
+                    List<string> keysToRemove = new List<string>();
+                    foreach (string key in _cache.Keys)
+                    {
+                        if (key == leaderboardId
+                            || key.StartsWith(leaderboardId + TimeframePrefix)
+                            || key.StartsWith(leaderboardId + AroundPlayerCacheSuffix)
+                            || key.StartsWith(leaderboardId + PlayerEntryCacheSuffix))
+                        {
+                            keysToRemove.Add(key);
+                        }
+                    }
 
-                    bool removed = false;
-                    removed |= _cache.Remove(mainKey);
-                    removed |= _cache.Remove(aroundKey);
-                    removed |= _cache.Remove(playerKey);
+                    foreach (string key in keysToRemove)
+                    {
+                        _cache.Remove(key);
+                    }
 
-                    if (removed)
+                    if (keysToRemove.Count > 0)
                     {
                         QuickLog.Debug<GoogleServiceLeaderboardProvider>(
-                            "[{0}] Cache invalidated for id='{1}'",
-                            providerId, leaderboardId);
+                            "[{0}] Cache invalidated {1} keys for id='{2}'",
+                            providerId, keysToRemove.Count, leaderboardId);
                     }
                 }
             }
@@ -404,6 +437,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             string gpgsId,
             LeaderboardStart start,
             int rowCount,
+            LeaderboardTimeSpan timeSpan,
             CancellationToken ct)
         {
             TaskCompletionSource<LeaderboardScoreData> tcs =
@@ -428,7 +462,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                     start,
                     rowCount,
                     LeaderboardCollection.Public,
-                    LeaderboardTimeSpan.AllTime,
+                    timeSpan,
                     (data) =>
                     {
                         if (data == null)
@@ -552,7 +586,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             );
         }
 
-        #endif
+#endif
 
         #endregion
 
@@ -561,9 +595,11 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES
 
         private async Task<LeaderboardResult> FetchLeaderboardInternal(
-            string leaderboardId, int index, int size, CancellationToken ct)
+            string leaderboardId, int index, int size,
+            LeaderboardTimeframe timeframe, CancellationToken ct)
         {
-            string cacheKey = leaderboardId;
+            string cacheKey = BuildCacheKey(leaderboardId, timeframe);
+            LeaderboardTimeSpan timeSpan = ToLeaderboardTimeSpan(timeframe);
             CachedLeaderboardData cacheEntry = GetCacheEntry(cacheKey);
 
             // Check if we can serve from cache
@@ -599,7 +635,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             LeaderboardScoreData firstPage = await WithTimeout(
                 LoadScoresTask(
-                    gpgsId, LeaderboardStart.TopScores, loadCount, ct),
+                    gpgsId, LeaderboardStart.TopScores, loadCount, timeSpan, ct),
                 fetchTimeoutSeconds);
 
             if (firstPage == null || !firstPage.Valid)
@@ -660,9 +696,11 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         private async Task<LeaderboardResult> FetchLeaderboardAroundPlayerInternal(
-            string leaderboardId, int radius, CancellationToken ct)
+            string leaderboardId, int radius,
+            LeaderboardTimeframe timeframe, CancellationToken ct)
         {
-            string cacheKey = leaderboardId + AroundPlayerCacheSuffix;
+            string cacheKey = BuildCacheKey(leaderboardId, timeframe, AroundPlayerCacheSuffix);
+            LeaderboardTimeSpan timeSpan = ToLeaderboardTimeSpan(timeframe);
             CachedLeaderboardData cacheEntry = GetCacheEntry(cacheKey);
 
             if (IsCacheValid(cacheEntry) && cacheEntry.AroundPlayerResult != null)
@@ -682,7 +720,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
             LeaderboardScoreData data = await WithTimeout(
                 LoadScoresTask(
-                    gpgsId, LeaderboardStart.PlayerCentered, rowCount, ct),
+                    gpgsId, LeaderboardStart.PlayerCentered, rowCount, timeSpan, ct),
                 fetchTimeoutSeconds);
 
             if (data == null || !data.Valid)
@@ -748,9 +786,12 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
         }
 
         private async Task<LeaderboardEntry> FetchPlayerEntryInternal(
-            string leaderboardId, CancellationToken ct)
+            string leaderboardId,
+            LeaderboardTimeframe timeframe,
+            CancellationToken ct)
         {
-            string cacheKey = leaderboardId + PlayerEntryCacheSuffix;
+            string cacheKey = BuildCacheKey(leaderboardId, timeframe, PlayerEntryCacheSuffix);
+            LeaderboardTimeSpan timeSpan = ToLeaderboardTimeSpan(timeframe);
             CachedLeaderboardData cacheEntry = GetCacheEntry(cacheKey);
 
             if (IsCacheValid(cacheEntry) && cacheEntry.PlayerEntry.HasValue)
@@ -770,7 +811,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             // Load 1 score centered on player — PlayerScore gives us what we need
             LeaderboardScoreData data = await WithTimeout(
                 LoadScoresTask(
-                    gpgsId, LeaderboardStart.PlayerCentered, 1, ct),
+                    gpgsId, LeaderboardStart.PlayerCentered, 1, timeSpan, ct),
                 fetchTimeoutSeconds);
 
             if (data == null || !data.Valid)
@@ -830,7 +871,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             return entry;
         }
 
-        #endif
+#endif
 
         #endregion
 
@@ -927,7 +968,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 null);
         }
 
-        #endif
+#endif
 
         #endregion
 
@@ -963,6 +1004,37 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 return value;
             }
             return id;
+        }
+
+        #endregion
+
+        #region Private Methods — Timeframe Helpers
+
+        private static string BuildCacheKey(
+            string leaderboardId,
+            LeaderboardTimeframe timeframe,
+            string suffix = null)
+        {
+            string key = leaderboardId + TimeframePrefix + timeframe.ToString().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(suffix))
+            {
+                key += suffix;
+            }
+            return key;
+        }
+
+        private static LeaderboardTimeSpan ToLeaderboardTimeSpan(
+            LeaderboardTimeframe timeframe)
+        {
+            switch (timeframe)
+            {
+                case LeaderboardTimeframe.Daily:
+                    return LeaderboardTimeSpan.Daily;
+                case LeaderboardTimeframe.Weekly:
+                    return LeaderboardTimeSpan.Weekly;
+                default:
+                    return LeaderboardTimeSpan.AllTime;
+            }
         }
 
         #endregion

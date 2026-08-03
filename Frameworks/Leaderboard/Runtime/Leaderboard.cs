@@ -47,33 +47,37 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public static async Task<LeaderboardResult> FetchLeaderboardAsync(
             string leaderboardId, int index, int size,
-            CancellationToken ct = default
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             await EnsureReadyAsync();
             return await LeaderboardDirector
                 .Instance
-                .FetchLeaderboardAsync(leaderboardId, index, size, ct);
+                .FetchLeaderboardAsync(leaderboardId, index, size, ct, timeframe);
         }
 
         public static async Task<LeaderboardResult> FetchLeaderboardAroundPlayerAsync(
-            string leaderboardId, int radius, CancellationToken ct = default
+            string leaderboardId, int radius,
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             await EnsureReadyAsync();
             return await LeaderboardDirector
                 .Instance
-                .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius, ct);
+                .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius, ct, timeframe);
         }
 
         public static async Task<LeaderboardEntry> FetchPlayerEntryAsync(
             string leaderboardId,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime)
         {
             await EnsureReadyAsync();
             return await LeaderboardDirector
                 .Instance
-                .FetchPlayerEntryAsync(leaderboardId, ct);
+                .FetchPlayerEntryAsync(leaderboardId, ct, timeframe);
         }
 
         #endregion
@@ -105,7 +109,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public static async void FetchLeaderboard(
             string leaderboardId, int index, int size,
-            Action<LeaderboardResult> onFetched
+            Action<LeaderboardResult> onFetched,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             try
@@ -113,7 +118,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 await EnsureReadyAsync();
                 LeaderboardResult result = await LeaderboardDirector
                     .Instance
-                    .FetchLeaderboardAsync(leaderboardId, index, size);
+                    .FetchLeaderboardAsync(leaderboardId, index, size,
+                        timeframe: timeframe);
                 onFetched?.Invoke(result);
             }
             catch (Exception ex)
@@ -127,7 +133,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public static async void FetchLeaderboardAroundPlayer(
             string leaderboardId, int radius,
-            Action<LeaderboardResult> onFetched
+            Action<LeaderboardResult> onFetched,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             try
@@ -135,7 +142,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 await EnsureReadyAsync();
                 LeaderboardResult result = await LeaderboardDirector
                     .Instance
-                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius);
+                    .FetchLeaderboardAroundPlayerAsync(leaderboardId, radius,
+                        timeframe: timeframe);
                 onFetched?.Invoke(result);
             }
             catch (Exception ex)
@@ -149,7 +157,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
 
         public static async void FetchPlayerEntry(
             string leaderboardId,
-            Action<LeaderboardEntry> onFetched
+            Action<LeaderboardEntry> onFetched,
+            LeaderboardTimeframe timeframe = LeaderboardTimeframe.AllTime
         )
         {
             try
@@ -157,7 +166,8 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                 await EnsureReadyAsync();
                 LeaderboardEntry entry = await LeaderboardDirector
                     .Instance
-                    .FetchPlayerEntryAsync(leaderboardId);
+                    .FetchPlayerEntryAsync(leaderboardId,
+                        timeframe: timeframe);
 
                 onFetched?.Invoke(entry);
             }
@@ -168,6 +178,32 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                     leaderboardId, ex
                 );
             }
+        }
+
+        #endregion
+
+        #region Feature Query
+
+        /// <summary>
+        /// Returns <c>true</c> if the active provider supports the given feature.
+        /// Safe to call before initialization.
+        /// </summary>
+        public static bool Supports(LeaderboardProviderFeatures feature)
+        {
+            LeaderboardDirector director = LeaderboardDirector.Instance;
+            return director != null && director.SupportsFeature(feature);
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> if the active provider natively supports
+        /// the given timeframe (without fallback). For example,
+        /// <c>Leaderboard.SupportsTimeframe(LeaderboardTimeframe.Monthly)</c>
+        /// returns <c>false</c> on GPGS and Game Center.
+        /// </summary>
+        public static bool SupportsTimeframe(LeaderboardTimeframe timeframe)
+        {
+            LeaderboardDirector director = LeaderboardDirector.Instance;
+            return director != null && director.SupportsTimeframe(timeframe);
         }
 
         #endregion

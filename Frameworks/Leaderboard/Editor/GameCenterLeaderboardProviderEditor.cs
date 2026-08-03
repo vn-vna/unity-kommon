@@ -7,8 +7,8 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
 {
-    [CustomEditor(typeof(GoogleServiceLeaderboardProvider))]
-    internal sealed class GoogleServiceLeaderboardProviderEditor : UnityEditor.Editor
+    [CustomEditor(typeof(GameCenterLeaderboardProvider))]
+    internal sealed class GameCenterLeaderboardProviderEditor : UnityEditor.Editor
     {
         #region Constants
 
@@ -131,7 +131,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Id Mapping", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(
+                    "Id Mapping (internal -> GameKit leaderboard id)",
+                    EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
 
                 using (new EditorGUI.DisabledScope(_knownIds.Length == 0))
@@ -155,9 +157,9 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
         {
             SerializedProperty element = _idMappingProp.GetArrayElementAtIndex(index);
             SerializedProperty leaderboardIdProp = element.FindPropertyRelative("leaderboardId");
-            SerializedProperty playServiceLeaderboardIdProp = element.FindPropertyRelative("playServiceLeaderboardId");
+            SerializedProperty gameKitIdProp = element.FindPropertyRelative("gameKitLeaderboardId");
 
-            if (leaderboardIdProp == null || playServiceLeaderboardIdProp == null)
+            if (leaderboardIdProp == null || gameKitIdProp == null)
             {
                 EditorGUILayout.LabelField($"Entry {index}: invalid format");
                 return false;
@@ -185,13 +187,13 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
             DrawIdDropdown(dropdownRect, leaderboardIdProp, currentId);
             x += dropdownWidth + Spacing;
 
-            // Text field for Google Play Service ID
+            // Text field for GameKit leaderboard ID
             Rect textRect = new Rect(x, lineRect.y, textWidth, lineHeight);
             EditorGUI.BeginChangeCheck();
-            string newValue = EditorGUI.TextField(textRect, playServiceLeaderboardIdProp.stringValue);
+            string newValue = EditorGUI.TextField(textRect, gameKitIdProp.stringValue);
             if (EditorGUI.EndChangeCheck())
             {
-                playServiceLeaderboardIdProp.stringValue = newValue;
+                gameKitIdProp.stringValue = newValue;
             }
             x += textWidth + Spacing;
 
@@ -277,16 +279,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
                 SerializedProperty newElement = _idMappingProp.GetArrayElementAtIndex(newIndex);
 
                 SerializedProperty idProp = newElement.FindPropertyRelative("leaderboardId");
-                SerializedProperty gpgsProp = newElement.FindPropertyRelative("playServiceLeaderboardId");
+                SerializedProperty gkIdProp = newElement.FindPropertyRelative("gameKitLeaderboardId");
 
                 if (idProp != null)
                 {
                     idProp.stringValue = string.Empty;
                 }
 
-                if (gpgsProp != null)
+                if (gkIdProp != null)
                 {
-                    gpgsProp.stringValue = string.Empty;
+                    gkIdProp.stringValue = string.Empty;
                 }
 
                 serializedObject.ApplyModifiedProperties();
@@ -324,16 +326,16 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
                     SerializedProperty newElement = _idMappingProp.GetArrayElementAtIndex(newIndex);
 
                     SerializedProperty idProp = newElement.FindPropertyRelative("leaderboardId");
-                    SerializedProperty gpgsProp = newElement.FindPropertyRelative("playServiceLeaderboardId");
+                    SerializedProperty gkIdProp = newElement.FindPropertyRelative("gameKitLeaderboardId");
 
                     if (idProp != null)
                     {
                         idProp.stringValue = id;
                     }
 
-                    if (gpgsProp != null)
+                    if (gkIdProp != null)
                     {
-                        gpgsProp.stringValue = string.Empty;
+                        gkIdProp.stringValue = string.Empty;
                     }
                 }
             }
