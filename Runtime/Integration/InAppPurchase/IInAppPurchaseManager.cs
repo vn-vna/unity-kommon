@@ -1,9 +1,17 @@
+using System;
 using System.Collections;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 {
     public interface IInAppPurchaseManager
     {
+        event Action<IInAppPurchaseProduct> PurchaseInitiated;
+        event Action<IInAppPurchaseProduct> PurchaseSucceeded;
+        event Action<IInAppPurchaseProduct> PurchaseFailed;
+        event Action<IInAppPurchaseProduct> PurchaseDeferred;
+        event Action<IInAppPurchaseProduct> ProductRestored;
+        event Action<bool> AllProductsRestored;
+
         IInAppPurchaseProvider Provider { get; }
         IInAppPurchaseDatabase ProductDatabase { get; }
         InAppPurchaseManagerStatus Status { get; }
