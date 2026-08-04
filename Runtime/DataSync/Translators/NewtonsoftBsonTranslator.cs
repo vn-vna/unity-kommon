@@ -29,21 +29,30 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<DecodeResult> DecodeAsync(
             Stream input, CancellationToken ct = default)
         {
-            Debug.Log($"[BSON Decode] Starting GZip decompress, stream length={input.Length}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Decode] Starting GZip decompress, stream length={input.Length}");
+            }
 
             using var gzip = new GZipStream(input, CompressionMode.Decompress, leaveOpen: true);
             using var reader = new BsonReader(gzip);
             var serializer = new JsonSerializer();
             JObject obj = serializer.Deserialize<JObject>(reader);
 
-            Debug.Log($"[BSON Decode] BSON parsed OK, property count={obj.Count}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Decode] BSON parsed OK, property count={obj.Count}");
+            }
 
             JToken versionToken = obj["_version"];
             VersionTag version = versionToken != null
                 ? VersionTag.Parse(versionToken.ToString())
                 : VersionTag.Zero;
 
-            Debug.Log($"[BSON Decode] Version: {version}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Decode] Version: {version}");
+            }
 
             obj.Remove("_version");
             await Task.CompletedTask;
@@ -54,12 +63,18 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             object data, VersionTag version,
             Stream output, CancellationToken ct = default)
         {
-            Debug.Log($"[BSON Encode] Wrapping data, version={version}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Encode] Wrapping data, version={version}");
+            }
 
             JObject wrapper = JObject.FromObject(data);
             wrapper["_version"] = version.ToString();
 
-            Debug.Log($"[BSON Encode] Serializing, property count={wrapper.Count}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Encode] Serializing, property count={wrapper.Count}");
+            }
 
             using var gzip = new GZipStream(output, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true);
             using var writer = new BsonWriter(gzip);
@@ -68,7 +83,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             writer.Flush();
             await Task.CompletedTask;
 
-            Debug.Log($"[BSON Encode] Done, output length={output.Length}");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[BSON Encode] Done, output length={output.Length}");
+            }
         }
 
         public object ConvertTo(object data, Type targetType)

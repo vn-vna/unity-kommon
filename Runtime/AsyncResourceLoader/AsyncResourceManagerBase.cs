@@ -261,8 +261,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             );
 
             QuickLog.Error<AsyncResourceManagerBase<SelfType, ResourceType>>(
-                "All {0} provider(s) failed to load resource '{1}'.",
-                _providers.Count, id?.ResourceId ?? "<null>"
+                "All {0} provider(s) failed to load resource '{1}': Exception: {2}",
+                _providers.Count, id?.ResourceId ?? "<null>", handler.Exception
             );
         }
 

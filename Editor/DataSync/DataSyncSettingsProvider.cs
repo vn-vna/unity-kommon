@@ -28,7 +28,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
             "DataSyncSettingsProvider_AdapterSubTab";
 
         private static readonly string[] TabNames =
-            { "Director", "Translators", "Adapters", "Preview" };
+            { "Director", "Translators", "Adapters" };
 
         private static readonly string[] AdapterSubTabNames =
             { "Manage", "Load Orders", "Save Orders" };
@@ -52,7 +52,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
             IEnumerable<string> keywords = null
         ) : base(path, scopes, keywords)
         {
-            _selectedTabIndex = EditorPrefs.GetInt(TabPrefKey, 0);
+            _selectedTabIndex = Mathf.Clamp(
+                EditorPrefs.GetInt(TabPrefKey, 0),
+                0, TabNames.Length - 1
+            );
             _adapterSubTabIndex = EditorPrefs.GetInt(AdapterSubTabPrefKey, 0);
         }
 
@@ -116,7 +119,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                 case 0: DrawDirectorTab(); break;
                 case 1: DrawTranslatorsTab(); break;
                 case 2: DrawAdaptersTab(); break;
-                case 3: DrawPreviewTab(); break;
             }
 
             EditorGUILayout.EndScrollView();
@@ -144,18 +146,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                 + "in their respective tabs below.",
                 MessageType.None
             );
-            EditorGUILayout.Space();
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField(
-                    "Config Asset",
-                    GUILayout.Width(EditorGUIUtility.labelWidth)
-                );
-                EditorGUILayout.LabelField(
-                    SettingsAssetPath, EditorStyles.miniLabel
-                );
-            }
             EditorGUILayout.Space();
 
             // ── Adapter Features ──
@@ -189,7 +179,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                     "_resolveMode", "Resolve Mode"
                 );
                 DrawSerializedProperty(
-                    "_defaultAdapterId", "Default Adapter Id"
+                    "_parallelLoadEnabled", "Parallel Load"
+                );
+                DrawSerializedProperty(
+                    "_verboseLogging", "Verbose Logging"
                 );
             }
         }
@@ -1387,60 +1380,6 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                 GUILayout.Width(24),
                 GUILayout.Height(18)
             );
-        }
-
-        #endregion
-
-        #region Tab — Preview
-
-        private void DrawPreviewTab()
-        {
-            DataSyncConfiguration config =
-                _serializedSettings.targetObject
-                    as DataSyncConfiguration;
-
-            if (config == null) return;
-
-            EditorGUILayout.HelpBox(
-                "Current configuration summary. "
-                + "Enter Play Mode to see live state.",
-                MessageType.None
-            );
-            EditorGUILayout.Space();
-
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                EditorGUILayout.LabelField(
-                    "Configuration Summary",
-                    EditorStyles.miniBoldLabel
-                );
-
-                using (new EditorGUI.DisabledScope(true))
-                {
-                    EditorGUILayout.IntField(
-                        "Translator Count",
-                        config.Translators?.Length ?? 0
-                    );
-                    EditorGUILayout.IntField(
-                        "Save Groups",
-                        config.SaveOrder?.Length ?? 0
-                    );
-                    EditorGUILayout.IntField(
-                        "Load Groups",
-                        config.LoadOrder?.Length ?? 0
-                    );
-                    int totalSaveAdapters =
-                        config.SaveOrder?.Sum(g => g.Count) ?? 0;
-                    int totalLoadAdapters =
-                        config.LoadOrder?.Sum(g => g.Count) ?? 0;
-                    EditorGUILayout.IntField(
-                        "Adapters (save)", totalSaveAdapters
-                    );
-                    EditorGUILayout.IntField(
-                        "Adapters (load)", totalLoadAdapters
-                    );
-                }
-            }
         }
 
         #endregion

@@ -23,6 +23,9 @@ namespace Com.Hapiga.Scheherazade.Common.UserIdentity
         /// <summary>
         /// Checks availability. Implementations must never trigger a login
         /// prompt here (the game owns when the user is asked to sign in).
+        /// Exception: <c>GoogleServiceIdentityProvider</c> silently
+        /// auto-signs-in and, when its auto-sign-in is enabled, forces the
+        /// consent UI when the silent attempt fails.
         /// </summary>
         Task<bool> InitializeAsync(CancellationToken ct = default);
 

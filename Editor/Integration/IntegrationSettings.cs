@@ -1888,7 +1888,10 @@ namespace Com.Hapiga.Scheherazade.Integration
             {
                 new SettingsTab(
                     "Providers",
-                    BaseDescriptors.Concat(discovered).ToArray())
+                    BaseDescriptors.Concat(discovered).ToArray()),
+                new SettingsTab(
+                    "Preview",
+                    customRenderer: DrawPreviewTab)
             };
         }
 
@@ -1909,7 +1912,18 @@ namespace Com.Hapiga.Scheherazade.Integration
             BuildTabs(), keywords)
         { }
 
-        protected override void DrawExtraContent(ScriptableObject manager)
+        private const string NotAvailableValueText = "not available";
+        private const float LabelColumnWidth = 140f;
+        private const string PreviewCollapsedPrefKey =
+            "RemoteConfigIntegrationSettingsProvider_PreviewCollapsed";
+        private static readonly string[] PreviewModeNames = { "Expanded", "Collapsed" };
+        private static bool _previewCollapsed =
+            EditorPrefs.GetBool(PreviewCollapsedPrefKey, false);
+        private static GUIStyle _infoLabelStyle;
+        private static GUIStyle _infoValueStyle;
+        private static GUIStyle _cardHeaderStyle;
+
+        private static void DrawPreviewTab(ScriptableObject manager)
         {
             if (manager is not IRemoteConfigManager rcManager) return;
 
@@ -1918,6 +1932,16 @@ namespace Com.Hapiga.Scheherazade.Integration
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Registered Config Properties", EditorStyles.boldLabel);
+                GUILayout.FlexibleSpace();
+
+                int newPreviewMode = GUILayout.Toolbar(
+                    _previewCollapsed ? 1 : 0,
+                    PreviewModeNames);
+                if (newPreviewMode != (_previewCollapsed ? 1 : 0))
+                {
+                    _previewCollapsed = newPreviewMode == 1;
+                    EditorPrefs.SetBool(PreviewCollapsedPrefKey, _previewCollapsed);
+                }
 
                 if (Application.isPlaying && rcManager.Status == RemoteConfigStatus.Ready)
                 {
@@ -1933,37 +1957,23 @@ namespace Com.Hapiga.Scheherazade.Integration
 
             if (configType == null) return;
 
-            bool isPlaying = Application.isPlaying;
             PropertyInfo[] properties = configType.GetProperties(BindingFlags.Instance | BindingFlags.Public);
             bool hasAny = false;
 
-            foreach (var prop in properties)
+            foreach (PropertyInfo property in properties)
             {
-                var attr = prop.GetCustomAttribute<RemoteConfigAttribute>();
-                if (attr == null) continue;
+                RemoteConfigAttribute attribute = property.GetCustomAttribute<RemoteConfigAttribute>();
+                if (attribute == null) continue;
                 hasAny = true;
 
-                object currentValue = configData != null ? prop.GetValue(configData) : null;
-
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.LabelField(attr.Key, EditorStyles.boldLabel);
-                using (new EditorGUI.IndentLevelScope())
+                if (_previewCollapsed)
                 {
-                    EditorGUILayout.LabelField("Property", $"{prop.Name} ({prop.PropertyType.Name})");
-                    EditorGUILayout.LabelField("Cached Value", currentValue?.ToString() ?? "null");
-
-                    if (isPlaying)
-                    {
-                        string runtimeValueStr = GetRuntimeConfigValue(rcManager, attr.Key, prop.PropertyType);
-                        EditorGUILayout.LabelField("Runtime Value", runtimeValueStr);
-                    }
-
-                    if (attr.ParserModule != null)
-                        EditorGUILayout.LabelField("Parser", attr.ParserModule.Name);
-                    if (attr.DefaultValue != null)
-                        EditorGUILayout.LabelField("Default", attr.DefaultValue.ToString());
+                    DrawCollapsedEntryRow(rcManager, configData, property, attribute);
                 }
-                EditorGUILayout.EndVertical();
+                else
+                {
+                    DrawConfigEntryCard(rcManager, configData, property, attribute);
+                }
             }
 
             if (!hasAny)
@@ -1974,20 +1984,297 @@ namespace Com.Hapiga.Scheherazade.Integration
             }
         }
 
-        private static string GetRuntimeConfigValue(IRemoteConfigManager rcManager, string key, Type propertyType)
+        private static void DrawCollapsedEntryRow(
+            IRemoteConfigManager rcManager,
+            object configData,
+            PropertyInfo property,
+            RemoteConfigAttribute attribute)
+        {
+            RemoteConfigMetadataAttribute metadata =
+                property.GetCustomAttribute<RemoteConfigMetadataAttribute>();
+            object currentValue = configData != null ? property.GetValue(configData) : null;
+
+            string valueText;
+            if (attribute.ParserModule != null)
+            {
+                valueText = FormatPreviewValue(currentValue, metadata);
+            }
+            else
+            {
+                string rawValue = GetRuntimeConfigValue(
+                    rcManager, attribute.Key, property.PropertyType, useStringType: false);
+                valueText = rawValue == NotAvailableValueText
+                    ? FormatPreviewValue(currentValue, metadata)
+                    : StripValue(rawValue);
+            }
+
+            EnsureInfoStyles();
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        PrettifyConfigName(property.Name, metadata),
+                        _cardHeaderStyle);
+                    EditorGUILayout.LabelField(
+                        valueText,
+                        _infoValueStyle,
+                        GUILayout.ExpandWidth(true));
+                }
+            }
+        }
+
+        private static void DrawConfigEntryCard(
+            IRemoteConfigManager rcManager,
+            object configData,
+            PropertyInfo property,
+            RemoteConfigAttribute attribute)
+        {
+            RemoteConfigMetadataAttribute metadata =
+                property.GetCustomAttribute<RemoteConfigMetadataAttribute>();
+            bool hasParser = attribute.ParserModule != null;
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EnsureInfoStyles();
+
+                EditorGUILayout.LabelField(
+                    PrettifyConfigName(property.Name, metadata),
+                    _cardHeaderStyle);
+
+                DrawConfigRow("Key:", attribute.Key);
+                DrawConfigRow("Type:", GetFriendlyTypeName(property.PropertyType));
+                DrawConfigRow("Fixed Default:", FormatPreviewValue(attribute.DefaultValue, metadata));
+
+                if (hasParser)
+                {
+                    DrawConfigRow("Parser:", attribute.ParserModule.Name);
+                    DrawConfigRow(
+                        "Parsed Default:",
+                        ParseDefaultValue(attribute.ParserModule, attribute.DefaultValue, metadata));
+                }
+
+                object currentValue = configData != null ? property.GetValue(configData) : null;
+
+                if (hasParser)
+                {
+                    string rawValue = GetRuntimeConfigValue(
+                        rcManager, attribute.Key, property.PropertyType, useStringType: true);
+                    DrawConfigRow("Value:", StripValue(rawValue));
+                    DrawConfigRow("Parsed Value:", FormatPreviewValue(currentValue, metadata));
+                }
+                else
+                {
+                    string rawValue = GetRuntimeConfigValue(
+                        rcManager, attribute.Key, property.PropertyType, useStringType: false);
+                    DrawConfigRow(
+                        "Value:",
+                        rawValue == NotAvailableValueText
+                            ? FormatPreviewValue(currentValue, metadata)
+                            : StripValue(rawValue));
+                }
+            }
+        }
+
+        private static void DrawConfigRow(string label, string value)
+        {
+            EnsureInfoStyles();
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(label, _infoLabelStyle, GUILayout.Width(LabelColumnWidth));
+                EditorGUILayout.LabelField(
+                    value,
+                    _infoValueStyle,
+                    GUILayout.ExpandWidth(true));
+            }
+
+            Rect guideRect = EditorGUILayout.GetControlRect(false, 1f);
+            EditorGUI.DrawRect(guideRect, new Color(0.5f, 0.5f, 0.5f, 0.25f));
+        }
+
+        private static void EnsureInfoStyles()
+        {
+            if (_infoValueStyle != null) return;
+
+            _infoLabelStyle = new GUIStyle(EditorStyles.label);
+            _infoValueStyle = new GUIStyle(EditorStyles.label)
+            {
+                alignment = TextAnchor.MiddleRight,
+                wordWrap = true
+            };
+            _cardHeaderStyle = new GUIStyle(EditorStyles.boldLabel);
+        }
+
+        private static string PrettifyConfigName(
+            string propertyName, RemoteConfigMetadataAttribute metadata)
+        {
+            if (metadata != null && !string.IsNullOrWhiteSpace(metadata.DisplayName))
+            {
+                return metadata.DisplayName;
+            }
+
+            return Regex.Replace(propertyName, "([a-z])([A-Z])", "$1 $2");
+        }
+
+        private static string GetFriendlyTypeName(Type type)
+        {
+            if (type == typeof(int)) return "int";
+            if (type == typeof(float)) return "float";
+            if (type == typeof(double)) return "double";
+            if (type == typeof(bool)) return "bool";
+            if (type == typeof(string)) return "string";
+            if (type == typeof(long)) return "long";
+            if (type == typeof(short)) return "short";
+            if (type == typeof(byte)) return "byte";
+
+            if (type.IsArray)
+            {
+                return GetFriendlyTypeName(type.GetElementType()) + "[]";
+            }
+
+            if (type.IsGenericType)
+            {
+                string name = type.GetGenericTypeDefinition() == typeof(List<>)
+                    ? "List"
+                    : type.Name.Substring(0, type.Name.IndexOf('`'));
+                string inner = string.Join(
+                    ", ",
+                    type.GetGenericArguments().Select(GetFriendlyTypeName));
+                return name + "<" + inner + ">";
+            }
+
+            return type.Name;
+        }
+
+        private static string FormatPreviewValue(
+            object value, RemoteConfigMetadataAttribute metadata)
+        {
+            if (value == null)
+            {
+                return "null";
+            }
+
+            if (metadata?.Formatter != null)
+            {
+                try
+                {
+                    if (Activator.CreateInstance(metadata.Formatter)
+                        is IRemoteConfigPreviewFormatter formatter)
+                    {
+                        return StripValue(formatter.Format(value));
+                    }
+                }
+                catch (Exception fex)
+                {
+                    Debug.LogWarning(
+                        $"Remote config formatter {metadata.Formatter.Name} failed: {fex.Message}");
+                }
+            }
+
+            if (value is string text)
+            {
+                text = StripValue(text);
+                return text.Length == 0 ? "<empty>" : text;
+            }
+
+            if (value is System.Collections.IEnumerable enumerable)
+            {
+                string[] items = enumerable
+                    .Cast<object>()
+                    .Select(item => StripValue(item?.ToString() ?? "null"))
+                    .ToArray();
+
+                string joined = string.Join(", ", items);
+                return joined.Length == 0 ? "<empty>" : joined;
+            }
+
+            return StripValue(value.ToString());
+        }
+
+        private static string StripValue(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return value ?? string.Empty;
+
+            string trimmed = value.Trim();
+            if (trimmed.Length == 0)
+                return trimmed;
+
+            string[] lines = trimmed.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                lines[i] = lines[i].Trim();
+            }
+
+            return string.Join("\n", lines);
+        }
+
+        private static string ParseDefaultValue(
+            Type parserModuleType,
+            object defaultValue,
+            RemoteConfigMetadataAttribute metadata)
+        {
+            if (defaultValue == null)
+            {
+                return "null";
+            }
+
+            try
+            {
+                if (Activator.CreateInstance(parserModuleType)
+                    is IRemoteConfigParserModule parserModule)
+                {
+                    string input = StripValue(defaultValue.ToString());
+                    if (parserModule.TryParse(input, out object parsed))
+                    {
+                        return FormatPreviewValue(parsed, metadata);
+                    }
+
+                    return "no match";
+                }
+            }
+            catch (Exception pex)
+            {
+                return "<parse error: " + pex.Message + ">";
+            }
+
+            return "<unavailable>";
+        }
+
+        private static string GetRuntimeConfigValue(
+            IRemoteConfigManager rcManager,
+            string key,
+            Type propertyType,
+            bool useStringType)
         {
             foreach (var provider in rcManager.Providers)
             {
                 var tryGetConfigMethod = typeof(IRemoteConfigProvider).GetMethod("TryGetConfig");
-                var genericMethod = tryGetConfigMethod.MakeGenericMethod(propertyType);
+
+                Type requestType = useStringType ? typeof(string) : propertyType;
+                var genericMethod = tryGetConfigMethod.MakeGenericMethod(requestType);
                 object[] parameters = new object[] { key, null };
                 bool success = (bool)genericMethod.Invoke(provider, parameters);
                 if (success)
                 {
                     return parameters[1]?.ToString() ?? "null";
                 }
+
+                if (useStringType && propertyType != typeof(string))
+                {
+                    genericMethod = tryGetConfigMethod.MakeGenericMethod(propertyType);
+                    parameters = new object[] { key, null };
+                    success = (bool)genericMethod.Invoke(provider, parameters);
+                    if (success)
+                    {
+                        return parameters[1]?.ToString() ?? "null";
+                    }
+                }
             }
-            return "not available";
+
+            return NotAvailableValueText;
         }
 
         private static void ClearRemoteConfigCache(ScriptableObject manager)

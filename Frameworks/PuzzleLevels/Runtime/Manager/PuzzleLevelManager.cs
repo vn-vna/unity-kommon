@@ -23,6 +23,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         private int _maxCachedLevels = 4;
 
 #if UNITY_EDITOR
+        [Tooltip(
+            "When false, the manager refuses all level loads "
+            + "(remote level loading is disabled).")]
+#endif
+        [SerializeField]
+        private bool _allowLoadLevels = true;
+
+#if UNITY_EDITOR
         [Tooltip("Enable detailed debug logging for preload and cache operations.")]
 #endif
         [SerializeField]
@@ -70,6 +78,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         public IReadOnlyDictionary<string, string> CustomTags
             => _customTagLookup;
+
+        public bool AllowLoadLevels
+        {
+            get => _allowLoadLevels;
+            set => _allowLoadLevels = value;
+        }
 
         #endregion
 
@@ -243,6 +257,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         {
             if (string.IsNullOrEmpty(levelId)) return;
 
+            if (!_allowLoadLevels)
+            {
+                LogVerbose(
+                    this,
+                    "Preload for level '{0}' skipped (AllowLoadLevels = false).",
+                    levelId);
+                return;
+            }
+
             LogVerbose(
                 this,
                 "Preload requested for level '{0}'.",
@@ -324,6 +347,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             if (string.IsNullOrEmpty(levelId))
             {
                 FailHandler(handler, new ArgumentNullException(nameof(levelId)));
+                yield break;
+            }
+
+            if (!_allowLoadLevels)
+            {
+                FailHandler(
+                    handler,
+                    new InvalidOperationException(
+                        $"Level load blocked: AllowLoadLevels is false."));
+                QuickLog.Warning<PuzzleLevelManager>(
+                    "Level '{0}' load blocked (AllowLoadLevels = false).", levelId);
                 yield break;
             }
 

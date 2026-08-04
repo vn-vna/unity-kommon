@@ -52,7 +52,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 return false;
             }
 #else
-            Debug.Log($"[{AdapterId}] Not available on this platform.");
+            if (DataSyncLogging.Verbose)
+            {
+                Debug.Log($"[{AdapterId}] Not available on this platform.");
+            }
             return false;
 #endif
         }
@@ -62,28 +65,37 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             if (PlayGamesPlatform.Instance == null)
             {
-                Debug.LogWarning(
-                    $"[{AdapterId}] PlayGamesPlatform not found. "
-                    + "Not available."
-                );
+                if (DataSyncLogging.Verbose)
+                {
+                    Debug.LogWarning(
+                        $"[{AdapterId}] PlayGamesPlatform not found. "
+                        + "Not available."
+                    );
+                }
                 return false;
             }
 
             if (Client == null)
             {
-                Debug.LogWarning(
-                    $"[{AdapterId}] SavedGame client not found. "
-                    + "Not available."
-                );
+                if (DataSyncLogging.Verbose)
+                {
+                    Debug.LogWarning(
+                        $"[{AdapterId}] SavedGame client not found. "
+                        + "Not available."
+                    );
+                }
                 return false;
             }
 
             if (!PlayGamesPlatform.Instance.IsAuthenticated())
             {
-                Debug.LogWarning(
-                    $"[{AdapterId}] Not authenticated. "
-                    + "Adapter unavailable until login."
-                );
+                if (DataSyncLogging.Verbose)
+                {
+                    Debug.LogWarning(
+                        $"[{AdapterId}] Not authenticated. "
+                        + "Adapter unavailable until login."
+                    );
+                }
                 return false;
             }
 

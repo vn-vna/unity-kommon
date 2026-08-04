@@ -383,35 +383,44 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 string relativePath = _catalogData.GetRelativePath(resourceId);
                 if (!string.IsNullOrEmpty(relativePath))
                 {
-                    return AcquireBaseUrl() + relativePath;
+                    return ApplyInterpolationTags(
+                        AcquireBaseUrl() + relativePath);
                 }
             }
 
             string fallback = downloadableId.GetUrl(this);
             if (!string.IsNullOrEmpty(fallback))
             {
-                return fallback;
+                return ApplyInterpolationTags(fallback);
             }
 
-            return AcquireBaseUrl() + string.Format(_urlFormat, resourceId);
+            return ApplyInterpolationTags(
+                AcquireBaseUrl() + string.Format(_urlFormat, resourceId));
         }
 
         protected virtual string ResolveCatalogUrl(
             string catalogFileName,
             string baseUrl)
         {
-            string url = baseUrl + catalogFileName;
+            return ApplyInterpolationTags(baseUrl + catalogFileName);
+        }
 
-            if (_catalogInterpolationTags != null
-                && _catalogInterpolationTags.Count > 0)
+        private string ApplyInterpolationTags(string url)
+        {
+            if (string.IsNullOrEmpty(url))
             {
-                foreach (
-                    KeyValuePair<string, string> kvp
-                    in _catalogInterpolationTags)
-                {
-                    url = url.Replace(
-                        $"{{{kvp.Key}}}", kvp.Value);
-                }
+                return url;
+            }
+
+            if (_catalogInterpolationTags == null
+                || _catalogInterpolationTags.Count == 0)
+            {
+                return url;
+            }
+
+            foreach (KeyValuePair<string, string> kvp in _catalogInterpolationTags)
+            {
+                url = url.Replace($"{{{kvp.Key}}}", kvp.Value);
             }
 
             return url;

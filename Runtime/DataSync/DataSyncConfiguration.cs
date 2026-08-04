@@ -125,6 +125,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         [SerializeField]
         private bool _parallelLoadEnabled = true;
 
+        // --- Verbose Logging ---
+        [SerializeField]
+        private bool _verboseLogging = false;
+
         #region Properties
 
         public ResolveMode ResolveMode
@@ -137,6 +141,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             get => _parallelLoadEnabled;
             set => _parallelLoadEnabled = value;
+        }
+
+        public bool VerboseLogging
+        {
+            get => _verboseLogging;
+            set => _verboseLogging = value;
         }
 
         public ISaveTranslator[] Translators

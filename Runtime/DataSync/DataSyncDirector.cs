@@ -62,6 +62,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             try
             {
                 _config = Resources.Load<DataSyncConfiguration>(ConfigPath);
+                DataSyncLogging.Verbose = _config != null
+                    && _config.VerboseLogging;
 
                 if (_config != null)
                 {
@@ -156,6 +158,17 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             return result.ToArray();
         }
 
+        /// <summary>
+        /// Emits a debug log only when verbose logging is enabled in the
+        /// Data Sync configuration. Errors and warnings are never gated.
+        /// </summary>
+        private static void VerboseLog(string message, params object[] args)
+        {
+            if (!DataSyncLogging.Verbose) return;
+
+            VerboseLog(message, args);
+        }
+
         #endregion
 
         #region Bootstrap
@@ -225,7 +238,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             VersionTag currentVersion = VersionRegistry.GetCurrentVersion(typeof(T));
             ISaveTranslator translator = ResolveTranslator();
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "Save<{0}>('{1}'): version={2}, translator={3}",
                 typeof(T).Name, key, currentVersion, translator.FormatId);
 
@@ -238,7 +251,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             );
             byte[] encodedBytes = encodeStream.ToArray();
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "Save<{0}>('{1}'): encoded {2} bytes",
                 typeof(T).Name, key, encodedBytes.Length);
 
@@ -338,7 +351,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             }
 
             bool parallel = _config != null && _config.ParallelLoadEnabled;
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "Load<{0}>('{1}'): groups={2}, parallel={3}, translators={4}",
                 typeof(T).Name, key, _loadOrderGroups.Length, parallel, _translators.Count);
 
@@ -359,43 +372,43 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     ISaveAdapter adapter = group[a];
                     try
                     {
-                        QuickLog.Debug<DataSyncDirector>(
+                        VerboseLog(
                             "Load seq: trying group[{0}] adapter[{1}] '{2}' for key '{3}'",
                             g, a, adapter.AdapterId, key);
 
                         Stream stream = await adapter.OpenReadAsync(key, ct);
                         if (stream == null)
                         {
-                            QuickLog.Debug<DataSyncDirector>(
+                            VerboseLog(
                                 "Load seq: group[{0}] adapter '{1}' returned null stream for key '{2}'",
                                 g, adapter.AdapterId, key);
                             continue;
                         }
 
-                        QuickLog.Debug<DataSyncDirector>(
+                        VerboseLog(
                             "Load seq: group[{0}] adapter '{1}' returned {2} bytes for key '{3}'",
                             g, adapter.AdapterId, stream.Length, key);
 
                         using (stream)
                         {
-                            QuickLog.Debug<DataSyncDirector>(
+                            VerboseLog(
                                 "Load seq: decoding stream for key '{0}'", key);
 
                             DecodeResult decoded = await DecodeStream(stream, ct);
 
-                            QuickLog.Debug<DataSyncDirector>(
+                            VerboseLog(
                                 "Load seq: decoded version={0}, dataType={1} for key '{2}'",
                                 decoded.Version, decoded.DataType.Name, key);
 
                             Type snapshotType = VersionRegistry.GetSnapshotType(typeof(T), decoded.Version);
-                            QuickLog.Debug<DataSyncDirector>(
+                            VerboseLog(
                                 "Load seq: snapshotType={0} for key '{1}'",
                                 snapshotType.Name, key);
 
                             ISaveTranslator translator = ResolveTranslator();
                             object snapshot = translator.ConvertTo(decoded.Data, snapshotType);
 
-                            QuickLog.Debug<DataSyncDirector>(
+                            VerboseLog(
                                 "Load seq: converted to {0}, migrating for key '{1}'",
                                 snapshot?.GetType().Name ?? "null", key);
 
@@ -431,7 +444,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     entries.Add((group[a], g, a));
             }
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "Load parallel: launching {0} fetches for key '{1}'",
                 entries.Count, key);
 
@@ -444,7 +457,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             {
                 if (results[i].data != null)
                 {
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: adapter '{0}' returned {1} bytes for key '{2}'",
                         entries[i].adapter.AdapterId, results[i].data.Length, key);
                     candidates.Add((entries[i].groupIndex, entries[i].adapterIndex, entries[i].adapter.AdapterId, results[i].data));
@@ -455,7 +468,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                         entries[i].adapter.AdapterId, key
                     );
                 else
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: adapter '{0}' returned no data for key '{1}'",
                         entries[i].adapter.AdapterId, key);
             }
@@ -467,7 +480,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 return a.adapterIndex.CompareTo(b.adapterIndex);
             });
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "Load parallel: {0} candidates to try for key '{1}'",
                 candidates.Count, key);
 
@@ -475,25 +488,25 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             {
                 try
                 {
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: decoding candidate group[{0}] adapter '{1}' ({2} bytes) for key '{3}'",
                         candidate.groupIndex, candidate.adapterId, candidate.data.Length, key);
 
                     using var ms = new MemoryStream(candidate.data);
                     DecodeResult decoded = await DecodeStream(ms, ct);
 
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: decoded version={0}, dataType={1}",
                         decoded.Version, decoded.DataType.Name);
 
                     Type snapshotType = VersionRegistry.GetSnapshotType(typeof(T), decoded.Version);
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: snapshotType={0}", snapshotType.Name);
 
                     ISaveTranslator translator = ResolveTranslator();
                     object snapshot = translator.ConvertTo(decoded.Data, snapshotType);
 
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "Load parallel: converted to {0}, migrating",
                         snapshot?.GetType().Name ?? "null");
 
@@ -543,7 +556,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
                 if (results[i].data != null)
                 {
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=FETCH] adapter='{0}' key='{1}' "
                         + "-> {2} bytes",
                         adapterId, key, results[i].data.Length);
@@ -565,7 +578,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 else
                 {
                     notFound++;
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=FETCH] adapter='{0}' key='{1}' "
                         + "-> NOT FOUND",
                         adapterId, key);
@@ -597,7 +610,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 string wtStr = c.writeTime.HasValue
                     ? c.writeTime.Value.ToString("yyyy-MM-dd HH:mm:ss.fff")
                     : "null";
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "LWC: [phase=WRITE_TIME] adapter='{0}' key='{1}' "
                     + "lastWrite={2}",
                     c.adapterId, key, wtStr);
@@ -649,7 +662,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 var candidate = enriched[i];
                 try
                 {
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=DECODE] key='{0}' attempt #{1}/{2} "
                         + "adapter='{3}' wt={4}",
                         key, i + 1, enriched.Count,
@@ -660,14 +673,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     using var ms = new MemoryStream(candidate.data);
                     DecodeResult decoded = await DecodeStream(ms, ct);
 
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=DECODE] key='{0}' decoded "
                         + "version={1} type={2}",
                         key, decoded.Version, decoded.DataType.Name);
 
                     Type snapshotType = VersionRegistry.GetSnapshotType(
                         typeof(T), decoded.Version);
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=DECODE] key='{0}' "
                         + "snapshotType={1}",
                         key, snapshotType.Name);
@@ -676,7 +689,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     object snapshot = translator.ConvertTo(
                         decoded.Data, snapshotType);
 
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=DECODE] key='{0}' converted -> {1}",
                         key, snapshot?.GetType().Name ?? "null");
 
@@ -731,7 +744,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                     byte[] data)> candidates,
                 CancellationToken ct)
         {
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "LWC: [phase=WRITE_TIME] key='{0}' querying timestamps "
                 + "from {1} adapter(s) in parallel",
                 key, candidates.Count);
@@ -742,7 +755,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 try
                 {
                     wt = await c.adapter.GetLastWriteTimeAsync(key, ct);
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "LWC: [phase=WRITE_TIME] adapter='{0}' key='{1}' "
                         + "-> {2}",
                         c.adapter.AdapterId, key,
@@ -780,7 +793,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             var readTask = adapter.OpenReadAsync(key, ct);
             if (await Task.WhenAny(readTask, Task.Delay(timeout, ct)) != readTask)
             {
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "TryFetch: adapter '{0}' timed out ({1}ms) for key '{2}'",
                     adapter.AdapterId, timeout.TotalMilliseconds, key);
                 return (null, true);
@@ -789,7 +802,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             Stream stream = await readTask;
             if (stream == null)
             {
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "TryFetch: adapter '{0}' returned null for key '{1}'",
                     adapter.AdapterId, key);
                 return (null, false);
@@ -799,7 +812,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             using (var ms = new MemoryStream())
             {
                 await stream.CopyToAsync(ms, ct);
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "TryFetch: adapter '{0}' read {1} bytes for key '{2}'",
                     adapter.AdapterId, ms.Length, key);
                 return (ms.ToArray(), false);
@@ -973,14 +986,14 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             ISaveTranslator translator = ResolveTranslator();
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "DecodeStream: trying primary translator '{0}', stream length={1}",
                 translator.FormatId, stream.Length);
 
             try
             {
                 var result = await translator.DecodeAsync(stream, ct);
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "DecodeStream: primary translator '{0}' succeeded, version={1}",
                     translator.FormatId, result.Version);
                 return result;
@@ -993,7 +1006,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 );
             }
 
-            QuickLog.Debug<DataSyncDirector>(
+            VerboseLog(
                 "DecodeStream: scanning {0} translators for signature match",
                 _translators.Count);
 
@@ -1002,12 +1015,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 stream.Position = 0;
                 if (!TryMatchSignature(stream, t.Signature))
                 {
-                    QuickLog.Debug<DataSyncDirector>(
+                    VerboseLog(
                         "DecodeStream: signature mismatch for '{0}'", t.FormatId);
                     continue;
                 }
 
-                QuickLog.Debug<DataSyncDirector>(
+                VerboseLog(
                     "DecodeStream: signature matched '{0}', attempting decode", t.FormatId);
 
                 stream.Position = 0;
