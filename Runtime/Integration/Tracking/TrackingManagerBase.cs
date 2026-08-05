@@ -543,7 +543,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (!AllowTracking)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Tracking is disabled. Skipping templated event '{0}'.", eventName);
+                    "Tracking is disabled. Skipping templated event '{0}'.", eventName
+                );
                 return;
             }
 
@@ -571,19 +572,29 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             if (eventDef == null)
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
-                    "Templated event '{0}' not found in configured events.", eventName);
+                    "Templated event '{0}' not found in configured events.", eventName
+                );
                 return;
             }
 
-            if (Status != TrackingManagerStatus.Ready
-                && Status != TrackingManagerStatus.PartiallyReady)
+            var resolvedParams = ResolveTemplatedParameters(eventDef);
+
+            QuickLog.Debug<TrackingManagerBase<T>>(
+                "Started pushing templated tracking event '{0}' with parameters [{1}]",
+                eventName,
+                (Func<object>)(() => string.Join(", ", resolvedParams.Select((kv) => $"{kv.Key} = {kv.Value}")))
+            );
+
+            if (
+                Status != TrackingManagerStatus.Ready
+                && Status != TrackingManagerStatus.PartiallyReady
+            )
             {
-                var deferredParams = ResolveTemplatedParameters(eventDef);
                 _pendingEvents.Enqueue(TrackingEventData.Action(new TrackingActionInfo
                 {
                     ActionId = eventName,
                     ProviderMask = mask,
-                    Parameters = deferredParams
+                    Parameters = resolvedParams
                 }));
                 return;
             }
@@ -592,11 +603,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 QuickLog.Warning<TrackingManagerBase<T>>(
                     "Ingame action tracking is disabled in manager features. Skipping templated event '{0}'.",
-                    eventName);
+                    eventName
+                );
                 return;
             }
 
-            var resolvedParams = ResolveTemplatedParameters(eventDef);
 
             TrackAction(new TrackingActionInfo
             {
@@ -614,13 +625,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
             {
                 if (!provider.IsInitialized) continue;
 
-                if (_providerPendingBuffers.TryGetValue(provider, out Queue<TrackingEventData> buffer))
+                if (!_providerPendingBuffers.TryGetValue(provider, out Queue<TrackingEventData> buffer))
                 {
-                    while (buffer.Count > 0)
-                    {
-                        TrackingEventData evt = buffer.Dequeue();
-                        DispatchEventToProvider(provider, evt);
-                    }
+                    continue;
+                }
+
+                while (buffer.Count > 0)
+                {
+                    TrackingEventData evt = buffer.Dequeue();
+                    DispatchEventToProvider(provider, evt);
                 }
             }
         }
@@ -864,17 +877,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
         {
             try
             {
-                ParameterExpression instanceParam =
-                    Expression.Parameter(typeof(ITemplatedTrackingParametersProvider), "p");
-                UnaryExpression castInstance =
-                    Expression.Convert(instanceParam, provider.GetType());
-                MethodCallExpression call =
-                    Expression.Call(castInstance, method);
-                UnaryExpression boxed =
-                    Expression.Convert(call, typeof(object));
-                Expression<Func<ITemplatedTrackingParametersProvider, object>> lambda =
-                    Expression.Lambda<Func<ITemplatedTrackingParametersProvider, object>>(
-                        boxed, instanceParam);
+                ParameterExpression instanceParam = Expression.Parameter(typeof(ITemplatedTrackingParametersProvider), "p");
+                UnaryExpression castInstance = Expression.Convert(instanceParam, provider.GetType());
+                MethodCallExpression call = Expression.Call(castInstance, method);
+                UnaryExpression boxed = Expression.Convert(call, typeof(object));
+                Expression<Func<ITemplatedTrackingParametersProvider, object>> lambda = Expression.Lambda<Func<ITemplatedTrackingParametersProvider, object>>(boxed, instanceParam);
                 Func<ITemplatedTrackingParametersProvider, object> compiled = lambda.Compile();
 
                 cache[paramName] = () => compiled(provider);

@@ -725,7 +725,7 @@ namespace Com.Hapiga.Scheherazade.Integration
                 _parameterFoldouts[key] = true;
 
             bool expanded = _parameterFoldouts[key];
-            string arrow = expanded ? "â–¼" : "â–¶";
+            string arrow = expanded ? "⟰" : "⟱";
             string label = $"{arrow} Defined Parameters ({validGetterCount} getters, {validFactoryCount} factories)";
 
             if (GUILayout.Button(label, EditorStyles.boldLabel))

@@ -146,7 +146,8 @@ namespace Com.Hapiga.Scheherazade.Common
                 "Registered command '{0}' with {1} parameter(s) and {2} subcommand(s).",
                 builder.CommandName,
                 builder.Parameters.Count,
-                builder.Subcommands.Count);
+                builder.Subcommands.Count
+            );
 
             LogRegistrationTree(registration);
         }
@@ -159,7 +160,8 @@ namespace Com.Hapiga.Scheherazade.Common
                 indent,
                 reg.CommandName,
                 reg.Subcommands.Count,
-                reg.Callback != null);
+                reg.Callback != null
+            );
 
             foreach (KeyValuePair<string, DirectCmdRegistration> kvp in reg.Subcommands)
             {
