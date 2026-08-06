@@ -431,21 +431,18 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         (float)successCount
                         / targets.Count);
 
-                    bool installed;
-                    if (isAab)
-                    {
-                        installed =
-                            AabUtility.InstallApks(
-                                tempApksPath,
-                                device.Serial);
-                    }
-                    else
-                    {
-                        installed =
-                            AdbUtility.InstallApk(
-                                installPath,
-                                device.Serial);
-                    }
+                    bool installed =
+                        DeviceInstaller.InstallWithRecovery(
+                            device.Serial,
+                            device.DisplayName,
+                            packageName,
+                            () => isAab
+                                ? AabUtility.InstallApks(
+                                    tempApksPath,
+                                    device.Serial)
+                                : AdbUtility.InstallApk(
+                                    installPath,
+                                    device.Serial));
 
                     if (!installed)
                     {

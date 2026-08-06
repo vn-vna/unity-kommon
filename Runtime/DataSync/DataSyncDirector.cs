@@ -20,7 +20,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         #endregion
 
         #region Static Init
-        private static readonly TaskCompletionSource<bool> _readySource = new TaskCompletionSource<bool>();
+        private static readonly TaskCompletionSource<bool> _readySource =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         public static Task ReadyTask => _readySource.Task;
         #endregion
 
@@ -49,6 +50,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         private DataSyncConfiguration _config;
         private ISaveAdapter[][] _saveOrderGroups;
         private ISaveAdapter[][] _loadOrderGroups;
+        private ISaveAdapter[][] _configuredSaveOrder;
+        private ISaveAdapter[][] _configuredLoadOrder;
+        private HashSet<ISaveAdapter> _configuredAdapters;
         private List<ISaveTranslator> _translators;
         private int _maxSignatureLength;
         #endregion
@@ -67,8 +71,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
                 if (_config != null)
                 {
-                    _saveOrderGroups = _config.ResolveSaveOrderGroups();
-                    _loadOrderGroups = _config.ResolveLoadOrderGroups();
+                    _configuredSaveOrder = _config.ResolveSaveOrderGroups();
+                    _configuredLoadOrder = _config.ResolveLoadOrderGroups();
+                    _saveOrderGroups = _configuredSaveOrder;
+                    _loadOrderGroups = _configuredLoadOrder;
                     _translators = _config.Translators
                         ?.Where(t => t != null).ToList()
                         ?? new List<ISaveTranslator>();
@@ -94,24 +100,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task InitializeAndFilterAsync()
         {
-            var allAdapters = new HashSet<ISaveAdapter>();
-            foreach (ISaveAdapter[] group in _saveOrderGroups)
-            {
-                foreach (ISaveAdapter a in group)
-                {
-                    if (a != null) allAdapters.Add(a);
-                }
-            }
+            _configuredAdapters = CollectConfiguredAdapters();
 
-            foreach (ISaveAdapter[] group in _loadOrderGroups)
-            {
-                foreach (ISaveAdapter a in group)
-                {
-                    if (a != null) allAdapters.Add(a);
-                }
-            }
-
-            foreach (ISaveAdapter adapter in allAdapters)
+            foreach (ISaveAdapter adapter in _configuredAdapters)
             {
                 try
                 {
@@ -130,8 +121,68 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 }
             }
 
-            _saveOrderGroups = FilterGroups(_saveOrderGroups);
-            _loadOrderGroups = FilterGroups(_loadOrderGroups);
+            _saveOrderGroups = FilterGroups(_configuredSaveOrder);
+            _loadOrderGroups = FilterGroups(_configuredLoadOrder);
+        }
+
+        private HashSet<ISaveAdapter> CollectConfiguredAdapters()
+        {
+            var result = new HashSet<ISaveAdapter>();
+
+            if (_configuredSaveOrder != null)
+            {
+                foreach (ISaveAdapter[] group in _configuredSaveOrder)
+                {
+                    foreach (ISaveAdapter adapter in group)
+                    {
+                        if (adapter != null) result.Add(adapter);
+                    }
+                }
+            }
+
+            if (_configuredLoadOrder != null)
+            {
+                foreach (ISaveAdapter[] group in _configuredLoadOrder)
+                {
+                    foreach (ISaveAdapter adapter in group)
+                    {
+                        if (adapter != null) result.Add(adapter);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Re-initializes adapters that reported unavailable at startup and
+        /// recomputes the active groups. Available adapters are skipped, so
+        /// this is cheap. Lets adapters rejoin after their provider becomes
+        /// ready (e.g. Play Games auth completing after the initial wait).
+        /// </summary>
+        private async Task RefreshAdapterAvailabilityAsync()
+        {
+            if (_configuredAdapters == null) return;
+
+            foreach (ISaveAdapter adapter in _configuredAdapters)
+            {
+                if (adapter.IsAvailable) continue;
+
+                try
+                {
+                    await adapter.InitializeAsync();
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Adapter '{0}' refresh threw: {1}",
+                        adapter.AdapterId, ex.Message
+                    );
+                }
+            }
+
+            _saveOrderGroups = FilterGroups(_configuredSaveOrder);
+            _loadOrderGroups = FilterGroups(_configuredLoadOrder);
         }
 
         private static ISaveAdapter[][] FilterGroups(
@@ -166,7 +217,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             if (!DataSyncLogging.Verbose) return;
 
-            VerboseLog(message, args);
+            Debug.LogFormat(message, args);
         }
 
         #endregion
@@ -235,6 +286,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             CancellationToken ct
         )
         {
+            await RefreshAdapterAvailabilityAsync();
+
             VersionTag currentVersion = VersionRegistry.GetCurrentVersion(typeof(T));
             ISaveTranslator translator = ResolveTranslator();
 
@@ -334,6 +387,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task<T> LoadInternalAsync<T>(string key, CancellationToken ct)
         {
+            await RefreshAdapterAvailabilityAsync();
+
             if (_loadOrderGroups.Length == 0)
                 throw new SaveAdapterException("none", "No load groups configured");
 
@@ -821,6 +876,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task DeleteInternalAsync(string key, CancellationToken ct)
         {
+            await RefreshAdapterAvailabilityAsync();
+
             for (int g = 0; g < _saveOrderGroups.Length; g++)
             {
                 await DeleteDataInInSingleGroupInternalAsync(key, g, ct);
@@ -849,6 +906,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task<bool> ExistsInternalAsync(string key, CancellationToken ct)
         {
+            await RefreshAdapterAvailabilityAsync();
+
             var entries = new List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>();
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
@@ -875,6 +934,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task<Stream> OpenReadStreamInternalAsync(string key, CancellationToken ct)
         {
+            await RefreshAdapterAvailabilityAsync();
+
             var entries = new List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>();
             for (int g = 0; g < _loadOrderGroups.Length; g++)
             {
@@ -927,6 +988,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task WriteStreamInternalAsync(string key, Stream data, CancellationToken ct)
         {
+            await RefreshAdapterAvailabilityAsync();
+
             for (int g = 0; g < _saveOrderGroups.Length; g++)
             {
                 foreach (ISaveAdapter adapter in _saveOrderGroups[g])

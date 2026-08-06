@@ -33,6 +33,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
              | SaveAdapterFeature.Exists
              | SaveAdapterFeature.Cloud;
 
+        [Tooltip("Max seconds to retry initializing Unity Cloud Save before treating the adapter as unavailable.")]
+        [Range(0.5f, 30f)]
+        [SerializeField] private float _initRetryTimeoutSeconds = 5f;
+
         public void Reset()
         { }
 
@@ -40,24 +44,36 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             IsAvailable = false;
 
-            try
+            float deadline = Time.realtimeSinceStartup + _initRetryTimeoutSeconds;
+            while (true)
             {
-                List<FileItem> files = await CloudSaveService
-                    .Instance
-                    .Files
-                    .Player
-                    .ListAllAsync();
+                try
+                {
+                    List<FileItem> files = await CloudSaveService
+                        .Instance
+                        .Files
+                        .Player
+                        .ListAllAsync();
 
-                IsAvailable = true;
-                return true;
+                    IsAvailable = true;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    if (Time.realtimeSinceStartup >= deadline)
+                    {
+                        QuickLog.Warning<UnityCloudSaveAdaptor>(
+                            "Cannot initialize unity cloud save adaptor: {0}",
+                            ex.Message
+                        );
+                        return false;
+                    }
+
+                    // Unity Services / auth may still be initializing; retry
+                    // within the budget instead of failing immediately.
+                    await Task.Delay(100);
+                }
             }
-            catch
-            {
-                QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot initialize unity cloud save adaptor"
-                );
-            }
-            return false;
         }
 
         public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)

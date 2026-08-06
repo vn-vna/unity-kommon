@@ -49,11 +49,43 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             return devices;
         }
 
-        public static bool InstallApk(string apkPath, string deviceSerial)
+        public static InstallResult InstallApk(string apkPath, string deviceSerial)
         {
-            if (!File.Exists(apkPath)) { Debug.LogError("APK not found: " + apkPath); return false; }
+            if (!File.Exists(apkPath))
+            {
+                Debug.LogError("APK not found: " + apkPath);
+                return new InstallResult
+                {
+                    Success = false,
+                    FailureKind = InstallFailureKind.Other,
+                    Output = "APK file not found."
+                };
+            }
+
             string output = RunAdb($"-s {deviceSerial} install -r \"{apkPath}\"");
-            return output != null && output.Contains("Success");
+            bool success = output != null && output.Contains("Success");
+            return new InstallResult
+            {
+                Success = success,
+                FailureKind = success
+                    ? InstallFailureKind.None
+                    : DeviceInstaller.ClassifyInstallFailure(output),
+                Output = output ?? ""
+            };
+        }
+
+        public static bool UninstallApp(string deviceSerial, string packageName)
+        {
+            if (string.IsNullOrEmpty(packageName)) return false;
+            string output = RunAdb($"-s {deviceSerial} uninstall \"{packageName}\"");
+            bool success = output != null && output.Contains("Success");
+            if (!success)
+            {
+                Debug.LogWarning(
+                    $"[NoBuild] adb uninstall of '{packageName}' "
+                    + $"on {deviceSerial}: {(output ?? "no output").Trim()}");
+            }
+            return success;
         }
 
         public static bool LaunchApp(string deviceSerial, string packageName)

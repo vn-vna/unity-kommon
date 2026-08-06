@@ -1427,22 +1427,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             "NoBuild",
                             $"Installing {apkFile}...",
                             0.5f);
-                        bool ok = AdbUtility.InstallApk(
-                            _installApkPath,
-                            device.Serial);
+                        bool ok =
+                            DeviceInstaller
+                                .InstallWithRecovery(
+                                    device.Serial,
+                                    device.DisplayName,
+                                    packageName,
+                                    () => AdbUtility
+                                        .InstallApk(
+                                            _installApkPath,
+                                            device.Serial));
                         EditorUtility.ClearProgressBar();
                         if (ok)
                         {
                             EditorPrefs.SetString(
                                 "NoBuild_LastAdbDevice",
                                 device.Serial);
-                        }
-                        else
-                        {
-                            EditorUtility.DisplayDialog(
-                                "NoBuild",
-                                "APK install failed.",
-                                "OK");
                         }
                     }
                 }
@@ -1498,8 +1498,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     "NoBuild",
                     $"Installing to {device.Model}...",
                     0.6f);
-                bool ok = AabUtility.InstallApks(
-                    tempApksPath, device.Serial);
+                bool ok =
+                    DeviceInstaller.InstallWithRecovery(
+                        device.Serial,
+                        device.DisplayName,
+                        AdbUtility.GetPackageName(),
+                        () => AabUtility.InstallApks(
+                            tempApksPath,
+                            device.Serial));
                 EditorUtility.ClearProgressBar();
 
                 if (ok)
@@ -1507,13 +1513,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     EditorPrefs.SetString(
                         "NoBuild_LastAdbDevice",
                         device.Serial);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "AAB install failed.",
-                        "OK");
                 }
             }
             catch (Exception ex)

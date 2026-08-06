@@ -164,7 +164,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                 DrawScriptingDefineToggle(
                     "GOOGLE_SERVICES_SAVE",
                     "Google Service Save Adapter",
-                    "Google Play Games Services saved-game API"
+                    "Google Play Games Services saved-game API. "
+                    + "Requires GOOGLE_PLAY_GAMES (set by the plugin)."
                 );
             }
             EditorGUILayout.Space();

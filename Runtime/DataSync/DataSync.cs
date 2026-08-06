@@ -20,6 +20,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             await DataSyncDirector.ReadyTask;
         }
 
+        /// <summary>
+        /// Waits until the DataSyncDirector and every configured adapter have
+        /// finished initializing. Safe to call before the bootstrap has
+        /// completed — will await asynchronously.
+        /// </summary>
+        public static Task WaitUntilReadyAsync() => EnsureReadyAsync();
+
         #endregion
 
         #region Typed API (async)

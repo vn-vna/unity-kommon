@@ -147,7 +147,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// Installs an APKS file to a specific device
         /// using bundletool install-apks.
         /// </summary>
-        public static bool InstallApks(
+        public static InstallResult InstallApks(
             string apksPath, string deviceSerial)
         {
             if (string.IsNullOrEmpty(apksPath))
@@ -161,7 +161,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 Debug.LogError(
                     $"[NoBuild] APKS not found: "
                     + $"{apksPath}");
-                return false;
+                return new InstallResult
+                {
+                    Success = false,
+                    FailureKind = InstallFailureKind.Other,
+                    Output = "APKS file not found."
+                };
             }
 
             try
@@ -199,7 +204,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         $"[NoBuild] APKS install "
                         + "succeeded on "
                         + $"{deviceSerial}");
-                    return true;
+                    return new InstallResult
+                    {
+                        Success = true,
+                        FailureKind =
+                            InstallFailureKind.None,
+                        Output = combined
+                    };
                 }
 
                 Debug.LogError(
@@ -207,14 +218,28 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     + $"{deviceSerial}"
                     + $" (exit={result.exitCode})"
                     + $":\n{Truncate(combined, 2000)}");
-                return false;
+                return new InstallResult
+                {
+                    Success = false,
+                    FailureKind =
+                        DeviceInstaller
+                            .ClassifyInstallFailure(
+                                combined),
+                    Output = combined
+                };
             }
             catch (Exception ex)
             {
                 Debug.LogError(
                     $"[NoBuild] APKS install "
                     + $"exception: {ex.Message}");
-                return false;
+                return new InstallResult
+                {
+                    Success = false,
+                    FailureKind =
+                        InstallFailureKind.Other,
+                    Output = ex.Message
+                };
             }
         }
 

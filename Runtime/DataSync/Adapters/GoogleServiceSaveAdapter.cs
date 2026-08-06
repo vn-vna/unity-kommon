@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 using GooglePlayGames.BasicApi.SavedGame;
@@ -33,7 +33,17 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
              | SaveAdapterFeature.Exists
              | SaveAdapterFeature.Cloud;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+        [Tooltip("Max seconds to wait for Play Games sign-in before treating the adapter as unavailable.")]
+        [Range(0.5f, 30f)]
+        [SerializeField] private float _initTimeoutSeconds = 5f;
+
+        /// <summary>Minimum time between bounded sign-in waits, so the
+        /// director's lazy refresh never stalls an operation.</summary>
+        private const float AuthRecheckCooldownSeconds = 3f;
+
+        private float _lastAuthAttemptTime = float.NegativeInfinity;
+
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
         public static ISavedGameClient Client => PlayGamesPlatform.Instance?.SavedGame;
 #endif
 
@@ -41,10 +51,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             IsAvailable = false;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             try
             {
-                return InitializeInternal();
+                return await InitializeInternalAsync();
             }
             catch (Exception ex)
             {
@@ -60,8 +70,8 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 #endif
         }
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
-        private bool InitializeInternal()
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+        private async Task<bool> InitializeInternalAsync()
         {
             if (PlayGamesPlatform.Instance == null)
             {
@@ -87,16 +97,41 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 return false;
             }
 
-            if (!PlayGamesPlatform.Instance.IsAuthenticated())
+            if (PlayGamesPlatform.Instance.IsAuthenticated())
             {
-                if (DataSyncLogging.Verbose)
-                {
-                    Debug.LogWarning(
-                        $"[{AdapterId}] Not authenticated. "
-                        + "Adapter unavailable until login."
-                    );
-                }
+                IsAvailable = true;
+                return true;
+            }
+
+            // Sign-in happens asynchronously at startup; a one-shot snapshot
+            // here would mark the adapter unavailable prematurely and skip
+            // the cloud loader. Wait a bounded time for auth to complete.
+            float now = Time.realtimeSinceStartup;
+            if (now - _lastAuthAttemptTime < AuthRecheckCooldownSeconds)
+            {
+                // A refresh ran recently and auth was still pending; return
+                // the current state quickly instead of stalling the op.
                 return false;
+            }
+
+            _lastAuthAttemptTime = now;
+            float deadline = now + _initTimeoutSeconds;
+            while (!PlayGamesPlatform.Instance.IsAuthenticated())
+            {
+                if (Time.realtimeSinceStartup >= deadline)
+                {
+                    if (DataSyncLogging.Verbose)
+                    {
+                        Debug.LogWarning(
+                            $"[{AdapterId}] Not authenticated within "
+                            + $"{_initTimeoutSeconds}s. Adapter unavailable "
+                            + "until login."
+                        );
+                    }
+                    return false;
+                }
+
+                await Task.Delay(50);
             }
 
             IsAvailable = true;
@@ -106,11 +141,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public void Reset()
         {
             IsAvailable = false;
+            _lastAuthAttemptTime = float.NegativeInfinity;
         }
 
         public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             if (!PlayGamesPlatform.Instance.IsAuthenticated())
             {
                 return false;
@@ -127,7 +163,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<bool> ExistsAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             return (await OpenConnection(key, ct)) != null;
 #else
             return false;
@@ -137,7 +173,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<DateTime?> GetLastWriteTimeAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             return (await OpenConnection(key, ct))
                 ?.LastModifiedTimestamp;
 #else
@@ -148,7 +184,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<Stream> OpenReadAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return null;
             return await OpenByteReadStream(metadata);
@@ -161,7 +197,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string key, Stream data,
             CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             if (metadata == null) return;
             byte[] bytes = null;
@@ -180,7 +216,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         private async Task ValidateConnection()
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             if (PlayGamesPlatform.Instance == null)
             {
                 throw new DataSyncException("Cannot find Play Games Platform instance");
@@ -200,7 +236,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 #endif
         }
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
         private async Task<ISavedGameMetadata> OpenConnection(
             string key, CancellationToken ct)
         {
@@ -223,25 +259,23 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         }
 #endif
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
         private async Task<Stream> OpenByteReadStream(
             ISavedGameMetadata metadata)
         {
             await ValidateConnection();
 
-            TaskCompletionSource<Stream> tsc =
-                new TaskCompletionSource<Stream>();
+            TaskCompletionSource<Stream> tsc = new TaskCompletionSource<Stream>();
             Client.ReadBinaryData(metadata, (readStatus, data) =>
             {
-                if (readStatus != SavedGameRequestStatus.Success)
-                    tsc.SetResult(null);
+                if (readStatus != SavedGameRequestStatus.Success) tsc.SetResult(null);
                 tsc.SetResult(new MemoryStream(data));
             });
             return await tsc.Task;
         }
 #endif
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
         private async Task<ISavedGameMetadata> WriteToStorage(
             ISavedGameMetadata metadata, byte[] bytes)
         {
