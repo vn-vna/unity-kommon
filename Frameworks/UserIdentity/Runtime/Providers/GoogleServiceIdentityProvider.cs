@@ -130,9 +130,18 @@ namespace Com.Hapiga.Scheherazade.Common.UserIdentity
             if (!forceUi)
             {
                 QuickLog.Debug<GoogleServiceIdentityProvider>(
-                    "[{0}] No silent sign-in: not authenticated.",
-                    _providerId);
-                return false;
+                    "[{0}] Start auto login",
+                    _providerId
+                );
+
+                TaskCompletionSource<bool> autoLoginTsc = new TaskCompletionSource<bool>();
+                PlayGamesPlatform.Instance.Authenticate((status) => autoLoginTsc.SetResult(status == SignInStatus.Success));
+                await autoLoginTsc.Task;
+
+                if (autoLoginTsc.Task.Result)
+                {
+                    return true;
+                }
             }
 
             QuickLog.Info<GoogleServiceIdentityProvider>(
