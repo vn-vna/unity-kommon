@@ -1023,6 +1023,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
             return key;
         }
 
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
         private static LeaderboardTimeSpan ToLeaderboardTimeSpan(
             LeaderboardTimeframe timeframe)
         {
@@ -1036,6 +1037,7 @@ namespace Com.Hapiga.Scheherazade.Common.Leaderboard
                     return LeaderboardTimeSpan.AllTime;
             }
         }
+#endif
 
         #endregion
 
