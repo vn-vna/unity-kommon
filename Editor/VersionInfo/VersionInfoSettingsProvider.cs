@@ -1489,11 +1489,61 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
 
             private static string ResolveBuildType()
             {
+                // During a NoBuild profile build, resolve build-type
+                // from the profile's designated script definition set
+                // (authority) instead of the editor's currently
+                // presented defines.
+                bool? production =
+                    TryResolveProductionFromProfile();
+                if (production.HasValue)
+                {
+                    return production.Value
+                        ? "prod" : "dev";
+                }
+
 #if PRODUCTION_BUILD
                 return "prod";
 #else
                 return "dev";
 #endif
+            }
+
+            private static bool? TryResolveProductionFromProfile()
+            {
+                NoBuildSettings settings =
+                    GetNoBuildSettings();
+                BuildProfile profile =
+                    BuildProfile.CurrentBuildProfile;
+                if (profile == null
+                    || settings == null
+                    || !profile.HasValidDefineSet(settings))
+                {
+                    return null;
+                }
+
+                ScriptDefinitionSet profileSet =
+                    settings.scriptDefinitionSets[
+                        profile.scriptDefinitionSetIndex];
+                if (profileSet?.slots == null)
+                {
+                    return null;
+                }
+
+                foreach (ScriptDefinitionSlot slot
+                    in profileSet.slots)
+                {
+                    if (string.Equals(
+                            slot.defineSymbol,
+                            "PRODUCTION_BUILD",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return slot.enabled
+                            && !string.IsNullOrEmpty(
+                                slot.defineSymbol);
+                    }
+                }
+
+                return null;
             }
 
             private static string ResolveAppBundle()
