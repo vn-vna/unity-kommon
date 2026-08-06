@@ -392,6 +392,17 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             if (_loadOrderGroups.Length == 0)
                 throw new SaveAdapterException("none", "No load groups configured");
 
+            KeyConflictPlan keyPlan = FindPlanForKey(key);
+            if (keyPlan != null)
+            {
+                QuickLog.Info<DataSyncDirector>(
+                    "Conflict plan for key '{0}': '{1}' ({2})",
+                    key, keyPlan.Plan.name, keyPlan.MatchType
+                );
+                return await LoadInternalWithPlanAsync<T>(
+                    key, keyPlan.Plan, ct);
+            }
+
             ResolveMode mode = _config != null
                 ? _config.ResolveMode
                 : ResolveMode.Priority;
@@ -775,6 +786,146 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 "LWC: [phase=DONE] key='{0}' ALL {1} decode(s) FAILED",
                 key, enriched.Count);
             throw new SaveNotFoundException(key);
+        }
+
+        /// <summary>
+        /// Loads a key using a per-key <see cref="ConflictResolutionPlan"/>.
+        /// Fetches all adapters in parallel, enriches candidates with
+        /// last-write times, lets the plan rank them, then decodes in ranked
+        /// order until one succeeds.
+        /// </summary>
+        private async Task<T> LoadInternalWithPlanAsync<T>(
+            string key,
+            ConflictResolutionPlan plan,
+            CancellationToken ct)
+        {
+            var entries = FlattenLoadOrder();
+
+            QuickLog.Info<DataSyncDirector>(
+                "Plan: [phase=FETCH] key='{0}' plan='{1}' launching {2} adapter(s)",
+                key, plan.name, entries.Count);
+
+            var fetchTasks = entries.Select(e =>
+                TryFetchAsync(e.adapter, key, e.adapter.ReadTimeout, ct));
+            var results = await Task.WhenAll(fetchTasks);
+
+            var candidates = new List<ResolutionCandidate>();
+            for (int i = 0; i < results.Length; i++)
+            {
+                if (results[i].data == null) continue;
+
+                var entry = entries[i];
+                VerboseLog(
+                    "Plan: [phase=FETCH] adapter='{0}' key='{1}' -> {2} bytes",
+                    entry.adapter.AdapterId, key, results[i].data.Length);
+                candidates.Add(new ResolutionCandidate(
+                    entry.adapter,
+                    entry.groupIndex,
+                    entry.adapterIndex,
+                    results[i].data,
+                    null
+                ));
+            }
+
+            if (candidates.Count == 0)
+            {
+                QuickLog.Info<DataSyncDirector>(
+                    "Plan: [phase=DONE] key='{0}' NO DATA from any adapter",
+                    key);
+                throw new SaveNotFoundException(key);
+            }
+
+            await EnrichPlanCandidatesWithWriteTimesAsync(key, candidates, ct);
+
+            IReadOnlyList<ResolutionCandidate> ranked;
+            try
+            {
+                ranked = await plan.RankCandidatesAsync(candidates, ct);
+            }
+            catch (Exception ex)
+            {
+                QuickLog.Warning<DataSyncDirector>(
+                    "Plan '{0}' failed for key '{1}': {2}. Falling back to priority order.",
+                    plan.name, key, ex.Message);
+                ranked = candidates
+                    .OrderBy(c => c.GroupIndex)
+                    .ThenBy(c => c.AdapterIndex)
+                    .ToArray();
+            }
+
+            QuickLog.Info<DataSyncDirector>(
+                "Plan: [phase=SORT] key='{0}' order: [{1}]",
+                key, string.Join(" -> ", ranked.Select(c => c.AdapterId)));
+
+            foreach (ResolutionCandidate candidate in ranked)
+            {
+                try
+                {
+                    using var ms = new MemoryStream(candidate.Data);
+                    DecodeResult decoded = await DecodeStream(ms, ct);
+
+                    Type snapshotType = VersionRegistry.GetSnapshotType(
+                        typeof(T), decoded.Version);
+                    ISaveTranslator translator = ResolveTranslator();
+                    object snapshot = translator.ConvertTo(
+                        decoded.Data, snapshotType);
+                    T result = (T)VersionRegistry.MigrateToCurrent(
+                        snapshot, typeof(T), decoded.Version);
+
+                    QuickLog.Info<DataSyncDirector>(
+                        "Loaded key '{0}' from adapter '{1}' (plan '{2}')",
+                        key, candidate.AdapterId, plan.name);
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Plan load decode failed for adapter '{0}' key '{1}': {2}",
+                        candidate.AdapterId, key, ex.Message);
+                }
+            }
+
+            QuickLog.Error<DataSyncDirector>(
+                "Plan: [phase=DONE] key='{0}' ALL {1} decode(s) FAILED",
+                key, ranked.Count);
+            throw new SaveNotFoundException(key);
+        }
+
+        private KeyConflictPlan FindPlanForKey(string key)
+        {
+            return _config?.FindPlanFor(key);
+        }
+
+        private static async Task EnrichPlanCandidatesWithWriteTimesAsync(
+            string key,
+            List<ResolutionCandidate> candidates,
+            CancellationToken ct)
+        {
+            var tasks = candidates.Select(async c =>
+            {
+                DateTime? writeTime = null;
+                try
+                {
+                    var task = c.Adapter.GetLastWriteTimeAsync(key, ct);
+                    if (await Task.WhenAny(
+                            task, Task.Delay(c.Adapter.ReadTimeout, ct)) == task)
+                    {
+                        writeTime = await task;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Warning<DataSyncDirector>(
+                        "Plan: write-time query failed for adapter '{0}' key '{1}': {2}",
+                        c.AdapterId, key, ex.Message);
+                }
+
+                return c.WithLastWriteTime(writeTime);
+            });
+
+            var results = await Task.WhenAll(tasks);
+            candidates.Clear();
+            candidates.AddRange(results);
         }
 
         private List<(ISaveAdapter adapter, int groupIndex, int adapterIndex)>

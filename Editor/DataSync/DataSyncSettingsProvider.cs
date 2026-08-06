@@ -44,6 +44,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
 
         private static Type[] _cachedTranslatorTypes;
         private static Type[] _cachedAdapterTypes;
+        private static Type[] _cachedPlanTypes;
         private static GUIStyle _statusLabelStyle;
 
         private DataSyncSettingsProvider(
@@ -133,6 +134,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
             DestroyInlineEditors();
             _cachedTranslatorTypes = null;
             _cachedAdapterTypes = null;
+            _cachedPlanTypes = null;
         }
 
         #endregion
@@ -186,6 +188,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                     "_verboseLogging", "Verbose Logging"
                 );
             }
+            EditorGUILayout.Space();
+
+            DrawConflictResolutionPlansSection();
         }
 
         private static void DrawScriptingDefineToggle(
@@ -232,6 +237,196 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
                     buildTarget, currentDefines
                 );
             }
+        }
+
+        #endregion
+
+        #region Conflict Resolution Plans
+
+        private void DrawConflictResolutionPlansSection()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "Conflict Resolution Plans", EditorStyles.miniBoldLabel
+                );
+                EditorGUILayout.HelpBox(
+                    "Per-key overrides for how data is resolved between "
+                    + "adapters on load. Exact matches beat wildcards, "
+                    + "which beat regex. Entries without an assigned plan "
+                    + "are ignored.",
+                    MessageType.None
+                );
+
+                SerializedProperty plansProp =
+                    _serializedSettings.FindProperty("_keyConflictPlans");
+                if (plansProp == null)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Field '_keyConflictPlans' not found.",
+                        MessageType.Error
+                    );
+                    return;
+                }
+
+                if (plansProp.arraySize == 0)
+                {
+                    EditorGUILayout.LabelField(
+                        "(no per-key plans)", EditorStyles.miniLabel
+                    );
+                }
+
+                for (int i = 0; i < plansProp.arraySize; i++)
+                {
+                    if (DrawConflictPlanEntry(plansProp, i))
+                    {
+                        // Entry deleted; bail and let the next repaint
+                        // rebuild the loop with the updated count.
+                        return;
+                    }
+                }
+
+                EditorGUILayout.Space(2);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button(
+                            "+ Add Plan",
+                            EditorStyles.miniButton,
+                            GUILayout.Width(120)))
+                    {
+                        plansProp.arraySize++;
+                        _serializedSettings.ApplyModifiedProperties();
+                        GUIUtility.ExitGUI();
+                    }
+                    GUILayout.FlexibleSpace();
+                }
+            }
+        }
+
+        private bool DrawConflictPlanEntry(
+            SerializedProperty plansProp,
+            int index)
+        {
+            SerializedProperty entry = plansProp.GetArrayElementAtIndex(index);
+            SerializedProperty keyProp =
+                entry.FindPropertyRelative("_key");
+            SerializedProperty matchTypeProp =
+                entry.FindPropertyRelative("_matchType");
+            SerializedProperty planProp =
+                entry.FindPropertyRelative("_plan");
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUILayout.VerticalScope())
+                {
+                    EditorGUILayout.PropertyField(
+                        keyProp, new GUIContent("Key")
+                    );
+                    EditorGUILayout.PropertyField(
+                        matchTypeProp, new GUIContent("Match")
+                    );
+
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.PropertyField(
+                            planProp, new GUIContent("Plan")
+                        );
+
+                        if (planProp != null
+                            && planProp.objectReferenceValue == null)
+                        {
+                            DrawPlanCreateButton(planProp);
+                        }
+                    }
+                }
+
+                if (DrawSmallDeleteButton())
+                {
+                    plansProp.DeleteArrayElementAtIndex(index);
+                    _serializedSettings.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(
+                        _serializedSettings.targetObject
+                    );
+                    return true;
+                }
+            }
+
+            if (planProp != null && planProp.objectReferenceValue == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "No plan assigned - this entry is ignored.",
+                    MessageType.Warning
+                );
+            }
+
+            EditorGUILayout.Space(2);
+            return false;
+        }
+
+        private void DrawPlanCreateButton(SerializedProperty planProp)
+        {
+            Type[] planTypes = GetCachedPlanTypes();
+            if (planTypes.Length == 0)
+            {
+                EditorGUILayout.LabelField(
+                    "No plans found", EditorStyles.miniLabel
+                );
+                return;
+            }
+
+            if (!GUILayout.Button(
+                    "Create", EditorStyles.miniButton,
+                    GUILayout.Width(60)))
+            {
+                return;
+            }
+
+            var menu = new GenericMenu();
+            foreach (Type planType in planTypes)
+            {
+                string label = ObjectNames.NicifyVariableName(planType.Name);
+                menu.AddItem(new GUIContent(label), false, () =>
+                {
+                    ScriptableObject asset = CreatePlanAsset(planType);
+                    planProp.objectReferenceValue = asset;
+                    _serializedSettings.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(
+                        _serializedSettings.targetObject
+                    );
+                    AssetDatabase.SaveAssets();
+                    EditorGUIUtility.PingObject(asset);
+                });
+            }
+
+            menu.ShowAsContext();
+        }
+
+        private static Type[] GetCachedPlanTypes()
+        {
+            _cachedPlanTypes ??= ScanProviderTypes(typeof(ConflictResolutionPlan));
+            return _cachedPlanTypes;
+        }
+
+        private static ScriptableObject CreatePlanAsset(Type planType)
+        {
+            ScriptableObject asset = ScriptableObject.CreateInstance(planType);
+            asset.name = planType.Name;
+
+            if (!Directory.Exists(ProviderAssetFolder))
+            {
+                Directory.CreateDirectory(ProviderAssetFolder);
+            }
+
+            string assetPath =
+                AssetDatabase.GenerateUniqueAssetPath(
+                    Path.Combine(
+                        ProviderAssetFolder,
+                        planType.Name + ".asset"
+                    )
+                );
+            AssetDatabase.CreateAsset(asset, assetPath);
+            return asset;
         }
 
         #endregion

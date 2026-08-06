@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.DataSync
@@ -97,6 +98,39 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         }
     }
 
+    /// <summary>
+    /// A per-key override telling the director how to resolve between
+    /// adapters on load. Key matching is Exact, Wildcard, or Regex.
+    /// </summary>
+    [Serializable]
+    public class KeyConflictPlan
+    {
+        [SerializeField]
+        private string _key;
+
+        [SerializeField]
+        private KeyMatchType _matchType = KeyMatchType.Exact;
+
+        [SerializeField]
+        private ConflictResolutionPlan _plan;
+
+        public string Key => _key;
+
+        public KeyMatchType MatchType => _matchType;
+
+        public ConflictResolutionPlan Plan => _plan;
+
+        public void Configure(
+            string key,
+            KeyMatchType matchType,
+            ConflictResolutionPlan plan)
+        {
+            _key = key;
+            _matchType = matchType;
+            _plan = plan;
+        }
+    }
+
     [CreateAssetMenu(
         fileName = "DataSyncConfiguration",
         menuName = "Scheherazade/Data Sync/Configuration")]
@@ -129,6 +163,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         [SerializeField]
         private bool _verboseLogging = false;
 
+        // --- Per-key conflict resolution plans ---
+        [SerializeField]
+        private KeyConflictPlan[] _keyConflictPlans;
+
         #region Properties
 
         public ResolveMode ResolveMode
@@ -147,6 +185,12 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             get => _verboseLogging;
             set => _verboseLogging = value;
+        }
+
+        public KeyConflictPlan[] KeyConflictPlans
+        {
+            get => _keyConflictPlans ?? Array.Empty<KeyConflictPlan>();
+            set => _keyConflictPlans = value ?? Array.Empty<KeyConflictPlan>();
         }
 
         public ISaveTranslator[] Translators
@@ -225,6 +269,76 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             return flat.Length > 0
                 ? new[] { flat }
                 : Array.Empty<ISaveAdapter[]>();
+        }
+
+        #endregion
+
+        #region Conflict Resolution Plans (used by DataSyncDirector)
+
+        /// <summary>
+        /// Returns the plan entry for a key. Precedence: Exact wins over
+        /// Wildcard (longest pattern wins), which wins over Regex (first
+        /// match). Entries without an assigned plan are ignored.
+        /// </summary>
+        internal KeyConflictPlan FindPlanFor(string key)
+        {
+            if (_keyConflictPlans == null || string.IsNullOrEmpty(key))
+            {
+                return null;
+            }
+
+            KeyConflictPlan exact = null;
+            KeyConflictPlan wildcard = null;
+            string wildcardPattern = null;
+            KeyConflictPlan regex = null;
+
+            foreach (KeyConflictPlan entry in _keyConflictPlans)
+            {
+                if (entry == null
+                    || string.IsNullOrEmpty(entry.Key)
+                    || entry.Plan == null)
+                {
+                    continue;
+                }
+
+                switch (entry.MatchType)
+                {
+                    case KeyMatchType.Exact:
+                        if (exact == null
+                            && string.Equals(entry.Key, key, StringComparison.Ordinal))
+                        {
+                            exact = entry;
+                        }
+                        break;
+
+                    case KeyMatchType.Wildcard:
+                        if (WildcardMatch(entry.Key, key)
+                            && (wildcard == null
+                                || entry.Key.Length > wildcardPattern.Length))
+                        {
+                            wildcard = entry;
+                            wildcardPattern = entry.Key;
+                        }
+                        break;
+
+                    case KeyMatchType.Regex:
+                        if (regex == null
+                            && Regex.IsMatch(key, entry.Key))
+                        {
+                            regex = entry;
+                        }
+                        break;
+                }
+            }
+
+            return exact ?? wildcard ?? regex;
+        }
+
+        private static bool WildcardMatch(string pattern, string value)
+        {
+            string regexPattern =
+                "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$";
+            return Regex.IsMatch(value, regexPattern);
         }
 
         #endregion
