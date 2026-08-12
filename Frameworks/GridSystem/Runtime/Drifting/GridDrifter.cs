@@ -107,6 +107,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             {
                 drifter.HandleDriftDetached();
             }
+
+            RecenterDriftersOnHookedCells();
+
             _feedback?.PlayDriftRelease(_driftMaster);
             _drifters.Clear();
             _driftMaster = null;
@@ -212,6 +215,25 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Private Methods
 
+        /// <summary>
+        /// Locks the drifter visuals onto their hooked cells so a released entity
+        /// never floats between cells (grid-snap feel).
+        /// </summary>
+        private void RecenterDriftersOnHookedCells()
+        {
+            IGridCoordinateProvider coordinates = _board.Coordinates;
+            if (coordinates == null) return;
+
+            foreach (var (drifter, _) in _drifters)
+            {
+                if (drifter.Occupant?.HookedCell != null)
+                {
+                    drifter.ControlledPosition =
+                        coordinates.CellToWorld(drifter.Occupant.HookedCell.GridPosition);
+                }
+            }
+        }
+
         private void UpdateDrifterMovementAbility()
         {
             foreach (var (drifter, data) in _drifters)
@@ -268,13 +290,18 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _movementDirection = (desired - hook).ToDirectionFlag();
             if ((_movementDirection & DirectionFlag.Diagonal & _movementAbility) == 0)
             {
+                // Diagonal is blocked (CheckObjectMovement excludes diagonals whose
+                // orthogonal intermediates are not clear) -> corner through the free
+                // cardinal axis. Free diagonals keep the diagonal bit and slide freely.
                 if (Mathf.Abs(desired.x - hook.x) > Mathf.Abs(desired.y - hook.y))
                 {
                     desired.y = hook.y;
+                    _movementDirection = _movementDirection & DirectionFlag.Horizontal;
                 }
                 else
                 {
                     desired.x = hook.x;
+                    _movementDirection = _movementDirection & DirectionFlag.Vertical;
                 }
             }
 

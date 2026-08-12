@@ -30,7 +30,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private GridCell _predictedCell;
         private GridCell _currentPositionCell;
-        private Vector2 _moveDirection;      // NOTE: drop-car never assigns this; ported as-is
         private readonly List<IGridOccupant> _occupantScratch = new List<IGridOccupant>();
 
         #endregion
@@ -71,20 +70,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 _drifter.MovementAbility.HasFlag(DirectionFlag.North) ? 1 : 0
             );
 
-            Vector2Int predictedPosition = _currentPositionCell.GridPosition + predictedDirection;
-
-            DirectionFlag directionFlag = predictedDirection.ToDirectionFlag();
-            if ((directionFlag & DirectionFlag.Diagonal) != 0)
+            // Resolve a diagonal into a single cardinal step. The ability clamp above
+            // already dropped blocked axes; when BOTH cardinals are free we pick the
+            // axis that is actually traversable, preferring the axis the visual drift
+            // is moving along. Never commit a 2-cell diagonal snap.
+            if ((predictedDirection.ToDirectionFlag() & DirectionFlag.Diagonal) != 0)
             {
-                if (Mathf.Abs(_moveDirection.x) > Mathf.Abs(_moveDirection.y))
-                {
-                    predictedDirection.y = 0;
-                }
-                else
-                {
-                    predictedDirection.x = 0;
-                }
+                predictedDirection = ResolveDiagonalAxis(predictedDirection);
             }
+
+            // NOTE: predictedPosition must be computed from the RESOLVED direction.
+            Vector2Int predictedPosition = _currentPositionCell.GridPosition + predictedDirection;
 
             _predictedCell = _map.CheckValidGridPosition(predictedPosition)
                 ? _map.AccessCell(predictedPosition)
@@ -99,6 +95,45 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Private Methods
 
+        private Vector2Int ResolveDiagonalAxis(Vector2Int direction)
+        {
+            IGridOccupant occupant = GetFirstOccupant();
+            if (occupant == null) return Vector2Int.zero;
+
+            Vector2Int horizontal = new Vector2Int(direction.x, 0);
+            Vector2Int vertical = new Vector2Int(0, direction.y);
+
+            bool horizontalFree = IsTraversable(occupant, horizontal);
+            bool verticalFree = IsTraversable(occupant, vertical);
+
+            // Free diagonal movement when BOTH orthogonal intermediates are clear
+            // (matches CheckObjectMovement's no-corner-cutting rule). Only corner
+            // through the free axis when one intermediate is blocked.
+            if (horizontalFree && verticalFree)
+            {
+                return direction;
+            }
+            if (horizontalFree) return horizontal;
+            if (verticalFree) return vertical;
+            return Vector2Int.zero;   // no free intermediate -> no snap
+        }
+
+        private bool IsTraversable(IGridOccupant occupant, Vector2Int relativeStep)
+        {
+            Vector2Int target = _currentPositionCell.GridPosition + relativeStep;
+            if (!_map.CheckValidGridPosition(target)) return false;
+            return _map.CheckObjectPlaceable(target, occupant);
+        }
+
+        private IGridOccupant GetFirstOccupant()
+        {
+            foreach (IDrifter drifter in _drifter.Drifters)
+            {
+                if (drifter.Occupant != null) return drifter.Occupant;
+            }
+            return null;
+        }
+
         private void SnapOccupantsToGrid()
         {
             if (_predictedCell == null) return;
@@ -111,6 +146,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
             if (!_map.MoveOccupants(_occupantScratch, _currentPositionCell, _predictedCell)) return;
 
+            // Logical snap only: the HookedCell follows the drag (keeps movement
+            // clamping correct), but the VISUAL stays at the pointer position while
+            // dragging. The box visibly locks to the cell on release
+            // (GridDrifter.ReleaseAllDrifters -> RecenterDriftersOnHookedCells).
             _currentPositionCell = _predictedCell;
             SnappedCellChanged?.Invoke();      // game hooks haptics/audio here (drop-car played HapticPattern)
         }

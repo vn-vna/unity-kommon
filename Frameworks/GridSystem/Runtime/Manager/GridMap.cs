@@ -475,9 +475,28 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             if (occupant.PlaceableObject.Grid[position] == PlaceableObjectGrid.GridCellEmptySentinelValue) return;
             foreach (DirectionFlag direction in OffsetMapping.Keys)
             {
-                Vector2Int predict = cell.GridPosition + OffsetMapping[direction];
-                if (ValidateCellPlaceable(cell, occupant, predict, position)) continue;
-                movement &= ~direction;
+                Vector2Int offset = OffsetMapping[direction];
+                Vector2Int predict = cell.GridPosition + offset;
+                if (!ValidateCellPlaceable(cell, occupant, predict, position))
+                {
+                    movement &= ~direction;
+                    continue;
+                }
+
+                // No corner cutting: a diagonal move is only possible when BOTH
+                // orthogonal neighbors are also clear. This keeps free diagonal
+                // movement in open space while forcing cornering (D→B→A) when one
+                // intermediate is blocked (e.g. an obstacle at C blocks D→A west).
+                if ((direction & DirectionFlag.Diagonal) != 0)
+                {
+                    Vector2Int horizontal = cell.GridPosition + new Vector2Int(offset.x, 0);
+                    Vector2Int vertical = cell.GridPosition + new Vector2Int(0, offset.y);
+                    if (!ValidateCellPlaceable(cell, occupant, horizontal, position)
+                        || !ValidateCellPlaceable(cell, occupant, vertical, position))
+                    {
+                        movement &= ~direction;
+                    }
+                }
             }
         }
 

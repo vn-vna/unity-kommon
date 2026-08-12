@@ -1,0 +1,16 @@
+{
+    "name": "Com.Hapiga.Scheherazade.Haptics",
+    "rootNamespace": "Com.Hapiga.Scheherazade.Common.Haptics",
+    "references": [
+        "Com.Hapiga.Scheherazade.Common"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
