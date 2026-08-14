@@ -170,6 +170,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         public void RefreshBorder()
         {
+            if (_inboundCells == null)
+            {
+                return;
+            }
+
             _borderGenerator?.Combine(BuildBorderData(), _gridSize);
             CalculateCurrentEffectiveGridSize();
         }
