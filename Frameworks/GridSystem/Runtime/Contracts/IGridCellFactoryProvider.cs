@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
@@ -8,6 +10,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
     /// </summary>
     public interface IGridCellFactoryProvider
     {
+        void BindParent(Transform parent);                                        // called once before pool creation
         void AttachCellView(GridCell cell, IGridCoordinateProvider coordinates); // on pool creation
         void DetachCellView(GridCell cell);                                      // on pool clear
         void RefreshCellView(GridCell cell);                                     // visual refresh (flag/occupant changes)

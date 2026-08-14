@@ -18,18 +18,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         private string _id;
 
 #if UNITY_EDITOR
-        [Tooltip("One-char identifier used to encode levels as strings.")]
-#endif
-        [SerializeField]
-        private char _identifier;
-
-#if UNITY_EDITOR
-        [Tooltip("Higher priority spawns first when multiple placeables compete.")]
-#endif
-        [SerializeField]
-        private int _spawnPriority;
-
-#if UNITY_EDITOR
         [Tooltip("Shape anchor offset in the grid. The hooked cell matches the shape's origin cell.")]
 #endif
         [SerializeField]
@@ -46,8 +34,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         #region Properties
 
         public string Id => _id;
-        public char Identifier => _identifier;
-        public int SpawnPriority => _spawnPriority;
         public Vector2Int Offset { get => _offset; set => _offset = value; }
         public PlaceableObjectGrid Grid { get => _grid; set => _grid = value; }
 

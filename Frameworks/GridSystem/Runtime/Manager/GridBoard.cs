@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
@@ -32,7 +34,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridConfiguration Configuration => configuration;
         public GridMap Map => _map;
         public GridCell[,] CellObjects => _map != null ? _map.CellObjects : null;
-        public Vector2Int GridSize => configuration != null ? configuration.GridSize : Vector2Int.zero;
+        public Vector2Int GridSize => _map != null
+            ? _map.GridSize
+            : (configuration != null ? configuration.GridSize : Vector2Int.zero);
+        public Vector2Int PoolSize => configuration != null ? configuration.PoolSize : Vector2Int.zero;
         public IGridCoordinateProvider Coordinates => _coordinates;
         public Vector2 PointerPlanePosition { get; private set; }
         public bool Initialized { get; private set; }
@@ -46,6 +51,30 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 #endif
         [SerializeField]
         private GridConfiguration configuration;
+
+#if UNITY_EDITOR
+        [Tooltip("Cells created per frame/chunk during InitializeAsync/InitializeCoroutine (0 = create everything in one pass).")]
+#endif
+        [SerializeField]
+        private int _cellsPerChunk = 256;
+
+#if UNITY_EDITOR
+        [Tooltip("Parent transform for spawned cell views. Leave empty to auto-create a container under this board.")]
+#endif
+        [SerializeField]
+        private Transform cellRoot;
+
+#if UNITY_EDITOR
+        [Tooltip("Auto-create a child container under this board when cellRoot is empty.")]
+#endif
+        [SerializeField]
+        private bool autoCreateCellContainer = true;
+
+#if UNITY_EDITOR
+        [Tooltip("Name of the auto-created cell container.")]
+#endif
+        [SerializeField]
+        private string cellContainerName = "Cells";
 
         #endregion
 
@@ -64,6 +93,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private GridCell _downCell;
         private bool _isPointerDown;
+        private bool _isInitializing;
+        private CancellationTokenSource _initCts;
 
         #endregion
 
@@ -86,6 +117,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void OnDisable()
         {
+            _initCts?.Cancel();
+            _initCts?.Dispose();
+            _initCts = null;
+            StopAllCoroutines();
+
             if (GridManager.Instance != null)
             {
                 GridManager.Instance.Unregister(this);
@@ -96,40 +132,121 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Public Methods
 
+        /// <summary>
+        /// Synchronously initializes the board from its configuration. If the
+        /// board is already initialized it is torn down and rebuilt first.
+        /// </summary>
         public void Initialize()
         {
-            ResolveProviders();
+            if (_isInitializing) return;
+            _isInitializing = true;
+            try
+            {
+                ShutdownIfInitialized();
+                InitializeCore();
+            }
+            finally
+            {
+                _isInitializing = false;
+            }
+        }
 
-            _map = new GridMap(configuration);
-            _drifter = new GridDrifter(this, _map, configuration, _feedback);
-            _snappingAdapter = new GridSnappingAdapter(_map, _drifter);
+        /// <summary>
+        /// Awaitable-based initialization. Cell views are created in chunks
+        /// (<see cref="_cellsPerChunk"/>) across frames on the main thread so
+        /// large grids do not stall a single frame. Cancellable via token or by
+        /// disabling the board.
+        /// </summary>
+        public async Awaitable InitializeAsync(CancellationToken cancellationToken = default)
+        {
+            if (_isInitializing) return;
+            _isInitializing = true;
+            try
+            {
+                ShutdownIfInitialized();
 
-            _snappingAdapter.SnappedCellChanged += () => SnappedCellChanged?.Invoke();
-            _drifter.DrifterAppended += drifter => DrifterAppended?.Invoke(drifter);
-            _drifter.DriftingFinished += () => DriftingFinished?.Invoke();
-            MouseDownOnCell += cell => _drifter.HandleMouseDownOnCell(cell);
+                CancellationToken token = GetInitCts().Token;
+                cancellationToken.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
 
-            _map.AllCellsCreated += () => AllCellsCreated?.Invoke();
-            _map.AllCellsCleared += () => AllCellsCleared?.Invoke();
+                ResolveProviders();
+                CreateModules();
 
-            _map.CreateAllCells();
-            _map.EnableRegion(configuration.GridSize);
-            RefreshBorder();
+                IEnumerator chunked = _map.CreateAllCellsChunked(_cellsPerChunk);
+                while (chunked.MoveNext())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    token.ThrowIfCancellationRequested();
+                    await Awaitable.NextFrameAsync();
+                }
 
-            Initialized = true;
-            QuickLog.Info<GridBoard>(
-                "Board '{0}' initialized. Grid {1}x{2}.",
-                configuration.Id,
-                configuration.GridSize.x,
-                configuration.GridSize.y
-            );
+                FinalizeInitialization();
+            }
+            finally
+            {
+                _isInitializing = false;
+            }
+        }
+
+        /// <summary>
+        /// Coroutine-based initialization. Equivalent to
+        /// <see cref="InitializeAsync"/> but driven by a Unity coroutine.
+        /// </summary>
+        public IEnumerator InitializeCoroutine()
+        {
+            if (_isInitializing) yield break;
+            _isInitializing = true;
+            try
+            {
+                ShutdownIfInitialized();
+                yield return InitializeCoreCoroutine(_cellsPerChunk);
+            }
+            finally
+            {
+                _isInitializing = false;
+            }
         }
 
         public void Shutdown()
         {
             if (!Initialized) return;
-            _map.ClearAllCells();
+
+            if (_map != null)
+            {
+                _map.ClearAllCells();
+                UnsubscribeModules();
+                _map = null;
+                _drifter = null;
+                _snappingAdapter = null;
+            }
+
             Initialized = false;
+        }
+
+        /// <summary>
+        /// Runtime resize of the active grid region. The requested size is clamped
+        /// to the configured pool size. Requires the board to be initialized.
+        /// </summary>
+        public void Resize(Vector2Int newSize)
+        {
+            if (!Initialized || _map == null)
+            {
+                QuickLog.Warning<GridBoard>(
+                    "Board '{0}': Resize ignored — board is not initialized.",
+                    configuration != null ? configuration.Id : name
+                );
+                return;
+            }
+
+            Vector2Int appliedSize = _map.Resize(newSize);
+            QuickLog.Info<GridBoard>(
+                "Board '{0}' resized to {1}x{2} (requested {3}x{4}).",
+                configuration.Id,
+                appliedSize.x,
+                appliedSize.y,
+                newSize.x,
+                newSize.y
+            );
         }
 
         public void Tick()
@@ -184,7 +301,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _snappingAdapter.UpdateSnapping();
         }
 
-        public void PlaceObjectAtPosition(Vector2Int position, IGridOccupant occupant)
+        public bool PlaceObjectAtPosition(Vector2Int position, IGridOccupant occupant)
             => _map.PlaceObjectAtPosition(position, occupant);
 
         public bool CheckObjectPlaceable(Vector2Int position, IGridOccupant occupant)
@@ -231,6 +348,126 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 );
             }
         }
+
+        private void InitializeCore()
+        {
+            ResolveProviders();
+            CreateModules();
+            _map.CreateAllCells();
+            FinalizeInitialization();
+        }
+
+        private IEnumerator InitializeCoreCoroutine(int cellsPerChunk)
+        {
+            ResolveProviders();
+            CreateModules();
+
+            IEnumerator chunked = _map.CreateAllCellsChunked(cellsPerChunk);
+            while (chunked.MoveNext())
+            {
+                yield return chunked.Current;
+            }
+
+            FinalizeInitialization();
+        }
+
+        private void CreateModules()
+        {
+            _cellFactory?.BindParent(ResolveCellRoot());
+
+            _map = new GridMap(configuration);
+            _drifter = new GridDrifter(this, _map, configuration, _feedback);
+            _snappingAdapter = new GridSnappingAdapter(_map, _drifter);
+
+            _snappingAdapter.SnappedCellChanged += HandleSnappedCellChanged;
+            _drifter.DrifterAppended += HandleDrifterAppended;
+            _drifter.DriftingFinished += HandleDriftingFinished;
+            MouseDownOnCell += HandleMouseDownOnCell;
+
+            _map.AllCellsCreated += HandleAllCellsCreated;
+            _map.AllCellsCleared += HandleAllCellsCleared;
+        }
+
+        private void UnsubscribeModules()
+        {
+            if (_snappingAdapter != null)
+            {
+                _snappingAdapter.SnappedCellChanged -= HandleSnappedCellChanged;
+            }
+
+            if (_drifter != null)
+            {
+                _drifter.DrifterAppended -= HandleDrifterAppended;
+                _drifter.DriftingFinished -= HandleDriftingFinished;
+            }
+
+            MouseDownOnCell -= HandleMouseDownOnCell;
+
+            if (_map != null)
+            {
+                _map.AllCellsCreated -= HandleAllCellsCreated;
+                _map.AllCellsCleared -= HandleAllCellsCleared;
+            }
+        }
+
+        private void FinalizeInitialization()
+        {
+            _map.EnableRegion(configuration.GridSize);
+            RefreshBorder();
+            Initialized = true;
+            QuickLog.Info<GridBoard>(
+                "Board '{0}' initialized. Grid {1}x{2}.",
+                configuration.Id,
+                _map.GridSize.x,
+                _map.GridSize.y
+            );
+        }
+
+        private void ShutdownIfInitialized()
+        {
+            if (Initialized) Shutdown();
+        }
+
+        /// <summary>
+        /// Resolves the parent transform for spawned cell views: explicit
+        /// <see cref="cellRoot"/>, otherwise an auto-created child container,
+        /// otherwise the board's own transform (never the scene root).
+        /// </summary>
+        private Transform ResolveCellRoot()
+        {
+            if (cellRoot != null) return cellRoot;
+            if (!autoCreateCellContainer) return transform;
+
+            Transform container = transform.Find(cellContainerName);
+            if (container == null)
+            {
+                GameObject go = new GameObject(cellContainerName);
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = Vector3.zero;
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = Vector3.one;
+                container = go.transform;
+            }
+
+            return container;
+        }
+
+        private CancellationTokenSource GetInitCts()
+        {
+            if (_initCts == null)
+            {
+                _initCts = new CancellationTokenSource();
+            }
+
+            return _initCts;
+        }
+
+        private void HandleSnappedCellChanged() => SnappedCellChanged?.Invoke();
+        private void HandleDrifterAppended(IDrifter drifter) => DrifterAppended?.Invoke(drifter);
+        private void HandleDriftingFinished() => DriftingFinished?.Invoke();
+        private void HandleMouseDownOnCell(GridCell cell) => _drifter?.HandleMouseDownOnCell(cell);
+        private void HandleAllCellsCreated() => AllCellsCreated?.Invoke();
+        private void HandleAllCellsCleared() => AllCellsCleared?.Invoke();
 
         private void RefreshBorder() => _borderGenerator?.Combine(_map.BuildBorderData(), _map.GridSize);
 

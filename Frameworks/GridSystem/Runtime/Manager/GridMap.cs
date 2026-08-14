@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Com.Hapiga.Scheherazade.Common.Extensions;
 using UnityEngine;
@@ -26,6 +27,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridCell[,] PooledCells => _pooledCells;
 
         public Vector2Int GridSize => _gridSize;
+        public Vector2Int PoolSize => _poolSize;
+        public Vector2Int BorderSize => _borderSize;
         public Vector2Int EffectiveGridSize { get; private set; }
         public Vector3 CenterPosition { get; private set; }
 
@@ -150,6 +153,19 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             }
 
             _gridSize = Vector2Int.zero;
+        }
+
+        /// <summary>
+        /// Runtime resize. Clamps to the pooled region (cells only exist within
+        /// pool+border bounds), re-enables the active region for the new size and
+        /// refreshes border/effective-size data. Returns the applied size.
+        /// </summary>
+        public Vector2Int Resize(Vector2Int size)
+        {
+            Vector2Int clamped = ClampToPool(size);
+            EnableRegion(clamped);
+            RefreshBorder();
+            return clamped;
         }
 
         public void RefreshBorder()
@@ -400,6 +416,37 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             AllCellsCreated?.Invoke();
         }
 
+        /// <summary>
+        /// Creates all pooled cells but yields back to the caller every
+        /// <paramref name="cellsPerChunk"/> cells so large grids can be built
+        /// incrementally across frames. The caller drives the iterator (coroutine
+        /// or a Task loop). <see cref="AllCellsCreated"/> fires once at the end.
+        /// </summary>
+        public IEnumerator CreateAllCellsChunked(int cellsPerChunk)
+        {
+            _inboundCells = new GridCell[_poolSize.x, _poolSize.y];
+            _pooledCells = new GridCell[
+                _poolSize.x + _borderSize.x * 2,
+                _poolSize.y + _borderSize.y * 2
+            ];
+
+            int cellsSinceYield = 0;
+            for (int x = -_borderSize.x; x < _poolSize.x + _borderSize.x; x++)
+            {
+                for (int y = -_borderSize.y; y < _poolSize.y + _borderSize.y; y++)
+                {
+                    CreateSingleCell(x, y);
+                    if (cellsPerChunk > 0 && ++cellsSinceYield >= cellsPerChunk)
+                    {
+                        cellsSinceYield = 0;
+                        yield return null;
+                    }
+                }
+            }
+
+            AllCellsCreated?.Invoke();
+        }
+
         public void GetAdjacentCellsNonAlloc(
             IGridOccupant occupant, DirectionFlag direction, GridCell[] buffer, out int count
         )
@@ -450,6 +497,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         #endregion
 
         #region Private Methods
+
+        private Vector2Int ClampToPool(Vector2Int size) => new Vector2Int(
+            Mathf.Clamp(size.x, 1, _poolSize.x),
+            Mathf.Clamp(size.y, 1, _poolSize.y)
+        );
 
         private void EnableRegionSingleCell(int x, int y)
         {

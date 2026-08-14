@@ -12,6 +12,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         #region Properties
 
         public string Id => _id;
+        public bool AutoConfigure => _autoConfigure;
         public Vector2Int GridSize => _gridSize;
         public Vector2Int PoolSize => _poolSize;
         public Vector2Int BorderSize => _borderSize;
@@ -34,6 +35,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 #endif
         [SerializeField]
         private string _id;
+
+#if UNITY_EDITOR
+        [Tooltip("Auto-initialize the board when enabled. Disable to initialize on demand via GridBoard.Initialize / InitializeAsync / InitializeCoroutine.")]
+#endif
+        [SerializeField]
+        private bool _autoConfigure = true;
 
 #if UNITY_EDITOR
         [Tooltip("Active playable region size in cells.")]

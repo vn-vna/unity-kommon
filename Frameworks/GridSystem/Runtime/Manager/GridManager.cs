@@ -9,7 +9,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
     /// <summary>
     /// Registry + single tick pump. Auto-created hidden GameObject; ticks every
     /// registered <see cref="GridBoard"/> in registration order. Boards never
-    /// implement Update() themselves.
+    /// implement Update() themselves. A board is auto-initialized on register only
+    /// when its <see cref="GridConfiguration.AutoConfigure"/> is enabled; otherwise
+    /// call <c>GridBoard.Initialize/InitializeAsync/InitializeCoroutine</c> manually.
     /// </summary>
     [AddComponentMenu("")] // Hidden component
     public class GridManager : SingletonBehavior<GridManager>
@@ -78,7 +80,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 _boardsById[board.Configuration.Id] = board;
             }
 
-            board.Initialize();
+            if (board.Configuration?.AutoConfigure != false)
+            {
+                board.Initialize();
+            }
+
             Status = GridManagerStatus.Ready;
             BoardRegistered?.Invoke(board);
             QuickLog.Debug<GridManager>(
