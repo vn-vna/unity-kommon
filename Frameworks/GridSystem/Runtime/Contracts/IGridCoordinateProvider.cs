@@ -9,8 +9,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
     /// </summary>
     public interface IGridCoordinateProvider
     {
-        Vector3 CellToWorld(Vector2Int cell);                    // cell center in world
-        Vector2Int WorldToCell(Vector3 world);
+        Vector3 CellToWorld(GridCoord cell);                 // cell center in world
+        GridCoord WorldToCell(Vector3 world);
         bool TryRaycastGridPlane(Ray ray, out Vector3 point);    // pointer ray -> grid plane
         Vector2 Flatten(Vector3 world);                          // world -> grid-plane coords
         Vector3 Unflatten(Vector2 plane, Vector3 anchorWorld);   // grid-plane -> world

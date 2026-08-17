@@ -11,9 +11,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public const int MaxGridWidth = int.MaxValue;
         public const int MaxGridHeight = int.MaxValue;
 
-        public Vector2Int Size
+        public GridCoord Size
         {
-            get => new Vector2Int(_width, _height);
+            get => new GridCoord(_width, _height);
             set => Resize(value);
         }
 
@@ -23,7 +23,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             set => _occupiedCells[x + y * _width] = value;
         }
 
-        public int this[Vector2Int position]
+        public int this[GridCoord position]
         {
             get => this[position.x, position.y];
             set => this[position.x, position.y] = value;
@@ -44,7 +44,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         [NonSerialized]
         private bool[] _occupationDataCache;
 
-        public PlaceableObjectGrid(Vector2Int size)
+        public PlaceableObjectGrid(GridCoord size)
             : this(size.x, size.y)
         { }
 
@@ -82,7 +82,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _occupationDataCache = null;
         }
 
-        public void Resize(Vector2Int newSize)
+        public void Resize(GridCoord newSize)
         {
             Resize(newSize.x, newSize.y);
         }

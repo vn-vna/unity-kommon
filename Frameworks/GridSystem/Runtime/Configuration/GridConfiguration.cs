@@ -13,9 +13,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         public string Id => _id;
         public bool AutoConfigure => _autoConfigure;
-        public Vector2Int GridSize => _gridSize;
-        public Vector2Int PoolSize => _poolSize;
-        public Vector2Int BorderSize => _borderSize;
+        public GridCoord GridSize => _gridSize;
+        public GridCoord PoolSize => _poolSize;
+        public GridCoord BorderSize => _borderSize;
         public float DrifterSpeedLimit => _drifterSpeedLimit;
         public float NudgeAmount => _nudgeAmount;
 
@@ -46,19 +46,19 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         [Tooltip("Active playable region size in cells.")]
 #endif
         [SerializeField]
-        private Vector2Int _gridSize = new Vector2Int(15, 15);
+        private GridCoord _gridSize = new GridCoord(15, 15);
 
 #if UNITY_EDITOR
         [Tooltip("Total pooled region size in cells (>= gridSize). Cells beyond the active region stay inactive.")]
 #endif
         [SerializeField]
-        private Vector2Int _poolSize = new Vector2Int(15, 15);
+        private GridCoord _poolSize = new GridCoord(15, 15);
 
 #if UNITY_EDITOR
         [Tooltip("Border ring thickness around the pool.")]
 #endif
         [SerializeField]
-        private Vector2Int _borderSize = new Vector2Int(5, 5);
+        private GridCoord _borderSize = new GridCoord(5, 5);
 
 #if UNITY_EDITOR
         [Tooltip("Maximum drift speed in world units per tick.")]

@@ -26,10 +26,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridCell[,] CellObjects => _inboundCells;
         public GridCell[,] PooledCells => _pooledCells;
 
-        public Vector2Int GridSize => _gridSize;
-        public Vector2Int PoolSize => _poolSize;
-        public Vector2Int BorderSize => _borderSize;
-        public Vector2Int EffectiveGridSize { get; private set; }
+        public GridCoord GridSize => _gridSize;
+        public GridCoord PoolSize => _poolSize;
+        public GridCoord BorderSize => _borderSize;
+        public GridCoord EffectiveGridSize { get; private set; }
         public Vector3 CenterPosition { get; private set; }
 
         public GridConfiguration Configuration => _configuration;
@@ -43,14 +43,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         private readonly IGridCoordinateProvider _coordinates;
         private readonly IBorderGenerator _borderGenerator;
 
-        private Vector2Int _gridSize;
-        private readonly Vector2Int _poolSize;
-        private readonly Vector2Int _borderSize;
+        private GridCoord _gridSize;
+        private readonly GridCoord _poolSize;
+        private readonly GridCoord _borderSize;
 
         private GridCell[,] _inboundCells;
         private GridCell[,] _pooledCells;
-
-        private Dictionary<DirectionFlag, Vector2Int> OffsetMapping => DirectionFlagHelper.D2VInt;
 
         #endregion
 
@@ -73,8 +71,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         public void CalculateCurrentEffectiveGridSize()
         {
-            Vector2Int wrange = new Vector2Int(int.MaxValue, int.MinValue);
-            Vector2Int hrange = new Vector2Int(int.MaxValue, int.MinValue);
+            GridCoord wrange = new GridCoord(int.MaxValue, int.MinValue);
+            GridCoord hrange = new GridCoord(int.MaxValue, int.MinValue);
 
             for (int x = 0; x < _gridSize.x; x++)
             {
@@ -96,7 +94,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 }
             }
 
-            EffectiveGridSize = new Vector2Int(
+            EffectiveGridSize = new GridCoord(
                 wrange.y - wrange.x + 1,
                 hrange.y - hrange.x + 1
             );
@@ -117,12 +115,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             return _inboundCells[x, y];
         }
 
-        public GridCell AccessCell(Vector2Int position)
+        public GridCell AccessCell(GridCoord position)
         {
             return AccessCell(position.x, position.y);
         }
 
-        public void EnableRegion(Vector2Int size)
+        public void EnableRegion(GridCoord size)
         {
             _gridSize = size;
 
@@ -152,7 +150,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 }
             }
 
-            _gridSize = Vector2Int.zero;
+            _gridSize = GridCoord.zero;
         }
 
         /// <summary>
@@ -160,9 +158,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         /// pool+border bounds), re-enables the active region for the new size and
         /// refreshes border/effective-size data. Returns the applied size.
         /// </summary>
-        public Vector2Int Resize(Vector2Int size)
+        public GridCoord Resize(GridCoord size)
         {
-            Vector2Int clamped = ClampToPool(size);
+            GridCoord clamped = ClampToPool(size);
             EnableRegion(clamped);
             RefreshBorder();
             return clamped;
@@ -197,16 +195,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             RefreshBorder();
         }
 
-        public GridCell GetCellRelativeTo(GridCell cell, Vector2Int relativePosition)
+        public GridCell GetCellRelativeTo(GridCell cell, GridCoord relativePosition)
         {
             if (cell == null) return null;
-            Vector2Int targetPosition = cell.GridPosition + relativePosition;
-            return !CheckValidGridPosition(targetPosition) ? null : _inboundCells.Access(targetPosition);
+            GridCoord targetPosition = cell.GridPosition + relativePosition;
+            return !CheckValidGridPosition(targetPosition) ? null : _inboundCells[targetPosition.x, targetPosition.y];
         }
 
         public GridCell GetNeighborCell(int x, int y, DirectionFlag direction)
         {
-            Vector2Int relativePosition = OffsetMapping[direction];
+            GridCoord relativePosition = direction.ToGridCoord();
             return GetCellRelativeTo(_inboundCells[x, y], relativePosition);
         }
 
@@ -214,11 +212,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         {
             if (cell == null) return null;
 
-            Vector2Int relativePosition = OffsetMapping[direction];
+            GridCoord relativePosition = direction.ToGridCoord();
             return GetCellRelativeTo(cell, relativePosition);
         }
 
-        public bool CheckValidGridPosition(Vector2Int gridPosition)
+        public bool CheckValidGridPosition(GridCoord gridPosition)
             => CheckValidGridPosition(gridPosition.x, gridPosition.y);
 
         public bool CheckValidGridPosition(int x, int y)
@@ -236,7 +234,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             {
                 if (occupant == null || occupant.PlaceableObject == null) continue;
 
-                Vector2Int relativePosition = occupant.GetRelativePositionToHookedCell(from);
+                GridCoord relativePosition = occupant.GetRelativePositionToHookedCell(from);
                 relatives.Add(new MovingOccupantRelativeInfo
                 {
                     Occupant = occupant,
@@ -290,11 +288,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             cell.Selected = false;
         }
 
-        public bool PlaceObjectAtPosition(Vector2Int gridPosition, IGridOccupant occupant)
+        public bool PlaceObjectAtPosition(GridCoord gridPosition, IGridOccupant occupant)
         {
             if (!CheckValidGridPosition(gridPosition.x, gridPosition.y)) return false;
 
-            GridCell cell = _inboundCells.Access(gridPosition);
+            GridCell cell = _inboundCells[gridPosition.x, gridPosition.y];
             return PlaceObjectAtCell(cell, occupant);
         }
 
@@ -324,10 +322,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             return success;
         }
 
-        public bool CheckObjectPlaceable(Vector2Int position, IGridOccupant occupant)
+        public bool CheckObjectPlaceable(GridCoord position, IGridOccupant occupant)
         {
             if (!CheckValidGridPosition(position.x, position.y)) return false;
-            GridCell cell = _inboundCells.Access(position);
+            GridCell cell = _inboundCells[position.x, position.y];
             return cell != null && CheckObjectPlaceable(cell, occupant);
         }
 
@@ -503,7 +501,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Private Methods
 
-        private Vector2Int ClampToPool(Vector2Int size) => new Vector2Int(
+        private GridCoord ClampToPool(GridCoord size) => new GridCoord(
             Mathf.Clamp(size.x, 1, _poolSize.x),
             Mathf.Clamp(size.y, 1, _poolSize.y)
         );
@@ -526,14 +524,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void CheckSingleCellPartMovable(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int position, ref DirectionFlag movement
+            GridCoord position, ref DirectionFlag movement
         )
         {
             if (occupant.PlaceableObject.Grid[position] == PlaceableObjectGrid.GridCellEmptySentinelValue) return;
-            foreach (DirectionFlag direction in OffsetMapping.Keys)
+            foreach (DirectionFlag direction in DirectionFlagHelper.AllCellDirections)
             {
-                Vector2Int offset = OffsetMapping[direction];
-                Vector2Int predict = cell.GridPosition + offset;
+                GridCoord offset = direction.ToGridCoord();
+                GridCoord predict = cell.GridPosition + offset;
                 if (!ValidateCellPlaceable(cell, occupant, predict, position))
                 {
                     movement &= ~direction;
@@ -546,8 +544,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 // intermediate is blocked (e.g. an obstacle at C blocks D→A west).
                 if ((direction & DirectionFlag.Diagonal) != 0)
                 {
-                    Vector2Int horizontal = cell.GridPosition + new Vector2Int(offset.x, 0);
-                    Vector2Int vertical = cell.GridPosition + new Vector2Int(0, offset.y);
+                    GridCoord horizontal = cell.GridPosition + new GridCoord(offset.x, 0);
+                    GridCoord vertical = cell.GridPosition + new GridCoord(0, offset.y);
                     if (!ValidateCellPlaceable(cell, occupant, horizontal, position)
                         || !ValidateCellPlaceable(cell, occupant, vertical, position))
                     {
@@ -559,11 +557,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private bool ValidateCellPlaceable(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int predictPosition, Vector2Int relPosition
+            GridCoord predictPosition, GridCoord relPosition
         )
         {
             if (!CheckValidGridPosition(predictPosition.x, predictPosition.y)) return false;
-            GridCell predictedCell = _inboundCells.Access(predictPosition);
+            GridCell predictedCell = _inboundCells[predictPosition.x, predictPosition.y];
             if (!predictedCell.CheckOccupantPlaceable(occupant)) return false;
             IGridOccupant perdOccupant = predictedCell.Occupant;
             if (perdOccupant == null) return true;
@@ -573,7 +571,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void CheckSingleCellPartPlaceable(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int position, ref bool success
+            GridCoord position, ref bool success
         )
         {
             if (occupant.PlaceableObject.Grid[position] == PlaceableObjectGrid.GridCellEmptySentinelValue) return;
@@ -584,7 +582,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void PlaceSingleCellPart(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int position, ref bool success
+            GridCoord position, ref bool success
         )
         {
             if (occupant.PlaceableObject.Grid[position] == PlaceableObjectGrid.GridCellEmptySentinelValue) return;
@@ -594,7 +592,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void RemoveSingleCellPart(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int position, ref bool success
+            GridCoord position, ref bool success
         )
         {
             if (occupant.PlaceableObject.Grid[position] == PlaceableObjectGrid.GridCellEmptySentinelValue) return;
@@ -604,16 +602,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private void CollectCellAdjacentsNonAlloc(
             GridCell cell, IGridOccupant occupant,
-            Vector2Int relativePosition,
+            GridCoord relativePosition,
             ref AdjacentCellNonAllocCollectorData actionData
         )
         {
             if (cell.Occupant != occupant) return;
-            Vector2Int directionOffset = actionData.Direction.ToVector2Int();
-            Vector2Int targetPosition = cell.GridPosition + directionOffset;
+            GridCoord directionOffset = actionData.Direction.ToGridCoord();
+            GridCoord targetPosition = cell.GridPosition + directionOffset;
 
             if (!CheckValidGridPosition(targetPosition)) return;
-            GridCell targetCell = _inboundCells.Access(targetPosition);
+            GridCell targetCell = _inboundCells[targetPosition.x, targetPosition.y];
             if (targetCell == null) return;
             if (targetCell.Occupant == occupant) return;
             if (actionData.VisitedCells.Contains(targetCell)) return;
@@ -626,8 +624,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             SingleCellAction<T> action = null
         )
         {
-            Vector2Int ps = occupant.PlaceableObject.Grid.Size; // Placement Size
-            Vector2Int pp = cell.GridPosition; // Placement Position
+            GridCoord ps = occupant.PlaceableObject.Grid.Size; // Placement Size
+            GridCoord pp = cell.GridPosition; // Placement Position
 
             for (int x = 0; x < ps.x; x++)
             {
@@ -635,7 +633,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 {
                     ExecuteSingleCellObjectPlacementAction(
                         occupant, action, pp,
-                        new Vector2Int(x, y),
+                        new GridCoord(x, y),
                         ref actionData
                     );
                 }
@@ -644,16 +642,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         private T ExecuteSingleCellObjectPlacementAction<T>(
             IGridOccupant occupant, SingleCellAction<T> action,
-            Vector2Int pp, Vector2Int relativePosition, ref T actionData
+            GridCoord pp, GridCoord relativePosition, ref T actionData
         )
         {
-            Vector2Int cellPosition =
+            GridCoord cellPosition =
                 CalculateObjectCellPosition(pp, relativePosition, occupant.PlaceableObject.Offset);
 
             if (CheckValidGridPosition(cellPosition.x, cellPosition.y))
             {
                 action?.Invoke(
-                    _inboundCells.Access(cellPosition), occupant, relativePosition,
+                    _inboundCells[cellPosition.x, cellPosition.y], occupant, relativePosition,
                     ref actionData
                 );
             }
@@ -661,11 +659,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             return actionData;
         }
 
-        private Vector2Int CalculateObjectCellPosition(
-            Vector2Int placementPosition, Vector2Int relativePosition,
-            Vector2Int offset
+        private GridCoord CalculateObjectCellPosition(
+            GridCoord placementPosition, GridCoord relativePosition,
+            GridCoord offset
         )
-            => new Vector2Int(
+            => new GridCoord(
                 placementPosition.x + relativePosition.x + offset.x,
                 placementPosition.y + relativePosition.y + offset.y
             );
@@ -674,7 +672,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         {
             GridCell cell = new GridCell();
             cell.Map = this;
-            cell.GridPosition = new Vector2Int(x, y);
+            cell.GridPosition = new GridCoord(x, y);
 
             _pooledCells[x + _borderSize.x, y + _borderSize.y] = cell;
 
@@ -697,7 +695,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         private delegate void SingleCellAction<T>(
             GridCell cell,
             IGridOccupant occupant,
-            Vector2Int relativePosition,
+            GridCoord relativePosition,
             ref T actionData
         );
 
@@ -712,7 +710,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         private struct MovingOccupantRelativeInfo
         {
             public IGridOccupant Occupant;
-            public Vector2Int RelativePosition;
+            public GridCoord RelativePosition;
         }
 
         #endregion

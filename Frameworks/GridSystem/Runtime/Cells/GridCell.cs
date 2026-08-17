@@ -24,7 +24,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         /// <summary>Owning map (set on creation by <see cref="GridMap"/>).</summary>
         internal GridMap Map { get; set; }
 
-        public Vector2Int GridPosition { get; set; }
+        public GridCoord GridPosition { get; set; }
 
         public HashSet<ICellExternalController> ExternalControllers { get; private set; } =
             new HashSet<ICellExternalController>();
@@ -159,49 +159,49 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
             if (direction.HasFlag(DirectionFlag.North))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(0, 1));
+                GridCell c = Map.AccessCell(GridPosition + GridCoord.up);
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.East))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(1, 0));
+                GridCell c = Map.AccessCell(GridPosition + GridCoord.right);
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.South))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(0, -1));
+                GridCell c = Map.AccessCell(GridPosition + GridCoord.down);
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.West))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(-1, 0));
+                GridCell c = Map.AccessCell(GridPosition + GridCoord.left);
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.NorthEast))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(1, 1));
+                GridCell c = Map.AccessCell(GridPosition + new GridCoord(1, 1));
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.SouthEast))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(1, -1));
+                GridCell c = Map.AccessCell(GridPosition + new GridCoord(1, -1));
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.SouthWest))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(-1, -1));
+                GridCell c = Map.AccessCell(GridPosition + new GridCoord(-1, -1));
                 if (c != null) yield return c;
             }
 
             if (direction.HasFlag(DirectionFlag.NorthWest))
             {
-                GridCell c = Map.AccessCell(GridPosition + new Vector2Int(-1, 1));
+                GridCell c = Map.AccessCell(GridPosition + new GridCoord(-1, 1));
                 if (c != null) yield return c;
             }
         }

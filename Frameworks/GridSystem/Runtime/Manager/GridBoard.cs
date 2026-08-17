@@ -34,10 +34,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridConfiguration Configuration => configuration;
         public GridMap Map => _map;
         public GridCell[,] CellObjects => _map != null ? _map.CellObjects : null;
-        public Vector2Int GridSize => _map != null
+        public GridCoord GridSize => _map != null
             ? _map.GridSize
-            : (configuration != null ? configuration.GridSize : Vector2Int.zero);
-        public Vector2Int PoolSize => configuration != null ? configuration.PoolSize : Vector2Int.zero;
+            : (configuration != null ? configuration.GridSize : GridCoord.zero);
+        public GridCoord PoolSize => configuration != null ? configuration.PoolSize : GridCoord.zero;
         public IGridCoordinateProvider Coordinates => _coordinates;
         public Vector2 PointerPlanePosition { get; private set; }
         public bool Initialized { get; private set; }
@@ -227,7 +227,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         /// Runtime resize of the active grid region. The requested size is clamped
         /// to the configured pool size. Requires the board to be initialized.
         /// </summary>
-        public void Resize(Vector2Int newSize)
+        public void Resize(GridCoord newSize)
         {
             if (!Initialized || _map == null)
             {
@@ -238,7 +238,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 return;
             }
 
-            Vector2Int appliedSize = _map.Resize(newSize);
+            GridCoord appliedSize = _map.Resize(newSize);
             QuickLog.Info<GridBoard>(
                 "Board '{0}' resized to {1}x{2} (requested {3}x{4}).",
                 configuration.Id,
@@ -301,10 +301,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _snappingAdapter.UpdateSnapping();
         }
 
-        public bool PlaceObjectAtPosition(Vector2Int position, IGridOccupant occupant)
+        public bool PlaceObjectAtPosition(GridCoord position, IGridOccupant occupant)
             => _map.PlaceObjectAtPosition(position, occupant);
 
-        public bool CheckObjectPlaceable(Vector2Int position, IGridOccupant occupant)
+        public bool CheckObjectPlaceable(GridCoord position, IGridOccupant occupant)
             => _map.CheckObjectPlaceable(position, occupant);
 
         public bool MoveOccupants(
@@ -315,7 +315,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             => _map.MoveOccupants(occupants, from, to);
 
         public bool RemoveObject(IGridOccupant occupant) => _map.RemoveObject(occupant);
-        public GridCell AccessCell(Vector2Int position) => _map.AccessCell(position);
+        public GridCell AccessCell(GridCoord position) => _map.AccessCell(position);
         public void Clear() => _map.ClearAllCells();
         public void ResetMap() => _map.ResetMap();
 

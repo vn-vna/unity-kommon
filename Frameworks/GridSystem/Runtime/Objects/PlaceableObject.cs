@@ -21,7 +21,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         [Tooltip("Shape anchor offset in the grid. The hooked cell matches the shape's origin cell.")]
 #endif
         [SerializeField]
-        private Vector2Int _offset;
+        private GridCoord _offset;
 
 #if UNITY_EDITOR
         [Tooltip("Occupied-cell shape. Cells >= 0 are occupied parts; -1 is empty.")]
@@ -34,7 +34,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         #region Properties
 
         public string Id => _id;
-        public Vector2Int Offset { get => _offset; set => _offset = value; }
+        public GridCoord Offset { get => _offset; set => _offset = value; }
         public PlaceableObjectGrid Grid { get => _grid; set => _grid = value; }
 
         #endregion

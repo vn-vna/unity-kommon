@@ -9,6 +9,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
     /// </summary>
     public interface IBorderGenerator
     {
-        void Combine(bool[] gridData, Vector2Int gridSize);
+        void Combine(bool[] gridData, GridCoord gridSize);
     }
 }

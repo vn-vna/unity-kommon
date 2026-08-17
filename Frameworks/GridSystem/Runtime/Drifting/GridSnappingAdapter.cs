@@ -58,7 +58,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 _predictedCell = _drifter.HoveringCell;
             }
 
-            Vector2Int predictedDirection = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
+            GridCoord predictedDirection = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
             predictedDirection.x = Math.Clamp(
                 predictedDirection.x,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.West) ? -1 : 0,
@@ -80,7 +80,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             }
 
             // NOTE: predictedPosition must be computed from the RESOLVED direction.
-            Vector2Int predictedPosition = _currentPositionCell.GridPosition + predictedDirection;
+            GridCoord predictedPosition = _currentPositionCell.GridPosition + predictedDirection;
 
             _predictedCell = _map.CheckValidGridPosition(predictedPosition)
                 ? _map.AccessCell(predictedPosition)
@@ -95,13 +95,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Private Methods
 
-        private Vector2Int ResolveDiagonalAxis(Vector2Int direction)
+        private GridCoord ResolveDiagonalAxis(GridCoord direction)
         {
             IGridOccupant occupant = GetFirstOccupant();
-            if (occupant == null) return Vector2Int.zero;
+            if (occupant == null) return GridCoord.zero;
 
-            Vector2Int horizontal = new Vector2Int(direction.x, 0);
-            Vector2Int vertical = new Vector2Int(0, direction.y);
+            GridCoord horizontal = new GridCoord(direction.x, 0);
+            GridCoord vertical = new GridCoord(0, direction.y);
 
             bool horizontalFree = IsTraversable(occupant, horizontal);
             bool verticalFree = IsTraversable(occupant, vertical);
@@ -115,12 +115,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             }
             if (horizontalFree) return horizontal;
             if (verticalFree) return vertical;
-            return Vector2Int.zero;   // no free intermediate -> no snap
+            return GridCoord.zero;   // no free intermediate -> no snap
         }
 
-        private bool IsTraversable(IGridOccupant occupant, Vector2Int relativeStep)
+        private bool IsTraversable(IGridOccupant occupant, GridCoord relativeStep)
         {
-            Vector2Int target = _currentPositionCell.GridPosition + relativeStep;
+            GridCoord target = _currentPositionCell.GridPosition + relativeStep;
             if (!_map.CheckValidGridPosition(target)) return false;
             return _map.CheckObjectPlaceable(target, occupant);
         }

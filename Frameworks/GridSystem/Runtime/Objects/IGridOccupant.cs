@@ -12,13 +12,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
     {
         IPlaceableObject PlaceableObject { get; }
         GridOccupantFlag Flags { get; }
-        Vector2Int Position { get; set; }
+        GridCoord Position { get; set; }
         GridCell HookedCell { get; set; }
         event Action<IGridOccupant, GridCell, GridCell> HookedCellChanged;
 
-        Vector2Int? GetRelativePositionOnPlaceableGrid(GridCell cell, bool forceInside = false);
-        Vector2Int GetRelativePositionToHookedCell(GridCell cell);
-        bool CheckReplaceableBy(IGridOccupant other, GridCell cell, Vector2Int relativePosition);
+        GridCoord? GetRelativePositionOnPlaceableGrid(GridCell cell, bool forceInside = false);
+        GridCoord GetRelativePositionToHookedCell(GridCell cell);
+        bool CheckReplaceableBy(IGridOccupant other, GridCell cell, GridCoord relativePosition);
         void HandleCellReplacedRequest(GridCell cell, IGridOccupant replacement);
     }
 }
