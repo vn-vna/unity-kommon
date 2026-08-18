@@ -1,0 +1,19 @@
+{
+    "name": "Com.Hapiga.Scheherazade.GridSystem.Editor",
+    "rootNamespace": "Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem.Editor",
+    "references": [
+        "Com.Hapiga.Scheherazade.GridSystem",
+        "Com.Hapiga.Scheherazade.Common"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
