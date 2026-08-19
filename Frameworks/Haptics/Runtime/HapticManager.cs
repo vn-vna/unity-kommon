@@ -83,20 +83,32 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
 
         #endregion
 
-        #region Bootstrap
+        #region Public Methods
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Bootstrap()
+        public static bool TryCreateIfConfigured()
         {
+            if (Instance != null)
+            {
+                return true;
+            }
+
+            HapticConfiguration configuration =
+                Resources.Load<HapticConfiguration>(ConfigPath);
+            if (configuration == null)
+            {
+                QuickLog.Info<HapticManager>(
+                    "Haptics disabled: no HapticConfiguration found at '{0}'.",
+                    ConfigPath);
+                return false;
+            }
+
             GameObject go = new GameObject("[Scheherazade Haptic Manager]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();
             go.AddComponent<HapticManager>();
+
+            return Instance != null;
         }
-
-        #endregion
-
-        #region Public Methods
 
         public HapticHandle PlayRhythm(string rhythmId, float intensityScale = 1f)
         {

@@ -1,4 +1,9 @@
+using System;
+using System.Collections;
+using System.Threading;
+using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Sound
 {
@@ -6,10 +11,46 @@ namespace Com.Hapiga.Scheherazade.Common.Sound
     /// Static facade over <see cref="SoundManager"/>. All methods are null-safe
     /// and log via QuickLog. This is the fire-and-forget surface game code calls.
     /// </summary>
-    public class Sound
+    public class Sounds
     {
-        private Sound() { }
+        private Sounds() { }
         public static bool IsReady => SoundManager.Instance != null;
+
+        public static bool Initialize()
+        {
+            return SoundManager.TryCreateIfConfigured();
+        }
+
+        public static async Awaitable<bool> InitializeAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool initialized = Initialize();
+            await Awaitable.NextFrameAsync();
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return initialized && IsReady;
+        }
+
+        public static Task<bool> InitializeTaskAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<bool>(cancellationToken);
+            }
+
+            return Task.FromResult(Initialize() && IsReady);
+        }
+
+        public static IEnumerator InitializeCoroutine(
+            Action<bool> onInitialized = null)
+        {
+            bool initialized = Initialize();
+            yield return null;
+            onInitialized?.Invoke(initialized && IsReady);
+        }
 
         public static SoundHandle PlaySfx(string soundId, float volumeScale = 1f)
         {
@@ -113,12 +154,23 @@ namespace Com.Hapiga.Scheherazade.Common.Sound
 
         private static bool EnsureReady(string operation)
         {
+            if (SoundManager.Instance != null)
+            {
+                return true;
+            }
+
+            if (Initialize())
+            {
+                return true;
+            }
+
             if (SoundManager.Instance == null)
             {
-                QuickLog.Warning<Sound>(
-                    "{0} ignored: SoundManager not ready.", operation);
+                QuickLog.Warning<Sounds>(
+                    "{0} ignored: no SoundConfiguration was found.", operation);
                 return false;
             }
+
             return true;
         }
 

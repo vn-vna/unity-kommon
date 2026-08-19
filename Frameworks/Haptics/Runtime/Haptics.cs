@@ -1,4 +1,9 @@
+using System;
+using System.Collections;
+using System.Threading;
+using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Haptics
 {
@@ -15,6 +20,42 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
         private Haptics() { }
 
         public static bool IsReady => HapticManager.Instance != null;
+
+        public static bool Initialize()
+        {
+            return HapticManager.TryCreateIfConfigured();
+        }
+
+        public static async Awaitable<bool> InitializeAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            bool initialized = Initialize();
+            await Awaitable.NextFrameAsync();
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return initialized && IsReady;
+        }
+
+        public static Task<bool> InitializeTaskAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<bool>(cancellationToken);
+            }
+
+            return Task.FromResult(Initialize() && IsReady);
+        }
+
+        public static IEnumerator InitializeCoroutine(
+            Action<bool> onInitialized = null)
+        {
+            bool initialized = Initialize();
+            yield return null;
+            onInitialized?.Invoke(initialized && IsReady);
+        }
 
         public static HapticHandle PlayRhythm(string rhythmId, float intensityScale = 1f)
         {
@@ -80,12 +121,23 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
 
         private static bool EnsureReady(string operation)
         {
+            if (HapticManager.Instance != null)
+            {
+                return true;
+            }
+
+            if (Initialize())
+            {
+                return true;
+            }
+
             if (HapticManager.Instance == null)
             {
                 QuickLog.Warning<Haptics>(
-                    "{0} ignored: HapticManager not ready.", operation);
+                    "{0} ignored: no HapticConfiguration was found.", operation);
                 return false;
             }
+
             return true;
         }
 

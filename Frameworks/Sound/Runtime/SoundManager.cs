@@ -94,20 +94,32 @@ namespace Com.Hapiga.Scheherazade.Common.Sound
 
         #endregion
 
-        #region Bootstrap
+        #region Public Methods
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void Bootstrap()
+        public static bool TryCreateIfConfigured()
         {
+            if (Instance != null)
+            {
+                return true;
+            }
+
+            SoundConfiguration configuration =
+                Resources.Load<SoundConfiguration>(ConfigPath);
+            if (configuration == null)
+            {
+                QuickLog.Info<SoundManager>(
+                    "Sound disabled: no SoundConfiguration found at '{0}'.",
+                    ConfigPath);
+                return false;
+            }
+
             GameObject go = new GameObject("[Scheherazade Sound Manager]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();
             go.AddComponent<SoundManager>();
+
+            return Instance != null;
         }
-
-        #endregion
-
-        #region Public Methods
 
         public SoundHandle PlaySfx(string soundId, float volumeScale = DefaultVolume)
         {
