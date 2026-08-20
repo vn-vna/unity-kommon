@@ -158,10 +158,24 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         /// pool+border bounds), re-enables the active region for the new size and
         /// refreshes border/effective-size data. Returns the applied size.
         /// </summary>
-        public GridCoord Resize(GridCoord size)
+        public GridCoord Resize(GridCoord size, bool[] mapping = null)
         {
             GridCoord clamped = ClampToPool(size);
             EnableRegion(clamped);
+
+            if (mapping != null)
+            {
+                for (int x = 0; x < clamped.x; ++x)
+                {
+                    for (int y = 0; y < clamped.y; ++y)
+                    {
+                        GridCell cell = AccessCell(new GridCoord(x, y));
+                        cell.IsBorder = !mapping[y * size.x + x];
+                        _cellFactory.RefreshCellView(cell);
+                    }
+                }
+            }
+
             RefreshBorder();
             return clamped;
         }
@@ -562,6 +576,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         {
             if (!CheckValidGridPosition(predictPosition.x, predictPosition.y)) return false;
             GridCell predictedCell = _inboundCells[predictPosition.x, predictPosition.y];
+            if (predictedCell.IsBorder) return false;
             if (!predictedCell.CheckOccupantPlaceable(occupant)) return false;
             IGridOccupant perdOccupant = predictedCell.Occupant;
             if (perdOccupant == null) return true;

@@ -227,7 +227,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         /// Runtime resize of the active grid region. The requested size is clamped
         /// to the configured pool size. Requires the board to be initialized.
         /// </summary>
-        public void Resize(GridCoord newSize)
+        public void Resize(GridCoord newSize, bool[] mapping = null)
         {
             if (!Initialized || _map == null)
             {
@@ -238,14 +238,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 return;
             }
 
-            GridCoord appliedSize = _map.Resize(newSize);
+            GridCoord appliedSize = _map.Resize(newSize, mapping);
+
             QuickLog.Info<GridBoard>(
                 "Board '{0}' resized to {1}x{2} (requested {3}x{4}).",
-                configuration.Id,
-                appliedSize.x,
-                appliedSize.y,
-                newSize.x,
-                newSize.y
+                configuration.Id, 
+                appliedSize.x, appliedSize.y,
+                newSize.x, newSize.y
             );
         }
 
@@ -282,7 +281,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             GridCell cell = _map.AccessCell(_coordinates.WorldToCell(point));
             if (cell == null)
             {
-                ReleasePointer();
+                // Pointer left the board while the button is still held. Do NOT
+                // release the drag: keep the press alive so the object keeps
+                // drifting (GridDrifter clamps motion inside the grid) and can be
+                // pulled back in. Only a real release / UI / pause ends the drag.
+                if (_isPointerDown)
+                {
+                    _drifter.UpdateDrifting(planePosition);
+                    _snappingAdapter.UpdateSnapping();
+                }
                 return;
             }
 
@@ -316,6 +323,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         public bool RemoveObject(IGridOccupant occupant) => _map.RemoveObject(occupant);
         public GridCell AccessCell(GridCoord position) => _map.AccessCell(position);
+        public GridCell AccessCell(int x, int y) => _map.AccessCell(new GridCoord(x, y));
         public void Clear() => _map.ClearAllCells();
         public void ResetMap() => _map.ResetMap();
 
