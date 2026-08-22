@@ -1158,7 +1158,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 sb.AppendLine($"      \"id\": \"{EscapeJson(entry.Id)}\",");
                 sb.AppendLine($"      \"type\": \"{typeStr}\",");
                 sb.AppendLine(
-                    $"      \"path\": \"{EscapeJson(entry.RelativePath)}\"");
+                    $"      \"relativePath\": \"{EscapeJson(entry.RelativePath)}\",");
+                sb.AppendLine(
+                    $"      \"contentHash\": \"{EscapeJson(entry.ContentHash)}\"");
                 sb.Append($"    }}{comma}");
                 sb.AppendLine();
             }
@@ -1209,8 +1211,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     byte[] hash = sha256.ComputeHash(stream);
                     return BitConverter.ToString(hash)
                         .Replace("-", "")
-                        .ToLowerInvariant()
-                        .Substring(0, 16);
+                        .ToLowerInvariant();
                 }
             }
             catch

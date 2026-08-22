@@ -10,5 +10,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         string GetText();
         byte[] GetBytes();
         T GetParsed<T>();
+        bool TryGetParsed<T>(out T value, out System.Exception error);
     }
 }

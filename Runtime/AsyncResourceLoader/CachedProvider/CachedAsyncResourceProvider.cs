@@ -2,7 +2,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
@@ -16,7 +18,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public class CachedAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
-        ICatalogAwareAsyncResourceProvider
+        ICatalogAwareAsyncResourceProvider,
+        IInvalidatableCatalog,
+        ISelectiveAsyncResourceCache,
+        IAsyncResourceCacheKeyProvider,
+        IAsyncResourceInterpolationTagReceiver,
+        IAsyncResourceDataTypePolicy,
+        IAsyncResourceDataTypeResolver,
+        IAsyncResourceInitializationStatus,
+        IAsyncResourceReleaseProvider<ResourceType>
         where ResourceType : UnityEngine.Object
     {
         #region Serialized Fields
@@ -77,7 +87,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public bool IsInitialized { get; private set; }
 
-        public float ResourceLoadingTimeout => _timeout;
+        public Exception InitializationException { get; private set; }
+
+        public float ResourceLoadingTimeout => _timeout > 0f ? _timeout : 30f;
 
         public IReadOnlyCollection<string> CatalogedIds
         {
@@ -97,7 +109,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
         }
 
-        private IAsyncResourceProvider<ResourceType> WrappedProvider
+        protected IAsyncResourceProvider<ResourceType> WrappedProvider
         {
             get
             {
@@ -118,22 +130,61 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private readonly Dictionary<string, LinkedListNode<CacheEntry>> _memoryCache
             = new Dictionary<string, LinkedListNode<CacheEntry>>();
         private readonly LinkedList<CacheEntry> _lruList = new LinkedList<CacheEntry>();
-        private readonly Dictionary<string, List<ResourceLoadingHandler<ResourceType>>> _pendingRequests
-            = new Dictionary<string, List<ResourceLoadingHandler<ResourceType>>>();
+        private readonly Dictionary<string, PendingRequestState> _pendingRequests
+            = new Dictionary<string, PendingRequestState>();
+        private readonly Dictionary<string, HashSet<string>> _cacheKeysByResourceId
+            = new Dictionary<string, HashSet<string>>();
+        private readonly List<CacheEntry> _retiredEntries
+            = new List<CacheEntry>();
+        private readonly Dictionary<ResourceType, int> _callerLeaseCounts
+            = new Dictionary<ResourceType, int>(
+                ResourceReferenceComparer.Instance);
 
         private IAsyncResourceProvider<ResourceType> _wrappedProvider;
         private string _diskCacheRoot;
         private CatalogData _catalogData;
+        private int _nextRequestGeneration;
+        private int _initializationGeneration;
 
         #endregion
 
-        #region Structs
+        #region Nested Types
 
-        private struct CacheEntry
+        private sealed class CacheEntry
         {
             public string ResourceId;
             public ResourceType Resource;
             public DateTime CachedAt;
+            public bool OwnsResource;
+            public IAsyncResourceReleaseProvider<ResourceType> ReleaseProvider;
+            public bool IsRetired;
+        }
+
+        private sealed class PendingRequestState
+        {
+            public int Generation;
+            public ResourceLoadingHandler<ResourceType> OriginalHandler;
+            public readonly List<ResourceLoadingHandler<ResourceType>> Subscribers
+                = new List<ResourceLoadingHandler<ResourceType>>();
+        }
+
+        private sealed class ResourceReferenceComparer :
+            IEqualityComparer<ResourceType>
+        {
+            public static readonly ResourceReferenceComparer Instance
+                = new ResourceReferenceComparer();
+
+            public bool Equals(ResourceType first, ResourceType second)
+            {
+                return ReferenceEquals(first, second);
+            }
+
+            public int GetHashCode(ResourceType resource)
+            {
+                return resource == null
+                    ? 0
+                    : RuntimeHelpers.GetHashCode(resource);
+            }
         }
 
         #endregion
@@ -143,7 +194,52 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private void OnEnable()
         {
             IsInitialized = false;
+            InitializationException = null;
         }
+
+        private void OnDisable()
+        {
+            List<CacheEntry> entriesToRelease = new List<CacheEntry>();
+            lock (_lock)
+            {
+                _initializationGeneration++;
+                RetireAllPendingRequestsLocked(new OperationCanceledException(
+                    "Cached provider was disabled."));
+                foreach (LinkedListNode<CacheEntry> node
+                         in _memoryCache.Values)
+                {
+                    if (node.Value.Resource != null)
+                    {
+                        entriesToRelease.Add(node.Value);
+                    }
+                }
+
+                _memoryCache.Clear();
+                _lruList.Clear();
+                _cacheKeysByResourceId.Clear();
+                entriesToRelease.AddRange(_retiredEntries);
+                _retiredEntries.Clear();
+                _callerLeaseCounts.Clear();
+                IsInitialized = false;
+                InitializationException = null;
+            }
+
+            ReleaseCacheEntriesImmediately(entriesToRelease);
+            _wrappedProvider = null;
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            _timeout = Mathf.Max(0.1f, _timeout);
+            _maxCacheEntries = Mathf.Max(1, _maxCacheEntries);
+            _cacheTTL = Mathf.Max(0f, _cacheTTL);
+            if (string.IsNullOrWhiteSpace(_cacheSubFolder))
+            {
+                _cacheSubFolder = "CachedResources";
+            }
+        }
+#endif
 
         #endregion
 
@@ -151,34 +247,145 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public void Initialize()
         {
+            InitializationException = null;
+            int initializationGeneration;
+            List<CacheEntry> entriesToRelease = new List<CacheEntry>();
             lock (_lock)
             {
+                initializationGeneration = ++_initializationGeneration;
+                RetireAllPendingRequestsLocked(new OperationCanceledException(
+                    "Cached provider was reinitialized."));
+                foreach (LinkedListNode<CacheEntry> node
+                         in _memoryCache.Values)
+                {
+                    if (node.Value.Resource != null)
+                    {
+                        entriesToRelease.Add(node.Value);
+                    }
+                }
+
                 _memoryCache.Clear();
                 _lruList.Clear();
-                _pendingRequests.Clear();
                 IsInitialized = false;
             }
 
-            _wrappedProvider = _wrappedProviderAsset as IAsyncResourceProvider<ResourceType>;
-            if (_wrappedProvider != null)
+            RetireCacheEntries(entriesToRelease);
+
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    InitializeCoroutine(initializationGeneration),
+                    exception => HandleInitializationFailure(
+                        initializationGeneration,
+                        exception)),
+                out _);
+            if (!dispatched)
             {
-                _wrappedProvider.Initialize();
+                HandleInitializationFailure(
+                    initializationGeneration,
+                    new InvalidOperationException(
+                        "Cached provider initialization requires a Dispatcher."
+                    ));
+            }
+        }
+
+        private IEnumerator InitializeCoroutine(int initializationGeneration)
+        {
+            IAsyncResourceProvider<ResourceType> wrappedProvider
+                = _wrappedProviderAsset as IAsyncResourceProvider<ResourceType>;
+            if (wrappedProvider == null || ReferenceEquals(wrappedProvider, this))
+            {
+                HandleInitializationFailure(
+                    initializationGeneration,
+                    new InvalidOperationException(
+                        "Cached provider requires a different wrapped provider."
+                    ));
+                yield break;
             }
 
-            _catalogData = new CatalogData();
+            try
+            {
+                wrappedProvider.Initialize();
+            }
+            catch (Exception exception)
+            {
+                HandleInitializationFailure(
+                    initializationGeneration,
+                    new InvalidOperationException(
+                        $"Wrapped provider '{wrappedProvider.GetType().Name}' "
+                        + "threw during initialization.",
+                        exception));
+                yield break;
+            }
+
+            float initializationStart = Time.realtimeSinceStartup;
+            float wrappedInitializationTimeout
+                = wrappedProvider.ResourceLoadingTimeout;
+            if (wrappedInitializationTimeout <= 0f
+                || float.IsNaN(wrappedInitializationTimeout))
+            {
+                wrappedInitializationTimeout = ResourceLoadingTimeout;
+            }
+
+            while (!wrappedProvider.IsInitialized
+                && GetWrappedInitializationException(wrappedProvider) == null
+                && Time.realtimeSinceStartup - initializationStart
+                < wrappedInitializationTimeout)
+            {
+                yield return null;
+            }
+
+            if (!IsCurrentInitialization(initializationGeneration))
+            {
+                yield break;
+            }
+
+            if (!wrappedProvider.IsInitialized)
+            {
+                HandleInitializationFailure(
+                    initializationGeneration,
+                    new InvalidOperationException(
+                        $"Wrapped provider '{wrappedProvider.GetType().Name}' "
+                        + "failed to initialize.",
+                        GetWrappedInitializationException(wrappedProvider)));
+                yield break;
+            }
+
+            CatalogData catalogData = new CatalogData();
             if (_catalogConfig.UseCatalog
                 && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
             {
-                _catalogData.LoadFromStreamingAssets(_catalogConfig.CatalogFileName);
+                yield return catalogData.LoadFromStreamingAssetsCoroutine(
+                    _catalogConfig.CatalogFileName);
+                catalogData.ThrowIfFailed(
+                    "Cached provider catalog initialization failed.");
             }
 
-            _diskCacheRoot = ResolveDiskCacheRoot();
-
-            if (!string.IsNullOrEmpty(_diskCacheRoot) && !Directory.Exists(_diskCacheRoot))
+            if (!IsCurrentInitialization(initializationGeneration))
             {
-                Directory.CreateDirectory(_diskCacheRoot);
+                yield break;
             }
 
+            try
+            {
+                _diskCacheRoot = ResolveDiskCacheRoot();
+
+                if (!Directory.Exists(_diskCacheRoot))
+                {
+                    Directory.CreateDirectory(_diskCacheRoot);
+                }
+            }
+            catch (Exception exception)
+            {
+                HandleInitializationFailure(
+                    initializationGeneration,
+                    new InvalidOperationException(
+                        "Failed to initialize disk cache.",
+                        exception));
+                yield break;
+            }
+
+            _wrappedProvider = wrappedProvider;
+            _catalogData = catalogData;
             IsInitialized = true;
 
             QuickLog.Info<CachedAsyncResourceProvider<ResourceType>>(
@@ -191,15 +398,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public bool HasResource(IAsyncResourceId resourceId)
         {
+            if (!IsInitialized || resourceId == null)
+            {
+                return false;
+            }
+
+            string cacheKey = GetCacheKey(resourceId);
             lock (_lock)
             {
-                if (_memoryCache.ContainsKey(resourceId.ResourceId))
+                if (_memoryCache.ContainsKey(cacheKey))
                 {
                     return true;
                 }
             }
 
-            if (DiskCacheHasResource(resourceId.ResourceId))
+            if (SupportsDiskCache(resourceId)
+                && DiskCacheHasResource(cacheKey))
             {
                 return true;
             }
@@ -246,11 +460,44 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             return DataType.Unknown;
         }
 
+        public DataType GetDataType(IAsyncResourceId resourceId)
+        {
+            DataType ownType = _catalogData?.GetDataType(
+                resourceId?.ResourceId) ?? DataType.Unknown;
+            if (ownType != DataType.Unknown)
+            {
+                return ownType;
+            }
+
+            if (WrappedProvider is IAsyncResourceDataTypeResolver resolver)
+            {
+                return resolver.GetDataType(resourceId);
+            }
+
+            return GetDataType(resourceId?.ResourceId);
+        }
+
         public void TryLoadResource(
             IAsyncResourceId id,
             ResourceLoadingHandler<ResourceType> handler
         )
         {
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return;
+            }
+
+            if (!IsInitialized)
+            {
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.ProviderSource = GetType().Name;
+                handler.Exception = new InvalidOperationException(
+                    "Cached provider is not initialized.");
+                return;
+            }
+
             if (id == null || string.IsNullOrEmpty(id.ResourceId))
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -259,43 +506,77 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
-            string resourceId = id.ResourceId;
+            string resourceId = GetCacheKey(id);
+            if (string.IsNullOrWhiteSpace(resourceId))
+            {
+                resourceId = id.ResourceId;
+            }
 
+            RegisterCacheKey(id.ResourceId, resourceId);
+
+            int requestGeneration;
             lock (_lock)
             {
                 if (_memoryCache.TryGetValue(resourceId, out LinkedListNode<CacheEntry> node))
                 {
-                    MoveToFront(node);
+                    if (node.Value.Resource == null)
+                    {
+                        _lruList.Remove(node);
+                        _memoryCache.Remove(resourceId);
+                    }
+                    else
+                    {
+                        MoveToFront(node);
+                        RetainCallerLeaseLocked(node.Value.Resource);
 
-                    handler.Resouce = node.Value.Resource;
-                    handler.LoadingStatus = LoadingStatus.Completed;
-                    handler.ResourceStatus = ResourceStatus.Loaded;
-                    handler.ProviderSource = GetType().Name;
+                        handler.Resouce = node.Value.Resource;
+                        handler.LoadingStatus = LoadingStatus.Completed;
+                        handler.ResourceStatus = ResourceStatus.Loaded;
+                        handler.ProviderSource = GetType().Name;
 
-                    QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
-                        "Memory cache hit for '{0}'.", resourceId
-                    );
-                    return;
+                        QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
+                            "Memory cache hit for '{0}'.", resourceId
+                        );
+                        return;
+                    }
                 }
 
-                if (_pendingRequests.TryGetValue(resourceId, out List<ResourceLoadingHandler<ResourceType>> pendingList))
+                if (_pendingRequests.TryGetValue(
+                        resourceId,
+                        out PendingRequestState pendingRequest))
                 {
-                    pendingList.Add(handler);
+                    handler.LoadingStatus = LoadingStatus.Loading;
+                    handler.ResourceStatus = ResourceStatus.Unknown;
+                    handler.ProviderSource = GetType().Name;
+                    pendingRequest.Subscribers.Add(handler);
                     QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
                         "Request for '{0}' already in-flight. Added to pending list ({1} total).",
-                        resourceId, pendingList.Count
+                        resourceId, pendingRequest.Subscribers.Count
                     );
                     return;
                 }
 
-                _pendingRequests[resourceId] = new List<ResourceLoadingHandler<ResourceType>>();
+                requestGeneration = NextRequestGenerationLocked();
+                _pendingRequests[resourceId] = new PendingRequestState
+                {
+                    Generation = requestGeneration,
+                    OriginalHandler = handler
+                };
             }
 
-            if (TryLoadFromDisk(resourceId, out ResourceType diskResource))
+            if (TryLoadFromDisk(
+                    id,
+                    resourceId,
+                    out ResourceType diskResource))
             {
-                AddToMemoryCache(resourceId, diskResource);
-                CompletePendingRequests(resourceId, diskResource, null);
+                AddToMemoryCache(resourceId, diskResource, true, null);
+                CompletePendingRequests(
+                    resourceId,
+                    diskResource,
+                    null,
+                    requestGeneration);
 
+                RetainCallerLease(resourceId, diskResource);
                 handler.Resouce = diskResource;
                 handler.LoadingStatus = LoadingStatus.Completed;
                 handler.ResourceStatus = ResourceStatus.Loaded;
@@ -307,7 +588,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
-            if (_wrappedProvider == null)
+            IAsyncResourceProvider<ResourceType> wrappedProvider
+                = _wrappedProvider;
+            if (wrappedProvider == null)
             {
                 QuickLog.Warning<CachedAsyncResourceProvider<ResourceType>>(
                     "No wrapped provider configured. Cannot load '{0}'.", resourceId
@@ -317,7 +600,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 handler.Exception = new InvalidOperationException(
                     "No wrapped provider configured."
                 );
-                lock (_lock) { _pendingRequests.Remove(resourceId); }
+                RemovePendingRequest(resourceId, requestGeneration);
                 return;
             }
 
@@ -325,20 +608,140 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             handler.ResourceStatus = ResourceStatus.Unknown;
             handler.ProviderSource = GetType().Name;
 
-            Dispatcher.DispatchCoroutine(
-                LoadFromProviderCoroutine(id, handler, resourceId)
-            );
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    LoadFromProviderCoroutine(
+                        id,
+                        handler,
+                        resourceId,
+                        requestGeneration,
+                        wrappedProvider),
+                    exception => HandleLoadCoroutineFailure(
+                        handler,
+                        resourceId,
+                        requestGeneration,
+                        exception)),
+                out _);
+            if (!dispatched)
+            {
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.Exception = new InvalidOperationException(
+                    "Cached provider loading requires a Dispatcher.");
+
+                lock (_lock)
+                {
+                    RemovePendingRequestLocked(
+                        resourceId,
+                        requestGeneration);
+                }
+            }
+        }
+
+        public string GetCacheKey(IAsyncResourceId resourceId)
+        {
+            string cacheKey;
+            if (WrappedProvider is IAsyncResourceCacheKeyProvider keyProvider)
+            {
+                cacheKey = keyProvider.GetCacheKey(resourceId);
+            }
+            else
+            {
+                cacheKey = resourceId?.ResourceId;
+            }
+
+            string contentHash = _catalogData?.GetContentHash(
+                resourceId?.ResourceId);
+            return string.IsNullOrWhiteSpace(contentHash)
+                ? cacheKey
+                : $"{cacheKey ?? string.Empty}\n{contentHash}";
+        }
+
+        public void SetInterpolationTags(
+            IReadOnlyDictionary<string, string> tags)
+        {
+            if (WrappedProvider
+                is IAsyncResourceInterpolationTagReceiver receiver)
+            {
+                receiver.SetInterpolationTags(tags);
+            }
+        }
+
+        public bool SupportsDataType(DataType dataType)
+        {
+            return WrappedProvider is not IAsyncResourceDataTypePolicy policy
+                || policy.SupportsDataType(dataType);
+        }
+
+        public void InvalidateCatalog(CatalogInvalidationMode mode)
+        {
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    InvalidateCatalogCoroutine(mode),
+                    HandleCatalogInvalidationFailure),
+                out _);
+            if (!dispatched)
+            {
+                QuickLog.Error<CachedAsyncResourceProvider<ResourceType>>(
+                    "Catalog invalidation requires a Dispatcher instance.");
+            }
+        }
+
+        public IEnumerator InvalidateCatalogCoroutine(
+            CatalogInvalidationMode mode)
+        {
+            if (mode == CatalogInvalidationMode.Aggressive)
+            {
+                ClearCache();
+            }
+
+            _catalogData ??= new CatalogData();
+            _catalogData.Reset();
+
+            if (_catalogConfig.UseCatalog
+                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            {
+                yield return _catalogData.LoadFromStreamingAssetsCoroutine(
+                    _catalogConfig.CatalogFileName);
+                _catalogData.ThrowIfFailed(
+                    "Cached provider catalog refresh failed.");
+            }
+
+            if (WrappedProvider is IInvalidatableCatalog invalidatable)
+            {
+                yield return invalidatable.InvalidateCatalogCoroutine(mode);
+            }
         }
 
         public void ClearCache()
         {
+            List<CacheEntry> entriesToRelease = new List<CacheEntry>();
             lock (_lock)
             {
+                RetireAllPendingRequestsLocked(new OperationCanceledException(
+                    "Cached provider requests were canceled because the cache "
+                    + "was cleared."));
+                foreach (LinkedListNode<CacheEntry> node
+                         in _memoryCache.Values)
+                {
+                    if (node.Value.Resource != null)
+                    {
+                        entriesToRelease.Add(node.Value);
+                    }
+                }
+
                 _memoryCache.Clear();
                 _lruList.Clear();
+                _cacheKeysByResourceId.Clear();
             }
 
+            RetireCacheEntries(entriesToRelease);
             ClearDiskCache();
+
+            if (WrappedProvider is IAsyncResourceCache wrappedCache)
+            {
+                wrappedCache.ClearCache();
+            }
 
             QuickLog.Info<CachedAsyncResourceProvider<ResourceType>>(
                 "Cache cleared (memory + disk)."
@@ -347,38 +750,246 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public void ClearCache(string resourceId)
         {
+            string[] cacheKeys;
+            List<CacheEntry> entriesToRelease = new List<CacheEntry>();
             lock (_lock)
             {
-                if (_memoryCache.TryGetValue(resourceId, out LinkedListNode<CacheEntry> node))
+                if (!_cacheKeysByResourceId.TryGetValue(
+                        resourceId,
+                        out HashSet<string> registeredKeys))
                 {
+                    cacheKeys = Array.Empty<string>();
+                }
+                else
+                {
+                    cacheKeys = new string[registeredKeys.Count];
+                    registeredKeys.CopyTo(cacheKeys);
+                    _cacheKeysByResourceId.Remove(resourceId);
+                }
+
+                for (int i = 0; i < cacheKeys.Length; i++)
+                {
+                    if (_pendingRequests.TryGetValue(
+                            cacheKeys[i],
+                            out PendingRequestState pendingRequest))
+                    {
+                        RetirePendingRequestLocked(
+                            cacheKeys[i],
+                            pendingRequest,
+                            new OperationCanceledException(
+                                $"Cached provider request for '{resourceId}' "
+                                + "was canceled because its cache was cleared."));
+                    }
+
+                    if (!_memoryCache.TryGetValue(
+                            cacheKeys[i],
+                            out LinkedListNode<CacheEntry> node))
+                    {
+                        continue;
+                    }
+
+                    if (node.Value.Resource != null)
+                    {
+                        entriesToRelease.Add(node.Value);
+                    }
+
                     _lruList.Remove(node);
-                    _memoryCache.Remove(resourceId);
+                    _memoryCache.Remove(cacheKeys[i]);
                 }
             }
 
-            DeleteDiskCacheEntry(resourceId);
+            RetireCacheEntries(entriesToRelease);
+            for (int i = 0; i < cacheKeys.Length; i++)
+            {
+                DeleteDiskCacheEntry(cacheKeys[i]);
+            }
+
+            DeletePersistedCacheEntries(resourceId);
+
+            if (WrappedProvider is ISelectiveAsyncResourceCache selectiveCache)
+            {
+                selectiveCache.ClearCache(resourceId);
+            }
+        }
+
+        public void ReleaseResource(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            List<CacheEntry> entriesToRelease = null;
+            bool isManagedResource;
+            lock (_lock)
+            {
+                isManagedResource = IsResourceCachedLocked(resource)
+                    || HasRetiredResourceLocked(resource);
+                if (_callerLeaseCounts.TryGetValue(
+                        resource,
+                        out int callerLeaseCount))
+                {
+                    isManagedResource = true;
+                    if (callerLeaseCount > 1)
+                    {
+                        _callerLeaseCounts[resource] = callerLeaseCount - 1;
+                    }
+                    else
+                    {
+                        _callerLeaseCounts.Remove(resource);
+                        entriesToRelease = RemoveRetiredEntriesLocked(resource);
+                    }
+                }
+                else if (isManagedResource)
+                {
+                    entriesToRelease = RemoveRetiredEntriesLocked(resource);
+                }
+            }
+
+            ReleaseCacheEntriesImmediately(entriesToRelease);
+            if (!isManagedResource)
+            {
+                ReleaseWrappedResource(resource);
+            }
         }
 
         #endregion
 
         #region Private Methods — Coroutine
 
+        private static Exception GetWrappedInitializationException(
+            IAsyncResourceProvider<ResourceType> wrappedProvider)
+        {
+            return wrappedProvider
+                is IAsyncResourceInitializationStatus initializationStatus
+                    ? initializationStatus.InitializationException
+                    : null;
+        }
+
+        private void HandleInitializationFailure(
+            int initializationGeneration,
+            Exception exception)
+        {
+            if (!IsCurrentInitialization(initializationGeneration))
+            {
+                return;
+            }
+
+            InitializationException = exception;
+            IsInitialized = false;
+            QuickLog.Error<CachedAsyncResourceProvider<ResourceType>>(
+                "Cached provider initialization failed: {0}",
+                exception);
+        }
+
+        private bool IsCurrentInitialization(int initializationGeneration)
+        {
+            lock (_lock)
+            {
+                return initializationGeneration == _initializationGeneration;
+            }
+        }
+
+        private static void HandleCatalogInvalidationFailure(
+            Exception exception)
+        {
+            QuickLog.Error<CachedAsyncResourceProvider<ResourceType>>(
+                "Cached provider catalog invalidation failed: {0}",
+                exception);
+        }
+
+        private void HandleLoadCoroutineFailure(
+            ResourceLoadingHandler<ResourceType> originalHandler,
+            string resourceId,
+            int requestGeneration,
+            Exception exception)
+        {
+            InvalidOperationException loadException
+                = new InvalidOperationException(
+                    $"Cached provider load coroutine failed for "
+                    + $"'{resourceId}'.",
+                    exception);
+            CompletePendingRequests(
+                resourceId,
+                null,
+                loadException,
+                requestGeneration);
+            if (originalHandler.IsCompleted)
+            {
+                return;
+            }
+
+            if (originalHandler.IsCancellationRequested)
+            {
+                originalHandler.Cancel();
+                return;
+            }
+
+            originalHandler.LoadingStatus = LoadingStatus.Completed;
+            originalHandler.ResourceStatus = ResourceStatus.Failed;
+            originalHandler.Exception = loadException;
+        }
+
         private IEnumerator LoadFromProviderCoroutine(
             IAsyncResourceId id,
             ResourceLoadingHandler<ResourceType> originalHandler,
-            string resourceId
+            string resourceId,
+            int requestGeneration,
+            IAsyncResourceProvider<ResourceType> wrappedProvider
         )
         {
             ResourceLoadingHandler<ResourceType> wrapperHandler
                 = new ResourceLoadingHandler<ResourceType>();
+            bool originalDetached = false;
 
-            _wrappedProvider.TryLoadResource(id, wrapperHandler);
-
-            float timer = 0f;
-            while (wrapperHandler.LoadingStatus != LoadingStatus.Completed
-                   && timer < _wrappedProvider.ResourceLoadingTimeout)
+            try
             {
-                timer += Time.deltaTime;
+                wrappedProvider.TryLoadResource(id, wrapperHandler);
+            }
+            catch (Exception exception)
+            {
+                CompletePendingRequests(
+                    resourceId,
+                    null,
+                    exception,
+                    requestGeneration);
+                originalHandler.LoadingStatus = LoadingStatus.Completed;
+                originalHandler.ResourceStatus = ResourceStatus.Failed;
+                originalHandler.Exception = exception;
+                yield break;
+            }
+
+            float startTime = Time.realtimeSinceStartup;
+            float wrappedTimeout = wrappedProvider.ResourceLoadingTimeout;
+            if (wrappedTimeout <= 0f || float.IsNaN(wrappedTimeout))
+            {
+                wrappedTimeout = ResourceLoadingTimeout;
+            }
+
+            while (wrapperHandler.LoadingStatus != LoadingStatus.Completed
+                   && Time.realtimeSinceStartup - startTime
+                   < wrappedTimeout)
+            {
+                if (!originalDetached
+                    && originalHandler.IsCancellationRequested)
+                {
+                    originalHandler.Cancel();
+                    originalDetached = true;
+
+                    if (!HasActivePendingRequest(
+                            resourceId,
+                            requestGeneration))
+                    {
+                        wrapperHandler.Cancel();
+                        CompletePendingRequests(
+                            resourceId,
+                            null,
+                            originalHandler.Exception,
+                            requestGeneration);
+                        yield break;
+                    }
+                }
+
                 yield return null;
             }
 
@@ -386,36 +997,48 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 && wrapperHandler.ResourceStatus == ResourceStatus.Loaded
                 && wrapperHandler.Resouce != null)
             {
-                AddToMemoryCache(resourceId, wrapperHandler.Resouce);
-                SaveToDisk(resourceId, wrapperHandler.Resouce);
-
-                QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
-                    "Loaded and cached '{0}' from wrapped provider.", resourceId
-                );
-
-                lock (_lock)
+                bool isCurrentRequest = IsCurrentPendingRequest(
+                    resourceId,
+                    requestGeneration);
+                if (isCurrentRequest)
                 {
-                    if (_pendingRequests.TryGetValue(resourceId,
-                            out List<ResourceLoadingHandler<ResourceType>> pendingList))
-                    {
-                        foreach (ResourceLoadingHandler<ResourceType> pending in pendingList)
-                        {
-                            pending.Resouce = wrapperHandler.Resouce;
-                            pending.LoadingStatus = LoadingStatus.Completed;
-                            pending.ResourceStatus = ResourceStatus.Loaded;
-                            pending.ProviderSource = GetType().Name;
-                        }
-
-                        _pendingRequests.Remove(resourceId);
-                    }
+                    AddToMemoryCache(
+                        resourceId,
+                        wrapperHandler.Resouce,
+                        false,
+                        wrappedProvider
+                            as IAsyncResourceReleaseProvider<ResourceType>);
+                    SaveToDisk(id, resourceId, wrapperHandler.Resouce);
+                    QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
+                        "Loaded and cached '{0}' from wrapped provider.",
+                        resourceId
+                    );
                 }
 
-                if (originalHandler.LoadingStatus != LoadingStatus.Completed)
+                CompletePendingRequests(
+                    resourceId,
+                    wrapperHandler.Resouce,
+                    null,
+                    requestGeneration);
+
+                if (!originalDetached
+                    && originalHandler.LoadingStatus != LoadingStatus.Completed)
                 {
+                    RetainCallerLease(
+                        resourceId,
+                        wrapperHandler.Resouce);
                     originalHandler.Resouce = wrapperHandler.Resouce;
                     originalHandler.LoadingStatus = LoadingStatus.Completed;
                     originalHandler.ResourceStatus = ResourceStatus.Loaded;
                     originalHandler.ProviderSource = GetType().Name;
+                }
+
+                if (!isCurrentRequest)
+                {
+                    ReleaseWrappedResource(
+                        wrapperHandler.Resouce,
+                        wrappedProvider
+                            as IAsyncResourceReleaseProvider<ResourceType>);
                 }
             }
             else
@@ -425,31 +1048,40 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 );
 
                 Exception failException = wrapperHandler.Exception
-                    ?? new InvalidOperationException(
-                        $"Wrapped provider failed to load '{resourceId}'."
-                    );
-
-                lock (_lock)
+                    ?? (wrapperHandler.IsCompleted
+                        ? new InvalidOperationException(
+                            $"Wrapped provider failed to load '{resourceId}'.")
+                        : new TimeoutException(
+                            $"Wrapped provider timed out loading '{resourceId}' "
+                            + $"after {wrappedTimeout:F1}s."));
+                if (!wrapperHandler.IsCompleted)
                 {
-                    if (_pendingRequests.TryGetValue(resourceId,
-                            out List<ResourceLoadingHandler<ResourceType>> pendingList))
-                    {
-                        foreach (ResourceLoadingHandler<ResourceType> pending in pendingList)
-                        {
-                            pending.LoadingStatus = LoadingStatus.Completed;
-                            pending.ResourceStatus = ResourceStatus.Failed;
-                            pending.Exception = failException;
-                        }
-
-                        _pendingRequests.Remove(resourceId);
-                    }
+                    wrapperHandler.Cancel();
                 }
+
+                CompletePendingRequests(
+                    resourceId,
+                    null,
+                    failException,
+                    requestGeneration);
 
                 if (originalHandler.LoadingStatus != LoadingStatus.Completed)
                 {
                     originalHandler.LoadingStatus = LoadingStatus.Completed;
-                    originalHandler.ResourceStatus = ResourceStatus.Failed;
+                    originalHandler.ResourceStatus
+                        = failException is OperationCanceledException
+                            ? ResourceStatus.Canceled
+                            : ResourceStatus.Failed;
                     originalHandler.Exception = failException;
+                }
+
+
+                if (wrapperHandler.Resouce != null)
+                {
+                    ReleaseWrappedResource(
+                        wrapperHandler.Resouce,
+                        wrappedProvider
+                            as IAsyncResourceReleaseProvider<ResourceType>);
                 }
             }
         }
@@ -458,12 +1090,25 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         #region Private Methods — Memory Cache
 
-        private void AddToMemoryCache(string resourceId, ResourceType resource)
+        private void AddToMemoryCache(
+            string resourceId,
+            ResourceType resource,
+            bool ownsResource,
+            IAsyncResourceReleaseProvider<ResourceType> releaseProvider)
         {
+            List<CacheEntry> entriesToRelease = null;
             lock (_lock)
             {
                 if (_memoryCache.TryGetValue(resourceId, out LinkedListNode<CacheEntry> existing))
                 {
+                    if (existing.Value.Resource != null)
+                    {
+                        entriesToRelease = new List<CacheEntry>
+                        {
+                            existing.Value
+                        };
+                    }
+
                     _lruList.Remove(existing);
                     _memoryCache.Remove(resourceId);
                 }
@@ -472,7 +1117,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 {
                     ResourceId = resourceId,
                     Resource = resource,
-                    CachedAt = DateTime.UtcNow
+                    CachedAt = DateTime.UtcNow,
+                    OwnsResource = ownsResource,
+                    ReleaseProvider = releaseProvider
                 };
 
                 LinkedListNode<CacheEntry> node = _lruList.AddFirst(entry);
@@ -484,10 +1131,211 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                     _lruList.RemoveLast();
                     _memoryCache.Remove(evicted.Value.ResourceId);
 
+                    if (evicted.Value.Resource != null)
+                    {
+                        entriesToRelease ??= new List<CacheEntry>();
+                        entriesToRelease.Add(evicted.Value);
+                    }
+
                     QuickLog.Debug<CachedAsyncResourceProvider<ResourceType>>(
                         "LRU evicted '{0}' from memory cache.", evicted.Value.ResourceId
                     );
                 }
+            }
+
+            RetireCacheEntries(entriesToRelease);
+        }
+
+        private void RetireCacheEntries(List<CacheEntry> entries)
+        {
+            if (entries == null)
+            {
+                return;
+            }
+
+            List<CacheEntry> entriesToRelease = null;
+            lock (_lock)
+            {
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    CacheEntry entry = entries[i];
+                    if (entry == null || entry.IsRetired)
+                    {
+                        continue;
+                    }
+
+                    entry.IsRetired = true;
+                    if (HasCallerLeaseLocked(entry.Resource))
+                    {
+                        _retiredEntries.Add(entry);
+                    }
+                    else
+                    {
+                        entriesToRelease ??= new List<CacheEntry>();
+                        entriesToRelease.Add(entry);
+                    }
+                }
+            }
+
+            ReleaseCacheEntriesImmediately(entriesToRelease);
+        }
+
+        private void RetainCallerLease(
+            string resourceId,
+            ResourceType resource)
+        {
+            lock (_lock)
+            {
+                if (_memoryCache.TryGetValue(
+                        resourceId,
+                        out LinkedListNode<CacheEntry> node)
+                    && ReferenceEquals(node.Value.Resource, resource))
+                {
+                    RetainCallerLeaseLocked(resource);
+                }
+            }
+        }
+
+        private void RetainCallerLeaseLocked(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            _callerLeaseCounts.TryGetValue(
+                resource,
+                out int callerLeaseCount);
+            _callerLeaseCounts[resource] = callerLeaseCount + 1;
+        }
+
+        private bool HasCallerLeaseLocked(ResourceType resource)
+        {
+            return resource != null
+                && _callerLeaseCounts.TryGetValue(
+                    resource,
+                    out int callerLeaseCount)
+                && callerLeaseCount > 0;
+        }
+
+        private bool IsResourceCachedLocked(ResourceType resource)
+        {
+            foreach (LinkedListNode<CacheEntry> node in _memoryCache.Values)
+            {
+                if (ReferenceEquals(node.Value.Resource, resource))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasRetiredResourceLocked(ResourceType resource)
+        {
+            for (int i = 0; i < _retiredEntries.Count; i++)
+            {
+                if (ReferenceEquals(_retiredEntries[i].Resource, resource))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private List<CacheEntry> RemoveRetiredEntriesLocked(
+            ResourceType resource)
+        {
+            List<CacheEntry> entries = null;
+            for (int i = _retiredEntries.Count - 1; i >= 0; i--)
+            {
+                CacheEntry entry = _retiredEntries[i];
+                if (!ReferenceEquals(entry.Resource, resource))
+                {
+                    continue;
+                }
+
+                entries ??= new List<CacheEntry>();
+                entries.Add(entry);
+                _retiredEntries.RemoveAt(i);
+            }
+
+            return entries;
+        }
+
+        private static void ReleaseCacheEntriesImmediately(
+            List<CacheEntry> entries)
+        {
+            if (entries == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                CacheEntry entry = entries[i];
+                if (entry.OwnsResource)
+                {
+                    DestroyOwnedResource(entry.Resource);
+                }
+                else
+                {
+                    ReleaseWrappedResource(
+                        entry.Resource,
+                        entry.ReleaseProvider);
+                }
+            }
+        }
+
+        private static void DestroyOwnedResource(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(resource);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(resource);
+            }
+        }
+
+        private void ReleaseWrappedResource(ResourceType resource)
+        {
+            ReleaseWrappedResource(
+                resource,
+                WrappedProvider
+                    as IAsyncResourceReleaseProvider<ResourceType>);
+        }
+
+        private static void ReleaseWrappedResource(
+            ResourceType resource,
+            IAsyncResourceReleaseProvider<ResourceType> releaseProvider)
+        {
+            if (resource != null && releaseProvider != null)
+            {
+                releaseProvider.ReleaseResource(resource);
+            }
+        }
+
+        private void RegisterCacheKey(string resourceId, string cacheKey)
+        {
+            lock (_lock)
+            {
+                if (!_cacheKeysByResourceId.TryGetValue(
+                        resourceId,
+                        out HashSet<string> keys))
+                {
+                    keys = new HashSet<string>(StringComparer.Ordinal);
+                    _cacheKeysByResourceId[resourceId] = keys;
+                }
+
+                keys.Add(cacheKey);
             }
         }
 
@@ -503,21 +1351,36 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private void CompletePendingRequests(
             string resourceId,
             ResourceType resource,
-            Exception exception
+            Exception exception,
+            int requestGeneration
         )
         {
             lock (_lock)
             {
-                if (!_pendingRequests.TryGetValue(resourceId,
-                        out List<ResourceLoadingHandler<ResourceType>> pendingList))
+                if (!_pendingRequests.TryGetValue(
+                        resourceId,
+                        out PendingRequestState pendingRequest)
+                    || pendingRequest.Generation != requestGeneration)
                 {
                     return;
                 }
 
-                foreach (ResourceLoadingHandler<ResourceType> pending in pendingList)
+                foreach (ResourceLoadingHandler<ResourceType> pending
+                         in pendingRequest.Subscribers)
                 {
+                    if (pending.IsCancellationRequested)
+                    {
+                        pending.Cancel();
+                        continue;
+                    }
+
                     if (resource != null)
                     {
+                        if (IsResourceCachedLocked(resource))
+                        {
+                            RetainCallerLeaseLocked(resource);
+                        }
+
                         pending.Resouce = resource;
                         pending.LoadingStatus = LoadingStatus.Completed;
                         pending.ResourceStatus = ResourceStatus.Loaded;
@@ -526,13 +1389,142 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                     else
                     {
                         pending.LoadingStatus = LoadingStatus.Completed;
-                        pending.ResourceStatus = ResourceStatus.Failed;
+                        pending.ResourceStatus
+                            = exception is OperationCanceledException
+                                ? ResourceStatus.Canceled
+                                : ResourceStatus.Failed;
                         pending.Exception = exception;
                     }
                 }
 
                 _pendingRequests.Remove(resourceId);
             }
+        }
+
+        private void RemovePendingRequest(
+            string resourceId,
+            int requestGeneration)
+        {
+            lock (_lock)
+            {
+                RemovePendingRequestLocked(resourceId, requestGeneration);
+            }
+        }
+
+        private void RemovePendingRequestLocked(
+            string resourceId,
+            int requestGeneration)
+        {
+            if (_pendingRequests.TryGetValue(
+                    resourceId,
+                    out PendingRequestState pendingRequest)
+                && pendingRequest.Generation == requestGeneration)
+            {
+                _pendingRequests.Remove(resourceId);
+            }
+        }
+
+        private void RetireAllPendingRequestsLocked(Exception exception)
+        {
+            foreach (KeyValuePair<string, PendingRequestState> pair
+                     in _pendingRequests)
+            {
+                CancelPendingRequest(pair.Value, exception);
+            }
+
+            _pendingRequests.Clear();
+        }
+
+        private void RetirePendingRequestLocked(
+            string resourceId,
+            PendingRequestState pendingRequest,
+            Exception exception)
+        {
+            CancelPendingRequest(pendingRequest, exception);
+            if (_pendingRequests.TryGetValue(
+                    resourceId,
+                    out PendingRequestState registered)
+                && ReferenceEquals(registered, pendingRequest))
+            {
+                _pendingRequests.Remove(resourceId);
+            }
+        }
+
+        private static void CancelPendingRequest(
+            PendingRequestState pendingRequest,
+            Exception exception)
+        {
+            CancelHandler(pendingRequest.OriginalHandler, exception);
+            for (int i = 0; i < pendingRequest.Subscribers.Count; i++)
+            {
+                CancelHandler(pendingRequest.Subscribers[i], exception);
+            }
+        }
+
+        private static void CancelHandler(
+            ResourceLoadingHandler<ResourceType> handler,
+            Exception exception)
+        {
+            if (handler == null || handler.IsCompleted)
+            {
+                return;
+            }
+
+            handler.Cancel();
+            handler.Exception = exception;
+        }
+
+        private bool HasActivePendingRequest(
+            string resourceId,
+            int requestGeneration)
+        {
+            lock (_lock)
+            {
+                if (!_pendingRequests.TryGetValue(
+                        resourceId,
+                        out PendingRequestState pendingRequest)
+                    || pendingRequest.Generation != requestGeneration)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < pendingRequest.Subscribers.Count; i++)
+                {
+                    if (!pendingRequest.Subscribers[i].IsCancellationRequested)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        private bool IsCurrentPendingRequest(
+            string resourceId,
+            int requestGeneration)
+        {
+            lock (_lock)
+            {
+                return _pendingRequests.TryGetValue(
+                        resourceId,
+                        out PendingRequestState pendingRequest)
+                    && pendingRequest.Generation == requestGeneration;
+            }
+        }
+
+        private int NextRequestGenerationLocked()
+        {
+            unchecked
+            {
+                _nextRequestGeneration++;
+                if (_nextRequestGeneration == 0)
+                {
+                    _nextRequestGeneration++;
+                }
+            }
+
+            return _nextRequestGeneration;
         }
 
         #endregion
@@ -544,13 +1536,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             string basePath = _cacheBasePath == CacheBasePathType.PersistentDataPath
                 ? Application.persistentDataPath
                 : Application.temporaryCachePath;
-
-            if (string.IsNullOrEmpty(_cacheSubFolder))
+            string subFolder = string.IsNullOrWhiteSpace(_cacheSubFolder)
+                ? "CachedResources"
+                : _cacheSubFolder.Trim();
+            string fullBasePath = Path.GetFullPath(basePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string cacheRoot = Path.GetFullPath(
+                Path.Combine(fullBasePath, subFolder));
+            string requiredPrefix = fullBasePath + Path.DirectorySeparatorChar;
+            if (!cacheRoot.StartsWith(
+                    requiredPrefix,
+                    StringComparison.OrdinalIgnoreCase))
             {
-                return basePath;
+                throw new InvalidOperationException(
+                    "Cache subfolder must remain inside the selected cache base path.");
             }
 
-            return Path.Combine(basePath, _cacheSubFolder);
+            return cacheRoot;
         }
 
         private string GetDiskCachePath(string resourceId)
@@ -575,9 +1577,18 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             return true;
         }
 
-        private bool TryLoadFromDisk(string resourceId, out ResourceType resource)
+        private bool TryLoadFromDisk(
+            IAsyncResourceId id,
+            string resourceId,
+            out ResourceType resource)
         {
             resource = null;
+
+            if (!SupportsDiskCache(id))
+            {
+                DeleteDiskCacheEntry(resourceId);
+                return false;
+            }
 
             string filePath = GetDiskCachePath(resourceId);
             if (!File.Exists(filePath))
@@ -617,10 +1628,19 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
         }
 
-        private void SaveToDisk(string resourceId, ResourceType resource)
+        private void SaveToDisk(
+            IAsyncResourceId id,
+            string resourceId,
+            ResourceType resource)
         {
             if (_cacheTTL <= 0f || string.IsNullOrEmpty(_diskCacheRoot))
             {
+                return;
+            }
+
+            if (!SupportsDiskCache(id))
+            {
+                DeleteDiskCacheEntry(resourceId);
                 return;
             }
 
@@ -645,7 +1665,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 Array.Copy(resourceData, 0, fileData, timestampBytes.Length, resourceData.Length);
 
                 string filePath = GetDiskCachePath(resourceId);
-                File.WriteAllBytes(filePath, fileData);
+                DiskCacheIdentity.Write(
+                    filePath,
+                    id.ResourceId,
+                    fileData);
             }
             catch (Exception ex)
             {
@@ -687,10 +1710,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             try
             {
                 string filePath = GetDiskCachePath(resourceId);
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
+                DiskCacheIdentity.Delete(filePath);
             }
             catch (Exception ex)
             {
@@ -733,11 +1753,53 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         private static string SanitizeFileName(string name)
         {
-            char[] invalid = Path.GetInvalidFileNameChars();
-            string sanitized = new string(
-                name.Select(c => Array.IndexOf(invalid, c) >= 0 ? '_' : c).ToArray()
-            );
-            return sanitized;
+            if (string.IsNullOrEmpty(name))
+            {
+                return "_empty";
+            }
+
+            using SHA256 sha256 = SHA256.Create();
+            byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(name));
+            StringBuilder builder = new StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
+            {
+                builder.Append(hash[i].ToString("x2"));
+            }
+
+            return builder.ToString();
+        }
+
+        private void DeletePersistedCacheEntries(string resourceId)
+        {
+            if (string.IsNullOrEmpty(_diskCacheRoot)
+                || !Directory.Exists(_diskCacheRoot))
+            {
+                return;
+            }
+
+            try
+            {
+                DiskCacheIdentity.DeleteByResourceId(
+                    _diskCacheRoot,
+                    resourceId);
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Warning<CachedAsyncResourceProvider<ResourceType>>(
+                    "Failed to clear persisted cache for '{0}': {1}",
+                    resourceId,
+                    exception.Message);
+            }
+        }
+
+        private bool SupportsDiskCache(IAsyncResourceId id)
+        {
+            if (typeof(ResourceType) != typeof(TextAsset))
+            {
+                return true;
+            }
+
+            return GetDataType(id) != DataType.Binary;
         }
 
         #endregion
@@ -773,8 +1835,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return texture as ResourceType;
             }
 
-            // TextAsset and most Unity objects cannot be reconstructed
-            // from raw bytes at runtime. Disk cache is skipped for these types.
+            if (typeof(ResourceType) == typeof(TextAsset))
+            {
+                TextAsset textAsset = new TextAsset(
+                    Encoding.UTF8.GetString(data));
+                return textAsset as ResourceType;
+            }
+
+            // Most Unity objects cannot be reconstructed from raw bytes.
             return null;
         }
 

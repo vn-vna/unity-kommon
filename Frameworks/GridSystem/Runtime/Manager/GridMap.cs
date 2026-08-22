@@ -79,11 +79,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 for (int y = 0; y < _gridSize.y; y++)
                 {
                     GridCell cell = _inboundCells[x, y];
-                    if (
-                        cell != null &&
-                        cell.Occupant != null &&
-                        cell.Occupant.Flags.HasFlag(GridOccupantFlag.RemoveBase)
-                    )
+                    if (cell == null || cell.IsBorder)
+                    {
+                        continue;
+                    }
+
+                    if (cell.Occupant != null && cell.Occupant.Flags.HasFlag(GridOccupantFlag.RemoveBase))
                     {
                         continue;
                     }
@@ -92,6 +93,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                     hrange.x = Math.Min(hrange.x, y);
                     hrange.y = Math.Max(hrange.y, y);
                 }
+            }
+
+            if (wrange.x > wrange.y || hrange.x > hrange.y)
+            {
+                EffectiveGridSize = GridCoord.zero;
+                CenterPosition = Vector3.zero;
+                return;
             }
 
             EffectiveGridSize = new GridCoord(

@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor;
 using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
@@ -633,14 +634,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             "Build && Run",
                             GUILayout.Height(28)))
                     {
-                        Rect runBtnRect =
-                            GUILayoutUtility.GetLastRect();
-                        runBtnRect.position +=
-                            editorWindow.position.position;
-                        PopupWindow.Show(
-                            runBtnRect,
-                            CreateDeviceSelectPopup(
-                                _onBuildAndRun));
+                        CustomPopupDropdown.ShowLastRect(
+                            CreateDeviceSelectPopup(_onBuildAndRun)
+                        );
                         editorWindow.Close();
                     }
                     GUI.backgroundColor = Color.white;

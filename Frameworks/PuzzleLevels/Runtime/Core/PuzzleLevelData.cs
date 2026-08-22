@@ -10,33 +10,49 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
     {
         public string LevelId { get; }
         public DataType Type { get; }
-        public bool IsLoaded => _textAsset != null || _rawBytes != null;
+        public bool IsLoaded => _rawBytes != null;
 
-        private readonly TextAsset _textAsset;
-        private byte[] _rawBytes;
+        private readonly byte[] _rawBytes;
         private readonly Dictionary<Type, object> _parsedCache = new Dictionary<Type, object>();
+        private readonly object _parseLock = new object();
 
         public PuzzleLevelData(string levelId, TextAsset textAsset, DataType type)
         {
-            LevelId = levelId ?? throw new ArgumentNullException(nameof(levelId));
-            _textAsset = textAsset ?? throw new ArgumentNullException(nameof(textAsset));
-            Type = type;
+            LevelId = ValidateLevelId(levelId);
+            if (textAsset == null)
+            {
+                throw new ArgumentNullException(nameof(textAsset));
+            }
+
+            byte[] sourceBytes = textAsset.bytes;
+            _rawBytes = sourceBytes == null
+                ? Array.Empty<byte>()
+                : (byte[])sourceBytes.Clone();
+            Type = ValidateDataType(type, DataType.Text);
         }
 
         public PuzzleLevelData(string levelId, byte[] rawBytes)
+            : this(levelId, rawBytes, DataType.Binary)
         {
-            LevelId = levelId ?? throw new ArgumentNullException(nameof(levelId));
-            _rawBytes = rawBytes ?? throw new ArgumentNullException(nameof(rawBytes));
-            Type = DataType.Binary;
+        }
+
+        public PuzzleLevelData(
+            string levelId,
+            byte[] rawBytes,
+            DataType type)
+        {
+            LevelId = ValidateLevelId(levelId);
+            if (rawBytes == null)
+            {
+                throw new ArgumentNullException(nameof(rawBytes));
+            }
+
+            _rawBytes = (byte[])rawBytes.Clone();
+            Type = ValidateDataType(type, DataType.Text);
         }
 
         public string GetText()
         {
-            if (_textAsset != null)
-            {
-                return _textAsset.text;
-            }
-
             if (_rawBytes != null)
             {
                 return System.Text.Encoding.UTF8.GetString(_rawBytes);
@@ -47,43 +63,93 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         public byte[] GetBytes()
         {
-            if (_textAsset != null)
-            {
-                return Type == DataType.Binary
-                    ? _textAsset.bytes
-                    : System.Text.Encoding.UTF8.GetBytes(_textAsset.text);
-            }
-
-            return _rawBytes;
+            return _rawBytes == null
+                ? null
+                : (byte[])_rawBytes.Clone();
         }
 
         public T GetParsed<T>()
         {
-            if (_parsedCache.TryGetValue(typeof(T), out object cached))
+            if (TryGetParsed(out T value, out Exception error))
             {
-                return (T)cached;
+                return value;
             }
 
-            try
+            QuickLog.Warning<PuzzleLevelData>(
+                "Failed to parse level '{0}' as {1}: {2}",
+                LevelId,
+                typeof(T).Name,
+                error?.Message ?? "Unknown parsing error"
+            );
+            return default;
+        }
+
+        public bool TryGetParsed<T>(out T value, out Exception error)
+        {
+            lock (_parseLock)
             {
-                string json = GetText();
-                if (string.IsNullOrEmpty(json))
+                if (_parsedCache.TryGetValue(typeof(T), out object cached))
                 {
-                    return default;
+                    value = cached == null ? default : (T)cached;
+                    error = null;
+                    return true;
                 }
 
-                T parsed = JsonUtility.FromJson<T>(json);
-                _parsedCache[typeof(T)] = parsed;
-                return parsed;
+                try
+                {
+                    string json = GetText();
+                    if (string.IsNullOrEmpty(json))
+                    {
+                        value = default;
+                        error = new InvalidOperationException(
+                            $"Puzzle level '{LevelId}' contains no text data.");
+                        return false;
+                    }
+
+                    value = JsonUtility.FromJson<T>(json);
+                    _parsedCache[typeof(T)] = value;
+                    error = null;
+                    return true;
+                }
+                catch (Exception exception)
+                {
+                    value = default;
+                    error = exception;
+                    return false;
+                }
             }
-            catch (Exception ex)
+        }
+
+        private static string ValidateLevelId(string levelId)
+        {
+            if (string.IsNullOrWhiteSpace(levelId))
             {
-                QuickLog.Warning<PuzzleLevelData>(
-                    "Failed to parse level '{0}' as {1}: {2}",
-                    LevelId, typeof(T).Name, ex.Message
-                );
-                return default;
+                throw new ArgumentException(
+                    "Level ID cannot be null, empty, or whitespace.",
+                    nameof(levelId));
             }
+
+            return levelId;
+        }
+
+        private static DataType ValidateDataType(
+            DataType type,
+            DataType defaultType)
+        {
+            if (type == DataType.Unknown)
+            {
+                return defaultType;
+            }
+
+            if (!Enum.IsDefined(typeof(DataType), type))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(type),
+                    type,
+                    "Unknown puzzle level data type.");
+            }
+
+            return type;
         }
     }
 }

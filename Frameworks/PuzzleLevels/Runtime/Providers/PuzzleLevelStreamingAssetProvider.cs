@@ -9,7 +9,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         menuName = "Scheherazade/Puzzle Levels/Providers/Streaming Assets"
     )]
     public sealed class PuzzleLevelStreamingAssetProvider :
-        StreamingAssetProvider<TextAsset>
+        StreamingAssetProvider<TextAsset>,
+        IAsyncResourceDataTypePolicy
     {
 #if UNITY_EDITOR
         [Tooltip(
@@ -24,6 +25,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         protected override TextAsset ConvertResource(byte[] data)
         {
             return new TextAsset(Encoding.UTF8.GetString(data));
+        }
+
+        public bool SupportsDataType(DataType dataType)
+        {
+            return dataType is DataType.Unknown or DataType.Text;
         }
     }
 }

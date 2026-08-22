@@ -24,19 +24,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
                 return Task.FromResult(false);
             }
 
-            if (Dispatcher.Instance == null)
+            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+            bool queued = Dispatcher.TryDispatchOnMainThread(() =>
             {
-                return Task.FromException<bool>(
+                bool dispatched = Dispatcher.TryDispatchCoroutine(
+                    RunInternal(coroutine, tcs),
+                    out _);
+                if (!dispatched)
+                {
+                    tcs.TrySetException(
+                        new InvalidOperationException(
+                            "Coroutine could not be dispatched."
+                        )
+                    );
+                }
+            });
+            if (!queued)
+            {
+                tcs.TrySetException(
                     new InvalidOperationException(
-                        "No Dispatcher instance found. Coroutine cannot be dispatched."
+                        "No Dispatcher instance found. Coroutine cannot be queued."
                     )
                 );
             }
 
-            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>(
-                TaskCreationOptions.RunContinuationsAsynchronously
-            );
-            Dispatcher.DispatchCoroutine(RunInternal(coroutine, tcs));
             return tcs.Task;
         }
 

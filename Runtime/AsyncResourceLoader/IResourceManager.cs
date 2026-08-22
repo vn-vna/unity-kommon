@@ -5,13 +5,13 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public interface IResourceManager
     {
         ResourceManagerStatus Status { get; }
-        void Initialize(float timeout = float.MaxValue);
+        void Initialize(float timeout = 30f);
     }
 
     public interface IResourceManager<ResourceType> : IResourceManager
         where ResourceType : UnityEngine.Object
     {
-        IEnumerator InitializeCoroutine(float timeout = float.MaxValue);
+        IEnumerator InitializeCoroutine(float timeout = 30f);
         ResourceLoadingHandler<ResourceType> LoadResouceAsync(IAsyncResourceId resouce);
     }
 
@@ -19,7 +19,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     {
         Uninitialized,
         Initializing,
-        Initialized
+        Initialized,
+        Failed
     }
 
 }

@@ -12,19 +12,21 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     public abstract class ReferenceTableAsyncResourceProvider<ResourceType> :
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
-        IReferenceTableAsyncResourceProvider<ResourceType>
+        IReferenceTableAsyncResourceProvider<ResourceType>,
+        IAsyncResourceCacheKeyProvider
         where ResourceType : UnityEngine.Object
     {
         public int Priority => priority;
         public bool IsInitialized { get; private set; }
-        public float ResourceLoadingTimeout => timeout;
+        public float ResourceLoadingTimeout => timeout > 0f ? timeout : 1f;
         public abstract IAsyncResourceReferenceTable<ResourceType> ReferenceTable { get; }
 
         [SerializeField]
         private int priority;
 
         [SerializeField]
-        private float timeout;
+        [Min(0.1f)]
+        private float timeout = 1f;
 
         public virtual void Initialize()
         {
@@ -49,6 +51,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             ResourceLoadingHandler<ResourceType> handler
         )
         {
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return;
+            }
+
             if (!IsInitialized)
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -70,8 +78,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
-            string resolvedId = rtid.GetResourceId(this);
-
             if (id == null || string.IsNullOrEmpty(id.ResourceId))
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -82,6 +88,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 );
                 return;
             }
+
+            string resolvedId = rtid.GetResourceId(this);
 
             handler.LoadingStatus = LoadingStatus.Loading;
             handler.ResourceStatus = ResourceStatus.Unknown;
@@ -130,5 +138,19 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 );
             }
         }
+
+        public string GetCacheKey(IAsyncResourceId resourceId)
+        {
+            return resourceId is IReferenceTableAsyncResourceId referenceId
+                ? referenceId.GetResourceId(this)
+                : resourceId?.ResourceId;
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            timeout = Mathf.Max(0.1f, timeout);
+        }
+#endif
     }
 }

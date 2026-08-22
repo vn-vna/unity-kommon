@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
 using UnityEngine;
@@ -15,6 +16,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         , IAddressableAsyncResourceId
 #endif
     {
+        private static readonly Regex UnresolvedTagRegex = new Regex(
+            @"\{[^{}]+\}",
+            RegexOptions.Compiled);
+
         public string ResourceId { get; set; }
 
         public IReadOnlyDictionary<string, string> CustomTags { get; set; }
@@ -40,8 +45,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         {
             DownloadableResourceProvider<TextAsset> dlProvider
                 = (DownloadableResourceProvider<TextAsset>)provider;
-            return dlProvider.BaseUrl
-                + ApplyTemplate(dlProvider.UrlFormat, ResourceId, CustomTags);
+            return CombineUrl(
+                dlProvider.BaseUrl,
+                ApplyTemplate(
+                    dlProvider.UrlFormat,
+                    ResourceId,
+                    CustomTags));
         }
 
         string IReferenceTableAsyncResourceId.GetResourceId(
@@ -65,21 +74,64 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             string resourceId,
             IReadOnlyDictionary<string, string> customTags)
         {
-            string result = template
+            if (string.IsNullOrWhiteSpace(resourceId))
+            {
+                throw new System.ArgumentException(
+                    "Resource ID cannot be null, empty, or whitespace.",
+                    nameof(resourceId));
+            }
+
+            string evaluatedTemplate = string.IsNullOrWhiteSpace(template)
+                ? "{id}"
+                : template;
+            string result = evaluatedTemplate
                 .Replace("{id}", resourceId)
                 .Replace("{0}", resourceId);
 
-            if (customTags == null || customTags.Count == 0)
+            if (customTags != null)
             {
-                return result;
+                foreach (KeyValuePair<string, string> kvp in customTags)
+                {
+                    if (string.IsNullOrWhiteSpace(kvp.Key))
+                    {
+                        continue;
+                    }
+
+                    result = result.Replace(
+                        $"{{{kvp.Key}}}",
+                        kvp.Value ?? string.Empty);
+                }
             }
 
-            foreach (KeyValuePair<string, string> kvp in customTags)
+            Match unresolvedTag = UnresolvedTagRegex.Match(result);
+            if (unresolvedTag.Success)
             {
-                result = result.Replace($"{{{kvp.Key}}}", kvp.Value);
+                throw new System.FormatException(
+                    $"Template contains unresolved tag "
+                    + $"'{unresolvedTag.Value}'.");
             }
 
             return result;
+        }
+
+        private static string CombineUrl(string baseUrl, string relativePath)
+        {
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                return relativePath;
+            }
+
+            if (System.Uri.TryCreate(
+                    relativePath,
+                    System.UriKind.Absolute,
+                    out System.Uri absoluteUri))
+            {
+                return absoluteUri.AbsoluteUri;
+            }
+
+            return baseUrl.TrimEnd('/')
+                + "/"
+                + (relativePath ?? string.Empty).TrimStart('/');
         }
     }
 

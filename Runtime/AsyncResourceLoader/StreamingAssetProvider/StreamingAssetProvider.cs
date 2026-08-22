@@ -18,12 +18,18 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         ScriptableObject,
         IAsyncResourceProvider<ResourceType>,
         IStreamingAssetProvider<ResourceType>,
-        ICatalogAwareAsyncResourceProvider
+        ICatalogAwareAsyncResourceProvider,
+        IInvalidatableCatalog,
+        IAsyncResourceCacheKeyProvider,
+        IAsyncResourceDataTypeResolver,
+        IAsyncResourceInitializationStatus,
+        IAsyncResourceReleaseProvider<ResourceType>
         where ResourceType : UnityEngine.Object
     {
         public int Priority => priority;
-        public float ResourceLoadingTimeout => timeout;
+        public float ResourceLoadingTimeout => timeout > 0f ? timeout : 30f;
         public bool IsInitialized { get; private set; }
+        public Exception InitializationException { get; private set; }
         public string SubFolder => subFolder;
 
         [SerializeField]
@@ -37,7 +43,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         [SerializeField]
         [Tooltip("Maximum time in seconds to wait for a single load request.")]
-        private float timeout = 10f;
+        private float timeout = 30f;
 
         [SerializeField]
         [Tooltip("Request timeout in seconds. Aborts if no progress is made "
@@ -49,6 +55,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private CatalogConfig _catalogConfig = new CatalogConfig();
 
         private CatalogData _catalogData;
+        private readonly object _operationLock = new object();
+        private readonly HashSet<ResourceLoadingHandler<ResourceType>>
+            _activeHandlers
+                = new HashSet<ResourceLoadingHandler<ResourceType>>();
+        private int _operationGeneration;
 
         /// <summary>
         /// Override to convert raw bytes into the target resource type.
@@ -57,15 +68,47 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public virtual void Initialize()
         {
-            _catalogData = new CatalogData();
+            int operationGeneration = AdvanceOperationGeneration(
+                "StreamingAsset provider was reinitialized.");
+            IsInitialized = false;
+            InitializationException = null;
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    InitializeCoroutine(operationGeneration),
+                    exception => HandleInitializationFailure(
+                        operationGeneration,
+                        exception)),
+                out _);
+            if (!dispatched)
+            {
+                HandleInitializationFailure(
+                    operationGeneration,
+                    new InvalidOperationException(
+                        "StreamingAsset provider initialization requires a Dispatcher."
+                    ));
+            }
+        }
+
+        private IEnumerator InitializeCoroutine(int operationGeneration)
+        {
+            CatalogData catalogData = new CatalogData();
             if (_catalogConfig.UseCatalog
                 && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
             {
-                _catalogData.LoadFromStreamingAssets(_catalogConfig.CatalogFileName);
+                yield return catalogData.LoadFromStreamingAssetsCoroutine(
+                    _catalogConfig.CatalogFileName);
+                catalogData.ThrowIfFailed(
+                    "StreamingAssets catalog initialization failed.");
+            }
+
+            if (!IsCurrentOperationGeneration(operationGeneration))
+            {
+                yield break;
             }
 
             string fullPath = BuildBasePath();
-            if (!Directory.Exists(fullPath))
+            if (!RequiresUnityWebRequest(fullPath)
+                && !Directory.Exists(fullPath))
             {
                 QuickLog.Warning<StreamingAssetProvider<ResourceType>>(
                     "StreamingAssets subfolder '{0}' not found at '{1}'. "
@@ -74,6 +117,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 );
             }
 
+            _catalogData = catalogData;
             IsInitialized = true;
 
             QuickLog.Debug<StreamingAssetProvider<ResourceType>>(
@@ -87,6 +131,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             ResourceLoadingHandler<ResourceType> handler
         )
         {
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return;
+            }
+
             if (!IsInitialized)
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -109,46 +159,67 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
-            string filePath = streamingId.GetFilePath(this);
+            if (string.IsNullOrEmpty(id.ResourceId))
+            {
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.ProviderSource = GetType().Name;
+                handler.Exception = new ArgumentException(
+                    "Resource ID is null or empty.",
+                    nameof(id)
+                );
+                return;
+            }
+
+            string filePath = ResolveRelativePath(id, streamingId);
             if (string.IsNullOrEmpty(filePath))
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
                 handler.ResourceStatus = ResourceStatus.Failed;
                 handler.ProviderSource = GetType().Name;
                 handler.Exception = new ArgumentException(
-                    "File path returned by resource ID is null or empty."
+                    "File path returned by resource ID is null or empty.",
+                    nameof(id)
                 );
                 return;
             }
 
             string fullPath = BuildFullPath(filePath);
 
-            if (string.IsNullOrEmpty(id.ResourceId))
-            {
-                handler.LoadingStatus = LoadingStatus.Completed;
-                handler.ResourceStatus = ResourceStatus.Failed;
-                handler.ProviderSource = GetType().Name;
-                handler.Exception = new ArgumentNullException(
-                    nameof(id), "Resource ID is null or empty."
-                );
-
-                QuickLog.Error<StreamingAssetProvider<ResourceType>>(
-                    "Resource ID is null or empty. Cannot load from "
-                    + "StreamingAssets."
-                );
-                return;
-            }
-
             handler.LoadingStatus = LoadingStatus.Loading;
             handler.ResourceStatus = ResourceStatus.Unknown;
             handler.ProviderSource = GetType().Name;
+            int operationGeneration;
+            lock (_operationLock)
+            {
+                operationGeneration = _operationGeneration;
+                _activeHandlers.Add(handler);
+            }
 
             QuickLog.Debug<StreamingAssetProvider<ResourceType>>(
                 "Loading StreamingAsset '{0}'...", fullPath
             );
 
-            LoadFromFileCoroutine(fullPath, handler)
-                .DispatchOnDispatcher();
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    LoadFromFileCoroutine(
+                        id.ResourceId,
+                        fullPath,
+                        handler,
+                        operationGeneration),
+                    exception => HandleLoadCoroutineFailure(
+                        handler,
+                        fullPath,
+                        exception)),
+                out _);
+            if (!dispatched)
+            {
+                RemoveActiveHandler(handler);
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.Exception = new InvalidOperationException(
+                    "StreamingAsset loading requires a Dispatcher instance.");
+            }
         }
 
         public IReadOnlyCollection<string> CatalogedIds =>
@@ -156,6 +227,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public bool HasResource(IAsyncResourceId resourceId)
         {
+            if (resourceId == null)
+            {
+                return false;
+            }
+
             if (_catalogData != null && _catalogData.IsLoaded)
             {
                 return _catalogData.HasResource(resourceId.ResourceId);
@@ -167,10 +243,113 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         public DataType GetDataType(string resourceId) =>
             _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
 
+        public DataType GetDataType(IAsyncResourceId resourceId)
+        {
+            return GetDataType(resourceId?.ResourceId);
+        }
+
+        public string GetCacheKey(IAsyncResourceId resourceId)
+        {
+            if (resourceId is not IStreamingAssetId streamingId)
+            {
+                return resourceId?.ResourceId;
+            }
+
+            string cacheKey = BuildFullPath(
+                ResolveRelativePath(resourceId, streamingId));
+            string contentHash = _catalogData?.GetContentHash(
+                resourceId.ResourceId);
+            return string.IsNullOrWhiteSpace(contentHash)
+                ? cacheKey
+                : $"{cacheKey}\n{contentHash}";
+        }
+
+        public void InvalidateCatalog(CatalogInvalidationMode mode)
+        {
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    InvalidateCatalogCoroutine(mode),
+                    HandleCatalogInvalidationFailure),
+                out _);
+            if (!dispatched)
+            {
+                QuickLog.Error<StreamingAssetProvider<ResourceType>>(
+                    "Catalog invalidation requires a Dispatcher instance.");
+            }
+        }
+
+        public IEnumerator InvalidateCatalogCoroutine(
+            CatalogInvalidationMode mode)
+        {
+            int operationGeneration = AdvanceOperationGeneration(
+                "StreamingAsset catalog was invalidated.");
+            CatalogData catalogData = new CatalogData();
+
+            if (_catalogConfig.UseCatalog
+                && !string.IsNullOrEmpty(_catalogConfig.CatalogFileName))
+            {
+                yield return catalogData.LoadFromStreamingAssetsCoroutine(
+                    _catalogConfig.CatalogFileName);
+                catalogData.ThrowIfFailed(
+                    "StreamingAssets catalog refresh failed.");
+            }
+
+            if (!IsCurrentOperationGeneration(operationGeneration))
+            {
+                yield break;
+            }
+
+            _catalogData = catalogData;
+        }
+
+        public virtual void ReleaseResource(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(resource);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(resource);
+            }
+        }
+
         private IEnumerator LoadFromFileCoroutine(
+            string resourceId,
             string fullPath,
-            ResourceLoadingHandler<ResourceType> handler
+            ResourceLoadingHandler<ResourceType> handler,
+            int operationGeneration
         )
+        {
+            IEnumerator operation = LoadFromFileInternalCoroutine(
+                resourceId,
+                fullPath,
+                handler,
+                operationGeneration);
+            try
+            {
+                while (operation.MoveNext())
+                {
+                    yield return operation.Current;
+                }
+            }
+            finally
+            {
+                (operation as IDisposable)?.Dispose();
+                RemoveActiveHandler(handler);
+            }
+        }
+
+        private IEnumerator LoadFromFileInternalCoroutine(
+            string resourceId,
+            string fullPath,
+            ResourceLoadingHandler<ResourceType> handler,
+            int operationGeneration)
         {
             using UnityWebRequest webRequest = UnityWebRequest.Get(fullPath);
             webRequest.downloadHandler = new DownloadHandlerBuffer();
@@ -182,6 +361,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
             while (!operation.isDone)
             {
+                if (handler.IsCancellationRequested
+                    || !IsCurrentOperationGeneration(operationGeneration))
+                {
+                    webRequest.Abort();
+                    handler.Cancel();
+                    yield break;
+                }
+
                 handler.Progress = webRequest.downloadProgress;
 
                 float elapsed = Time.realtimeSinceStartup - startTime;
@@ -196,11 +383,30 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 yield return null;
             }
 
+            if (handler.IsCancellationRequested
+                || !IsCurrentOperationGeneration(operationGeneration))
+            {
+                webRequest.Abort();
+                handler.Cancel();
+                yield break;
+            }
+
             handler.Progress = webRequest.downloadProgress;
 
             if (webRequest.result == UnityWebRequest.Result.Success)
             {
                 byte[] data = webRequest.downloadHandler.data;
+
+                if (!TryValidateContentHash(
+                        resourceId,
+                        data,
+                        out Exception hashException))
+                {
+                    handler.LoadingStatus = LoadingStatus.Completed;
+                    handler.ResourceStatus = ResourceStatus.Failed;
+                    handler.Exception = hashException;
+                    yield break;
+                }
 
                 try
                 {
@@ -208,6 +414,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
                     if (resource != null)
                     {
+                        if (handler.IsCancellationRequested
+                            || !IsCurrentOperationGeneration(
+                                operationGeneration))
+                        {
+                            ReleaseResource(resource);
+                            handler.Cancel();
+                            yield break;
+                        }
+
                         handler.Resouce = resource;
                         handler.LoadingStatus = LoadingStatus.Completed;
                         handler.ResourceStatus = ResourceStatus.Loaded;
@@ -270,18 +485,170 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return basePath;
             }
 
-            return Path.Combine(basePath, subFolder);
+            return CombinePath(basePath, subFolder);
         }
 
         private string BuildFullPath(string relativePath)
         {
-            string basePath = Application.streamingAssetsPath;
-            if (!string.IsNullOrEmpty(subFolder))
+            return CombinePath(BuildBasePath(), relativePath);
+        }
+
+        private void HandleInitializationFailure(
+            int operationGeneration,
+            Exception exception)
+        {
+            if (!IsCurrentOperationGeneration(operationGeneration))
             {
-                basePath = Path.Combine(basePath, subFolder);
+                return;
             }
 
-            return Path.Combine(basePath, relativePath);
+            InitializationException = exception;
+            IsInitialized = false;
+            QuickLog.Error<StreamingAssetProvider<ResourceType>>(
+                "StreamingAsset provider initialization failed: {0}",
+                exception);
+        }
+
+        private void OnDisable()
+        {
+            AdvanceOperationGeneration(
+                "StreamingAsset provider was disabled.");
+            IsInitialized = false;
+            InitializationException = null;
+        }
+
+        private int AdvanceOperationGeneration(string cancellationReason)
+        {
+            ResourceLoadingHandler<ResourceType>[] handlers;
+            int operationGeneration;
+            lock (_operationLock)
+            {
+                unchecked
+                {
+                    _operationGeneration++;
+                }
+
+                operationGeneration = _operationGeneration;
+                handlers = new ResourceLoadingHandler<ResourceType>[
+                    _activeHandlers.Count];
+                _activeHandlers.CopyTo(handlers);
+                _activeHandlers.Clear();
+            }
+
+            OperationCanceledException exception
+                = new OperationCanceledException(cancellationReason);
+            for (int i = 0; i < handlers.Length; i++)
+            {
+                if (!handlers[i].IsCompleted)
+                {
+                    handlers[i].Cancel();
+                    handlers[i].Exception = exception;
+                }
+            }
+
+            return operationGeneration;
+        }
+
+        private bool IsCurrentOperationGeneration(int operationGeneration)
+        {
+            lock (_operationLock)
+            {
+                return operationGeneration == _operationGeneration;
+            }
+        }
+
+        private void RemoveActiveHandler(
+            ResourceLoadingHandler<ResourceType> handler)
+        {
+            lock (_operationLock)
+            {
+                _activeHandlers.Remove(handler);
+            }
+        }
+
+        private static void HandleLoadCoroutineFailure(
+            ResourceLoadingHandler<ResourceType> handler,
+            string fullPath,
+            Exception exception)
+        {
+            if (handler.IsCompleted)
+            {
+                return;
+            }
+
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return;
+            }
+
+            handler.LoadingStatus = LoadingStatus.Completed;
+            handler.ResourceStatus = ResourceStatus.Failed;
+            handler.Exception = new InvalidOperationException(
+                $"StreamingAsset load coroutine failed for '{fullPath}'.",
+                exception);
+        }
+
+        private static void HandleCatalogInvalidationFailure(
+            Exception exception)
+        {
+            QuickLog.Error<StreamingAssetProvider<ResourceType>>(
+                "StreamingAssets catalog invalidation failed: {0}",
+                exception);
+        }
+
+        private string ResolveRelativePath(
+            IAsyncResourceId resourceId,
+            IStreamingAssetId streamingId)
+        {
+            string catalogPath = _catalogData?.GetRelativePath(
+                resourceId?.ResourceId);
+            return string.IsNullOrWhiteSpace(catalogPath)
+                ? streamingId.GetFilePath(this)
+                : catalogPath;
+        }
+
+        private bool TryValidateContentHash(
+            string resourceId,
+            byte[] data,
+            out Exception exception)
+        {
+            return CatalogContentHash.TryValidate(
+                resourceId,
+                data,
+                _catalogData?.GetContentHash(resourceId),
+                out exception);
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            timeout = Mathf.Max(0.1f, timeout);
+            requestTimeout = Mathf.Max(0.1f, requestTimeout);
+            subFolder = subFolder?.Trim().Trim('/', '\\');
+        }
+#endif
+
+        private static bool RequiresUnityWebRequest(string path)
+        {
+            return path.IndexOf("://", StringComparison.Ordinal) >= 0;
+        }
+
+        private static string CombinePath(string basePath, string relativePath)
+        {
+            if (string.IsNullOrEmpty(basePath))
+            {
+                return relativePath;
+            }
+
+            if (RequiresUnityWebRequest(basePath))
+            {
+                return basePath.TrimEnd('/')
+                    + "/"
+                    + (relativePath ?? string.Empty).TrimStart('/');
+            }
+
+            return Path.Combine(basePath, relativePath ?? string.Empty);
         }
     }
 }

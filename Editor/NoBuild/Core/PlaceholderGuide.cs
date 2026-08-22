@@ -4,6 +4,7 @@
 
 using System;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor;
 using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
@@ -41,15 +42,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         public static void Show(Rect activatorRect)
         {
-            PopupWindow.Show(activatorRect, new GuideContent());
+            CustomPopupDropdown.Show(
+                activatorRect,
+                new GuideContent()
+            );
         }
 
         public static void Show(Rect activatorRect,
             Action<string> onPlaceholderClicked)
         {
-            PopupWindow.Show(activatorRect,
-                new GuideContent { OnPlaceholderClicked =
-                    onPlaceholderClicked });
+            CustomPopupDropdown.Show(
+                activatorRect,
+                new GuideContent
+                {
+                    OnPlaceholderClicked = onPlaceholderClicked
+                }
+            );
         }
 
         private sealed class GuideContent : PopupWindowContent

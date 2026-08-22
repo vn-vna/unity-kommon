@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor;
 using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEditor;
+using UnityEditor.PackageManager;
+using UnityEditor.PackageManager.Requests;
 using UnityEngine;
+using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
 namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
@@ -33,17 +36,26 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         private AsyncResourceLoadingConfiguration _config;
         private AsyncResourceLoaderSettingsProvider.ConcreteManagerInfo _managerInfo;
+        private PuzzleLevelManager _managerCandidate;
+        private int _managerAssetCount = -1;
         private int _tabIndex;
         private Vector2 _scrollPosition;
 
         // Provider cache — avoids per-frame SerializedObject + AssetDatabase lookups
         private ScriptableObject _cachedManagerAsset;
+        private int _providerSignature;
         private readonly Dictionary<Type, ScriptableObject> _providerCache
+            = new Dictionary<Type, ScriptableObject>();
+        private readonly Dictionary<Type, ScriptableObject> _providerCandidates
             = new Dictionary<Type, ScriptableObject>();
 
         // Cached editors — avoids per-frame Editor.CreateEditor (Odin caching issue)
         private readonly Dictionary<ScriptableObject, UnityEditor.Editor>
             _cachedEditors = new Dictionary<ScriptableObject, UnityEditor.Editor>();
+
+#if !UNITY_ADDRESSABLES
+        private static AddRequest _addressablesInstallRequest;
+#endif
 
         private PuzzleLevelSettingsProvider(
             string path, SettingsScope scopes,
@@ -121,8 +133,28 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[PuzzleLevelSettings] {ex}");
+                QuickLog.Error<PuzzleLevelSettingsProvider>(
+                    "Failed to draw Puzzle Level settings: {0}",
+                    ex);
             }
+        }
+
+        public override void OnActivate(
+            string searchContext,
+            VisualElement rootElement)
+        {
+            base.OnActivate(searchContext, rootElement);
+            Undo.undoRedoPerformed += HandleProjectStateChanged;
+            EditorApplication.projectChanged += HandleProjectStateChanged;
+            InvalidateCaches();
+        }
+
+        public override void OnDeactivate()
+        {
+            Undo.undoRedoPerformed -= HandleProjectStateChanged;
+            EditorApplication.projectChanged -= HandleProjectStateChanged;
+            InvalidateCaches();
+            base.OnDeactivate();
         }
 
         #region Manager Card Header
@@ -174,6 +206,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                         + "Create one to enable level loading.",
                         MessageType.Warning);
                 }
+
+                int managerAssetCount = GetManagerAssetCount();
+                if (managerAssetCount > 1)
+                {
+                    EditorGUILayout.HelpBox(
+                        $"Found {managerAssetCount} PuzzleLevelManager assets. "
+                        + "Keep one canonical asset at "
+                        + "Assets/Resources/PuzzleLevelManager.asset to avoid "
+                        + "split-brain singleton resolution.",
+                        MessageType.Error);
+                }
             }
         }
 
@@ -218,11 +261,31 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 GUILayout.Space(8);
 
                 EditorGUILayout.HelpBox(
-                    "Creates the manager asset directly in "
-                    + "Assets/Resources/.",
+                    "Attach an existing canonical manager or create one at "
+                    + "Assets/Resources/PuzzleLevelManager.asset.",
                     MessageType.Info);
 
                 GUILayout.Space(8);
+
+                _managerCandidate = (PuzzleLevelManager)EditorGUILayout.ObjectField(
+                    "Existing Manager",
+                    _managerCandidate,
+                    typeof(PuzzleLevelManager),
+                    false);
+
+                using (new EditorGUI.DisabledScope(
+                           _managerCandidate == null
+                           || EditorApplication.isCompiling))
+                {
+                    if (GUILayout.Button(
+                            "Attach Existing Manager",
+                            GUILayout.Height(28)))
+                    {
+                        AttachManagerToConfig(_managerCandidate);
+                        RefreshManagerInfo();
+                        return;
+                    }
+                }
 
                 EditorGUI.BeginDisabledGroup(EditorApplication.isCompiling);
 
@@ -239,32 +302,63 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         private void CreateAndAttachManager()
         {
-            // Ensure Resources folder exists
             if (!AssetDatabase.IsValidFolder("Assets/Resources"))
             {
                 AssetDatabase.CreateFolder("Assets", "Resources");
             }
 
+            PuzzleLevelManager canonicalManager
+                = AssetDatabase.LoadAssetAtPath<PuzzleLevelManager>(
+                    ManagerAssetPath);
+            if (canonicalManager != null)
+            {
+                AttachManagerToConfig(canonicalManager);
+                RefreshManagerInfo();
+                Selection.activeObject = canonicalManager;
+                EditorGUIUtility.PingObject(canonicalManager);
+                return;
+            }
+
+            string[] existingManagerGuids = AssetDatabase.FindAssets(
+                $"t:{nameof(PuzzleLevelManager)}");
+            if (existingManagerGuids.Length > 0)
+            {
+                string firstPath = AssetDatabase.GUIDToAssetPath(
+                    existingManagerGuids[0]);
+                _managerCandidate = AssetDatabase.LoadAssetAtPath<
+                    PuzzleLevelManager>(firstPath);
+                EditorUtility.DisplayDialog(
+                    "Existing Manager Found",
+                    "A PuzzleLevelManager already exists. Review and attach "
+                    + "it explicitly to avoid a split-brain singleton.",
+                    "OK");
+                if (_managerCandidate != null)
+                {
+                    Selection.activeObject = _managerCandidate;
+                    EditorGUIUtility.PingObject(_managerCandidate);
+                }
+
+                return;
+            }
+
             PuzzleLevelManager manager
                 = ScriptableObject.CreateInstance<PuzzleLevelManager>();
-            string assetPath = AssetDatabase.GenerateUniqueAssetPath(
-                ManagerAssetPath);
 
-            AssetDatabase.CreateAsset(manager, assetPath);
-            AssetDatabase.SaveAssets();
+            AssetDatabase.CreateAsset(manager, ManagerAssetPath);
+            Undo.RegisterCreatedObjectUndo(
+                manager,
+                "Create Puzzle Level Manager");
 
             AttachManagerToConfig(manager);
-
-            EditorUtility.SetDirty(_config);
             AssetDatabase.SaveAssets();
-
-            _managerInfo = AsyncResourceLoaderSettingsProvider.FindManagerInfo(
-                typeof(PuzzleLevelManager), _config);
+            RefreshManagerInfo();
 
             Selection.activeObject = manager;
             EditorGUIUtility.PingObject(manager);
 
-            Debug.Log($"[PuzzleLevelSettings] Created manager at '{assetPath}'.");
+            QuickLog.Info<PuzzleLevelSettingsProvider>(
+                "Created canonical PuzzleLevelManager at '{0}'.",
+                ManagerAssetPath);
         }
 
         private void AttachManagerToConfig(PuzzleLevelManager manager)
@@ -272,13 +366,35 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             if (_config == null || manager == null) return;
 
             SerializedObject serializedConfig = new SerializedObject(_config);
-            var listProp = serializedConfig.FindProperty("managerAssets");
+            SerializedProperty listProp
+                = serializedConfig.FindProperty("managerAssets");
             if (listProp == null) return;
 
+            for (int i = 0; i < listProp.arraySize; i++)
+            {
+                if (listProp.GetArrayElementAtIndex(i).objectReferenceValue
+                    == manager)
+                {
+                    return;
+                }
+            }
+
+            Undo.RecordObject(_config, "Attach Puzzle Level Manager");
             int newIndex = listProp.arraySize++;
             listProp.GetArrayElementAtIndex(newIndex)
                 .objectReferenceValue = manager;
             serializedConfig.ApplyModifiedProperties();
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            InvalidateCaches();
+        }
+
+        private void RefreshManagerInfo()
+        {
+            _managerInfo = AsyncResourceLoaderSettingsProvider.FindManagerInfo(
+                typeof(PuzzleLevelManager),
+                _config);
+            InvalidateCaches();
         }
 
         #endregion
@@ -307,15 +423,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         {
             public string DisplayName;
             public Type ProviderType;
-            public string[] RequiredDefines;
 
             public PuzzleLevelProviderCard(
-                string displayName, Type providerType,
-                string[] requiredDefines = null)
+                string displayName,
+                Type providerType)
             {
                 DisplayName = displayName;
                 ProviderType = providerType;
-                RequiredDefines = requiredDefines;
             }
         }
 
@@ -327,8 +441,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             new("Downloadable",     typeof(PuzzleLevelDownloadableProvider)),
             new("Reference Table",  typeof(PuzzleLevelReferenceTableProvider)),
 #if UNITY_ADDRESSABLES
-            new("Addressable",      typeof(PuzzleLevelAddressableProvider),
-                new[] { "UNITY_ADDRESSABLES" }),
+            new("Addressable",      typeof(PuzzleLevelAddressableProvider)),
 #endif
         };
 
@@ -347,6 +460,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                     DrawPuzzleLevelProviderCard(card);
                     GUILayout.Space(4);
                 }
+
+#if !UNITY_ADDRESSABLES
+                DrawAddressablesSetupCard();
+#endif
             }
         }
 
@@ -359,10 +476,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                string[] missingDefines = GetMissingDefines(
-                    card.RequiredDefines);
-
-                // -- Header row --
                 using (new EditorGUILayout.HorizontalScope())
                 {
                     EditorGUILayout.LabelField(
@@ -379,55 +492,117 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                             return;
                         }
                     }
-                    else if (missingDefines.Length > 0)
-                    {
-                        EditorGUI.BeginDisabledGroup(
-                            EditorApplication.isCompiling);
-                        if (GUILayout.Button(
-                                $"Enable {string.Join(", ", missingDefines)}",
-                                GUILayout.Width(180)))
-                        {
-                            EnablePuzzleLevelProviderDefineSymbols(
-                                missingDefines);
-                        }
-                        EditorGUI.EndDisabledGroup();
-                    }
                     else
                     {
-                        EditorGUI.BeginDisabledGroup(
-                            EditorApplication.isCompiling);
-                        if (GUILayout.Button("Enable",
-                                GUILayout.Width(70)))
-                        {
-                            EnablePuzzleLevelProvider(card);
-                            return;
-                        }
-                        EditorGUI.EndDisabledGroup();
+                        GUILayout.Label(
+                            " DISABLED ",
+                            EditorStyles.miniLabel,
+                            GUILayout.Width(70));
                     }
                 }
 
-                // -- Body --
                 if (isEnabled)
                 {
                     GUILayout.Space(4);
                     DrawPuzzleLevelProviderBody(card, existingAsset);
                 }
-                else if (missingDefines.Length > 0)
-                {
-                    EditorGUILayout.HelpBox(
-                        "Requires scripting define(s): "
-                        + string.Join(", ", missingDefines),
-                        MessageType.Warning);
-                }
                 else
                 {
-                    EditorGUILayout.LabelField(
-                        "Not yet enabled. Click Enable to create "
-                        + "and assign.",
-                        EditorStyles.miniLabel);
+                    DrawDisabledProviderBody(card);
                 }
             }
         }
+
+        private void DrawDisabledProviderBody(PuzzleLevelProviderCard card)
+        {
+            _providerCandidates.TryGetValue(
+                card.ProviderType,
+                out ScriptableObject candidate);
+            ScriptableObject selected = EditorGUILayout.ObjectField(
+                "Existing Asset",
+                candidate,
+                card.ProviderType,
+                false) as ScriptableObject;
+            _providerCandidates[card.ProviderType] = selected;
+
+            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUI.DisabledScope(EditorApplication.isCompiling))
+            {
+                using (new EditorGUI.DisabledScope(selected == null))
+                {
+                    if (GUILayout.Button("Attach Existing"))
+                    {
+                        EnablePuzzleLevelProvider(card, selected);
+                        return;
+                    }
+                }
+
+                if (GUILayout.Button("Create New"))
+                {
+                    ScriptableObject created = CreateProviderAsset(card);
+                    if (created != null)
+                    {
+                        EnablePuzzleLevelProvider(card, created);
+                    }
+                }
+            }
+        }
+
+#if !UNITY_ADDRESSABLES
+        private static void DrawAddressablesSetupCard()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField(
+                    "Addressable",
+                    EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    "Install com.unity.addressables to enable the optional "
+                    + "Addressable puzzle-level provider. The assembly version "
+                    + "define is configured automatically.",
+                    MessageType.Info);
+
+                using (new EditorGUI.DisabledScope(
+                           EditorApplication.isCompiling
+                           || _addressablesInstallRequest != null))
+                {
+                    if (GUILayout.Button("Install Addressables"))
+                    {
+                        _addressablesInstallRequest = Client.Add(
+                            "com.unity.addressables");
+                        EditorApplication.update
+                            += HandleAddressablesInstallProgress;
+                    }
+                }
+            }
+        }
+
+        private static void HandleAddressablesInstallProgress()
+        {
+            if (_addressablesInstallRequest == null
+                || !_addressablesInstallRequest.IsCompleted)
+            {
+                return;
+            }
+
+            EditorApplication.update -= HandleAddressablesInstallProgress;
+            if (_addressablesInstallRequest.Status == StatusCode.Success)
+            {
+                QuickLog.Info<PuzzleLevelSettingsProvider>(
+                    "Installed Addressables package '{0}'.",
+                    _addressablesInstallRequest.Result.packageId);
+            }
+            else
+            {
+                QuickLog.Error<PuzzleLevelSettingsProvider>(
+                    "Addressables installation failed: {0}",
+                    _addressablesInstallRequest.Error?.message
+                    ?? "Unknown package-manager error");
+            }
+
+            _addressablesInstallRequest = null;
+        }
+#endif
 
         private void DrawPuzzleLevelProviderBody(
             PuzzleLevelProviderCard card,
@@ -484,21 +659,39 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private void EnsureProviderCache()
         {
             ScriptableObject currentManager = _managerInfo?.AttachedAsset;
-            if (_cachedManagerAsset == currentManager)
+            if (currentManager == null)
             {
+                _cachedManagerAsset = null;
+                _providerSignature = 0;
+                _providerCache.Clear();
                 return;
             }
-
-            _cachedManagerAsset = currentManager;
-            _providerCache.Clear();
-
-            if (currentManager == null) return;
 
             using (SerializedObject so = new SerializedObject(currentManager))
             {
                 SerializedProperty prop
                     = so.FindProperty("initialProviders");
                 if (prop == null) return;
+
+                int signature = 17;
+                for (int i = 0; i < prop.arraySize; i++)
+                {
+                    Object reference
+                        = prop.GetArrayElementAtIndex(i).objectReferenceValue;
+                    signature = unchecked(
+                        signature * 31
+                        + (reference != null ? reference.GetInstanceID() : 0));
+                }
+
+                if (_cachedManagerAsset == currentManager
+                    && _providerSignature == signature)
+                {
+                    return;
+                }
+
+                _cachedManagerAsset = currentManager;
+                _providerSignature = signature;
+                _providerCache.Clear();
 
                 for (int i = 0; i < prop.arraySize; i++)
                 {
@@ -514,12 +707,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         }
 
         private void EnablePuzzleLevelProvider(
-            PuzzleLevelProviderCard card)
+            PuzzleLevelProviderCard card,
+            ScriptableObject asset)
         {
-            ScriptableObject asset
-                = FindOrCreateProviderAsset(card);
-
-            if (asset == null) return;
+            if (asset == null
+                || !card.ProviderType.IsInstanceOfType(asset))
+            {
+                return;
+            }
 
             using (SerializedObject so = new SerializedObject(
                        _managerInfo.AttachedAsset))
@@ -530,9 +725,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
                 so.Update();
 
-                // Add if not already in array
                 if (FindProviderInArray(card.ProviderType) == null)
                 {
+                    Undo.RecordObject(
+                        _managerInfo.AttachedAsset,
+                        $"Enable {card.DisplayName} Provider");
                     int idx = prop.arraySize++;
                     prop.GetArrayElementAtIndex(idx)
                         .objectReferenceValue = asset;
@@ -559,6 +756,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 if (prop == null) return;
 
                 so.Update();
+                Undo.RecordObject(
+                    _managerInfo.AttachedAsset,
+                    "Disable Puzzle Level Provider");
 
                 for (int i = 0; i < prop.arraySize; i++)
                 {
@@ -597,11 +797,23 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         {
             string assetPath = AssetDatabase.GetAssetPath(existingAsset);
             string assetName = existingAsset.name;
+            List<PuzzleLevelManager> users = FindProviderUsers(existingAsset);
+
+            if (users.Count > 1)
+            {
+                EditorUtility.DisplayDialog(
+                    "Shared Provider Cannot Be Deleted",
+                    $"'{assetName}' is referenced by {users.Count} managers. "
+                    + "Disable it here, then remove all remaining references "
+                    + "before deleting the asset.",
+                    "OK");
+                return;
+            }
 
             if (!EditorUtility.DisplayDialog(
-                    "Delete Provider",
-                    $"Delete '{assetName}' permanently?",
-                    "Delete", "Cancel"))
+                    "Move Provider to Trash",
+                    $"Disable '{assetName}' and move its asset to the OS trash?",
+                    "Move to Trash", "Cancel"))
             {
                 return;
             }
@@ -610,12 +822,64 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
             if (!string.IsNullOrEmpty(assetPath))
             {
-                AssetDatabase.DeleteAsset(assetPath);
+                if (!AssetDatabase.MoveAssetToTrash(assetPath))
+                {
+                    EnablePuzzleLevelProvider(card, existingAsset);
+                    EditorUtility.DisplayDialog(
+                        "Delete Failed",
+                        $"Could not move '{assetName}' to the trash.",
+                        "OK");
+                    return;
+                }
+
                 AssetDatabase.SaveAssets();
             }
 
-            Debug.Log(
-                $"[PuzzleLevelSettings] Deleted provider '{assetName}'.");
+            QuickLog.Info<PuzzleLevelSettingsProvider>(
+                "Moved provider '{0}' to the trash.",
+                assetName);
+        }
+
+        private static List<PuzzleLevelManager> FindProviderUsers(
+            ScriptableObject provider)
+        {
+            List<PuzzleLevelManager> users = new List<PuzzleLevelManager>();
+            string[] managerGuids = AssetDatabase.FindAssets(
+                $"t:{nameof(PuzzleLevelManager)}");
+            foreach (string managerGuid in managerGuids)
+            {
+                string managerPath = AssetDatabase.GUIDToAssetPath(managerGuid);
+                PuzzleLevelManager manager
+                    = AssetDatabase.LoadAssetAtPath<PuzzleLevelManager>(
+                        managerPath);
+                if (manager == null)
+                {
+                    continue;
+                }
+
+                using SerializedObject serializedManager
+                    = new SerializedObject(manager);
+                SerializedProperty providers
+                    = serializedManager.FindProperty("initialProviders");
+                if (providers == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < providers.arraySize; i++)
+                {
+                    if (providers.GetArrayElementAtIndex(i).objectReferenceValue
+                        != provider)
+                    {
+                        continue;
+                    }
+
+                    users.Add(manager);
+                    break;
+                }
+            }
+
+            return users;
         }
 
         private void ClearCachedEditors()
@@ -631,78 +895,58 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             _cachedEditors.Clear();
         }
 
-        private ScriptableObject FindOrCreateProviderAsset(
-            PuzzleLevelProviderCard card)
+        private void HandleProjectStateChanged()
         {
-            // Search existing assets on disk
-            string[] guids = AssetDatabase.FindAssets(
-                "t:" + card.ProviderType.Name);
-            foreach (string guid in guids)
+            InvalidateCaches();
+            Repaint();
+        }
+
+        private void InvalidateCaches()
+        {
+            _managerAssetCount = -1;
+            _cachedManagerAsset = null;
+            _providerSignature = 0;
+            _providerCache.Clear();
+            _providerCandidates.Clear();
+            ClearCachedEditors();
+        }
+
+        private int GetManagerAssetCount()
+        {
+            if (_managerAssetCount < 0)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                ScriptableObject asset
-                    = AssetDatabase.LoadAssetAtPath(
-                        path, card.ProviderType) as ScriptableObject;
-                if (asset != null) return asset;
+                _managerAssetCount = AssetDatabase.FindAssets(
+                    $"t:{nameof(PuzzleLevelManager)}").Length;
             }
 
-            // Create new
+            return _managerAssetCount;
+        }
+
+        private ScriptableObject CreateProviderAsset(
+            PuzzleLevelProviderCard card)
+        {
             ScriptableObject newAsset
                 = ScriptableObject.CreateInstance(card.ProviderType);
             newAsset.name = card.ProviderType.Name;
 
             string folderPath = ProviderDefaultFolder;
-            if (!System.IO.Directory.Exists(folderPath))
+            if (!AssetDatabase.IsValidFolder(folderPath))
             {
-                System.IO.Directory.CreateDirectory(folderPath);
+                AssetDatabase.CreateFolder("Assets", "Resources");
             }
 
             string assetPath2 = AssetDatabase.GenerateUniqueAssetPath(
                 $"{folderPath}/{card.ProviderType.Name}.asset");
             AssetDatabase.CreateAsset(newAsset, assetPath2);
+            Undo.RegisterCreatedObjectUndo(
+                newAsset,
+                $"Create {card.DisplayName} Provider");
 
-            Debug.Log(
-                $"[PuzzleLevelSettings] Created provider at "
-                + $"'{assetPath2}'.");
+            QuickLog.Info<PuzzleLevelSettingsProvider>(
+                "Created provider at '{0}'.",
+                assetPath2);
 
             return newAsset;
-        }
-
-        private static string[] GetMissingDefines(string[] required)
-        {
-            if (required == null || required.Length == 0)
-            {
-                return Array.Empty<string>();
-            }
-
-            string currentDefines = PlayerSettings
-                .GetScriptingDefineSymbolsForGroup(
-                    EditorUserBuildSettings.selectedBuildTargetGroup);
-            return required
-                .Where(d => !currentDefines.Contains(d))
-                .ToArray();
-        }
-
-        private static void EnablePuzzleLevelProviderDefineSymbols(
-            string[] missingDefines)
-        {
-            string currentDefines = PlayerSettings
-                .GetScriptingDefineSymbolsForGroup(
-                    EditorUserBuildSettings.selectedBuildTargetGroup);
-            var defines = new HashSet<string>(
-                currentDefines.Split(';'));
-            foreach (string d in missingDefines)
-            {
-                defines.Add(d);
-            }
-
-            PlayerSettings.SetScriptingDefineSymbolsForGroup(
-                EditorUserBuildSettings.selectedBuildTargetGroup,
-                string.Join(";", defines));
-
-            Debug.Log(
-                "[PuzzleLevelSettings] Enabled scripting defines: "
-                + string.Join(", ", missingDefines));
         }
 
         #endregion
@@ -836,6 +1080,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 = ScriptableObject.CreateInstance<
                     PuzzleLevelOverrideConfig>();
             AssetDatabase.CreateAsset(config, filePath);
+            Undo.RegisterCreatedObjectUndo(
+                config,
+                "Create Puzzle Level Override Config");
 
             SetManagerConfigValue("_overrideConfig", config);
 
@@ -844,9 +1091,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             Selection.activeObject = config;
             EditorGUIUtility.PingObject(config);
 
-            Debug.Log(
-                $"[PuzzleLevelSettings] Created override config at "
-                + $"'{filePath}'.");
+            QuickLog.Info<PuzzleLevelSettingsProvider>(
+                "Created override config at '{0}'.",
+                filePath);
         }
 
         private static void DrawRuntimeOverrideStatus()
@@ -915,12 +1162,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 if (prop != null)
                 {
                     so.Update();
+                    Undo.RecordObject(
+                        _managerInfo.AttachedAsset,
+                        "Change Puzzle Level Manager Configuration");
                     prop.objectReferenceValue = value;
                     so.ApplyModifiedProperties();
                 }
             }
 
             EditorUtility.SetDirty(_managerInfo.AttachedAsset);
+            AssetDatabase.SaveAssets();
+            InvalidateCaches();
         }
 
         private static AsyncResourceLoadingConfiguration GetOrCreateConfiguration()
@@ -933,12 +1185,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             if (config != null) return config;
 
             config = ScriptableObject.CreateInstance<AsyncResourceLoadingConfiguration>();
-            if (!System.IO.Directory.Exists("Assets/Resources"))
+            if (!AssetDatabase.IsValidFolder("Assets/Resources"))
             {
-                System.IO.Directory.CreateDirectory("Assets/Resources");
+                AssetDatabase.CreateFolder("Assets", "Resources");
             }
 
             AssetDatabase.CreateAsset(config, ConfigAssetPath);
+            Undo.RegisterCreatedObjectUndo(
+                config,
+                "Create Async Resource Loader Configuration");
             AssetDatabase.SaveAssets();
             return config;
         }
@@ -1034,8 +1289,19 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                     if (GUILayout.Button("Add Override Entry",
                             GUILayout.Height(24)))
                     {
-                        entriesProp.arraySize++;
+                        Undo.RecordObject(config, "Add Puzzle Level Override");
+                        int newIndex = entriesProp.arraySize;
+                        entriesProp.InsertArrayElementAtIndex(newIndex);
+                        SerializedProperty newEntry
+                            = entriesProp.GetArrayElementAtIndex(newIndex);
+                        newEntry.FindPropertyRelative("LevelId").stringValue
+                            = string.Empty;
+                        newEntry.FindPropertyRelative("OverrideAsset")
+                            .objectReferenceValue = null;
+                        newEntry.FindPropertyRelative("DataType").intValue
+                            = (int)DataType.Text;
                         so.ApplyModifiedProperties();
+                        EditorUtility.SetDirty(config);
                     }
                 }
 

@@ -12,6 +12,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     {
         Unknown,
         Loaded,
-        Failed
+        Failed,
+        Canceled
     }
 }

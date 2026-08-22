@@ -1,5 +1,6 @@
 using System.IO;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
@@ -28,7 +29,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             PuzzleLevelManager manager = PuzzleLevelManager.Instance;
 
             DrawHeader();
-            DrawInjectSection();
+            DrawInjectSection(manager);
             GUILayout.Space(8);
             DrawActiveOverrides(manager);
         }
@@ -46,9 +47,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             GUILayout.Space(4);
         }
 
-        private void DrawInjectSection()
+        private void DrawInjectSection(PuzzleLevelManager manager)
         {
             EditorGUILayout.LabelField("Inject Override", EditorStyles.miniBoldLabel);
+
+            if (!Application.isPlaying)
+            {
+                EditorGUILayout.HelpBox(
+                    "Enter Play Mode before injecting runtime overrides.",
+                    MessageType.Info);
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -63,8 +71,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             GUILayout.Space(4);
 
             EditorGUI.BeginDisabledGroup(
-                string.IsNullOrEmpty(_levelId)
-                || string.IsNullOrEmpty(_overrideFilePath));
+                !Application.isPlaying
+                || manager == null
+                || string.IsNullOrWhiteSpace(_levelId)
+                || string.IsNullOrWhiteSpace(_overrideFilePath));
 
             if (GUILayout.Button("Inject Override", GUILayout.Height(28)))
             {
@@ -86,14 +96,20 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             {
                 if (dropArea.Contains(evt.mousePosition))
                 {
-                    DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
-                    _isDraggingOver = true;
+                    string draggedPath = DragAndDrop.paths.Length > 0
+                        ? DragAndDrop.paths[0]
+                        : null;
+                    bool isSupported = IsSupportedOverrideFile(draggedPath);
+                    DragAndDrop.visualMode = isSupported
+                        ? DragAndDropVisualMode.Copy
+                        : DragAndDropVisualMode.Rejected;
+                    _isDraggingOver = isSupported;
 
                     if (evt.type == EventType.DragPerform
-                        && DragAndDrop.paths.Length > 0)
+                        && isSupported)
                     {
                         DragAndDrop.AcceptDrag();
-                        _overrideFilePath = DragAndDrop.paths[0];
+                        _overrideFilePath = draggedPath;
                         _isDraggingOver = false;
                     }
 
@@ -145,7 +161,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         private void DrawActiveOverrides(PuzzleLevelManager manager)
         {
-            if (manager == null)
+            if (!Application.isPlaying || manager == null)
             {
                 return;
             }
@@ -204,6 +220,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         private void InjectOverride()
         {
+            if (!Application.isPlaying)
+            {
+                EditorUtility.DisplayDialog(
+                    "Play Mode Required",
+                    "Enter Play Mode before injecting runtime overrides.",
+                    "OK");
+                return;
+            }
+
             if (!File.Exists(_overrideFilePath))
             {
                 EditorUtility.DisplayDialog(
@@ -224,31 +249,73 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 return;
             }
 
-            // Determine DataType from file extension
             string ext = Path.GetExtension(_overrideFilePath).ToLowerInvariant();
             DataType dataType = ext == ".json"
                 ? DataType.Text
                 : DataType.Binary;
 
-            // Load file bytes
-            byte[] fileBytes = File.ReadAllBytes(_overrideFilePath);
+            byte[] fileBytes;
+            try
+            {
+                fileBytes = File.ReadAllBytes(_overrideFilePath);
+            }
+            catch (System.Exception exception)
+            {
+                QuickLog.Error<PuzzleLevelOverrideWindow>(
+                    "Failed to read override file '{0}': {1}",
+                    _overrideFilePath,
+                    exception.Message);
+                EditorUtility.DisplayDialog(
+                    "Override Read Failed",
+                    exception.Message,
+                    "OK");
+                return;
+            }
 
-            // Create PuzzleLevelData and inject
+            if (!IsSupportedOverrideFile(_overrideFilePath))
+            {
+                EditorUtility.DisplayDialog(
+                    "Unsupported Override File",
+                    "Supported extensions are .json, .bytes, and .bin.",
+                    "OK");
+                return;
+            }
+
+            string levelId = _levelId.Trim();
             PuzzleLevelData levelData = new PuzzleLevelData(
-                _levelId, fileBytes);
+                levelId,
+                fileBytes,
+                dataType);
 
-            manager.GetOverrideRegistry()?.SetOverride(_levelId, levelData);
+            PuzzleLevelOverrideRegistry registry = manager.GetOverrideRegistry();
+            if (registry == null || !registry.SetOverride(levelId, levelData))
+            {
+                EditorUtility.DisplayDialog(
+                    "Override Failed",
+                    "The runtime override registry rejected the override.",
+                    "OK");
+                return;
+            }
 
             EditorUtility.DisplayDialog(
                 "Override Injected",
-                $"Level '{_levelId}' overridden with '{Path.GetFileName(_overrideFilePath)}'.",
+                $"Level '{levelId}' overridden with "
+                + $"'{Path.GetFileName(_overrideFilePath)}'.",
                 "OK");
 
-            // Clear fields for next injection
             _levelId = "";
             _overrideFilePath = "";
 
             Repaint();
+        }
+
+        private static bool IsSupportedOverrideFile(string path)
+        {
+            string extension = Path.GetExtension(path ?? string.Empty)
+                .ToLowerInvariant();
+            return extension == ".json"
+                || extension == ".bytes"
+                || extension == ".bin";
         }
     }
 }

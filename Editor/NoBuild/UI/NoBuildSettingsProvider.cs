@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Com.Hapiga.Scheherazade.Common.Editor;
 using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEditor.Build;
@@ -867,12 +868,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (GUILayout.Button("\u25B6 Build", GUILayout.Width(70)))
             {
                 _so.ApplyModifiedProperties();
-                Rect btnRect = GUILayoutUtility.GetLastRect();
-                btnRect.position =
-                    GUIUtility.GUIToScreenPoint(
-                        btnRect.position);
                 var profile = s.buildProfiles[_selBuild];
-                PopupWindow.Show(btnRect,
+                CustomPopupDropdown.ShowLastRect(
                     NoBuildDropdowns.CreateBuildConfirmPopup(
                         profile, s,
                         () => BuildExecutor.Build(profile),
@@ -892,12 +889,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 if (GUILayout.Button("\u25B6\u25B6 Run", GUILayout.Width(65)))
                 {
                     _so.ApplyModifiedProperties();
-                    Rect btnRect =
-                        GUILayoutUtility.GetLastRect();
-                    btnRect.position =
-                        GUIUtility.GUIToScreenPoint(
-                            btnRect.position);
-                    PopupWindow.Show(btnRect,
+                    CustomPopupDropdown.ShowLastRect(
                         NoBuildDropdowns.CreateDeviceSelectPopup(
                             (option, serial) =>
                             {
@@ -906,7 +898,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                                         s.buildProfiles[
                                             _selBuild],
                                         option, serial);
-                            }));
+                            }
+                        )
+                    );
                 }
                 GUI.backgroundColor = Color.white;
             }
@@ -1702,11 +1696,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             if (GUI.Button(btnRect, btnContent, btnStyle))
             {
-                Rect screenRect = btnRect;
-                screenRect.position =
-                    GUIUtility.GUIToScreenPoint(
-                        screenRect.position);
-                PopupWindow.Show(screenRect,
+                CustomPopupDropdown.Show(
+                    btnRect,
                     NoBuildDropdowns.CreatePlatformGridDropdown(
                         currentPlatform,
                         newPlatform =>
@@ -1715,7 +1706,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                                 (int)newPlatform;
                             platP.serializedObject
                                 .ApplyModifiedProperties();
-                        }));
+                        }
+                    )
+                );
             }
 
             EditorGUILayout.EndHorizontal();
@@ -1776,9 +1769,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 Rect btnRect =
                     GUILayoutUtility.GetLastRect();
-                btnRect.position =
-                    GUIUtility.GUIToScreenPoint(
-                        btnRect.position);
                 PlaceholderGuide.Show(btnRect,
                     key =>
                     {

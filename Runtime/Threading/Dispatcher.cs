@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Singleton;
@@ -12,41 +13,56 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
     public class Dispatcher :
         SingletonBehavior<Dispatcher>
     {
-        private Queue<Action> _actions;
+        private readonly object _actionsLock = new object();
+        private Queue<Action> _actions = new Queue<Action>();
+        private Queue<Action> _dispatchingActions = new Queue<Action>();
+
+        private static int _mainThreadId;
+        private static volatile bool _isAvailable;
+
+        public static bool IsAvailable => _isAvailable;
+        public static bool IsMainThread =>
+            _isAvailable
+            && Thread.CurrentThread.ManagedThreadId == _mainThreadId;
 
         protected override void Awake()
         {
-            _actions = new Queue<Action>();
             base.Awake();
+            if (ReferenceEquals(Instance, this))
+            {
+                _mainThreadId = Thread.CurrentThread.ManagedThreadId;
+                _isAvailable = true;
+            }
         }
 
         private void Update()
         {
-            if (_actions.Count == 0)
+            lock (_actionsLock)
             {
-                return;
+                if (_actions.Count == 0)
+                {
+                    return;
+                }
+
+                Queue<Action> queuedActions = _dispatchingActions;
+                _dispatchingActions = _actions;
+                _actions = queuedActions;
             }
 
             QuickLog.SDebug(
                 "Dispatching {0} action(s) on main thread.",
-                _actions.Count
+                _dispatchingActions.Count
             );
 
-            lock (this)
+            while (_dispatchingActions.Count > 0)
             {
-                while (_actions.Count > 0)
-                {
-                    Action action;
-                    action = _actions.Dequeue();
-
-                    TryDispatchAction(action);
-                }
+                TryDispatchAction(_dispatchingActions.Dequeue());
             }
         }
 
         public void ClearActions()
         {
-            lock (this)
+            lock (_actionsLock)
             {
                 _actions.Clear();
             }
@@ -54,9 +70,13 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
 
         public void QueueAction(Action action)
         {
-            lock (this)
+            if (action == null)
             {
-                _actions ??= new Queue<Action>();
+                return;
+            }
+
+            lock (_actionsLock)
+            {
                 _actions.Enqueue(action);
             }
         }
@@ -78,49 +98,128 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
 
         public static void DispatchOnMainThread(Action action)
         {
-            if (Instance == null)
+            TryDispatchOnMainThread(action);
+        }
+
+        public static bool TryDispatchOnMainThread(Action action)
+        {
+            Dispatcher dispatcher = Instance;
+            if (!_isAvailable || ReferenceEquals(dispatcher, null))
             {
                 QuickLog.SCritical(
                     "No Dispatcher instance found. " +
                     "Action cannot be dispatched on main thread."
                 );
-                return;
+                return false;
             }
 
-            Instance.QueueAction(action);
+            dispatcher.QueueAction(action);
+            return true;
         }
 
         public static void DispatchDelayedOnMainThread(Action action, float delaySeconds)
         {
-            if (Instance == null)
+            bool dispatched = TryDispatchOnMainThread(() =>
+            {
+                Dispatcher dispatcher = Instance;
+                if (dispatcher != null)
+                {
+                    dispatcher.StartCoroutine(
+                        DispatchDelayedInternal(action, delaySeconds));
+                }
+            });
+
+            if (!dispatched)
             {
                 QuickLog.SCritical(
-                    "No Dispatcher instance found. " +
-                    "Delayed action cannot be dispatched on main thread."
-                );
-                return;
+                    "Delayed action cannot be dispatched on main thread.");
             }
-
-            Instance.StartCoroutine(DispatchDelayedInternal(action, delaySeconds));
         }
 
         public static async Task DispatchActionAsync(Action action)
         {
-            action?.Invoke();
+            if (action == null)
+            {
+                return;
+            }
+
+            if (IsMainThread)
+            {
+                action.Invoke();
+                return;
+            }
+
+            TaskCompletionSource<bool> completion
+                = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+            bool dispatched = TryDispatchOnMainThread(() =>
+            {
+                try
+                {
+                    action.Invoke();
+                    completion.TrySetResult(true);
+                }
+                catch (Exception exception)
+                {
+                    completion.TrySetException(exception);
+                }
+            });
+
+            if (!dispatched)
+            {
+                throw new InvalidOperationException(
+                    "No Dispatcher instance is available.");
+            }
+
+            await completion.Task;
         }
 
         public static Coroutine DispatchCoroutine(IEnumerator coroutine)
         {
-            if (Instance == null)
+            TryDispatchCoroutine(coroutine, out Coroutine handle);
+            return handle;
+        }
+
+        public static bool TryDispatchCoroutine(
+            IEnumerator coroutine,
+            out Coroutine handle)
+        {
+            handle = null;
+            if (coroutine == null)
+            {
+                QuickLog.SError("Cannot dispatch a null coroutine.");
+                return false;
+            }
+
+            Dispatcher dispatcher = Instance;
+            if (!_isAvailable || ReferenceEquals(dispatcher, null))
             {
                 QuickLog.SCritical(
                     "No Dispatcher instance found. " +
                     "Coroutine cannot be dispatched on main thread."
                 );
-                return null;
+                return false;
             }
 
-            return Instance.StartCoroutine(coroutine);
+            if (!IsMainThread)
+            {
+                QuickLog.SError(
+                    "Coroutines must be dispatched from the Unity main thread.");
+                return false;
+            }
+
+            try
+            {
+                handle = dispatcher.StartCoroutine(coroutine);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                QuickLog.SError(
+                    "Failed to dispatch coroutine: {0}",
+                    exception);
+                return false;
+            }
         }
 
         private static IEnumerator DispatchDelayedInternal(Action action, float delaySeconds)
@@ -129,13 +228,31 @@ namespace Com.Hapiga.Scheherazade.Common.Threading
             action?.Invoke();
         }
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void CreateDispatcher()
         {
+            if (Instance != null)
+            {
+                return;
+            }
+
             GameObject dispatcher = new GameObject("[Scheherazade Action Dispatcher]");
             dispatcher.hideFlags = HideFlags.HideInHierarchy;
             dispatcher.AddComponent<KeepAliveComponent>();
             dispatcher.AddComponent<Dispatcher>();
+        }
+
+        protected override void OnDestroy()
+        {
+            if (ReferenceEquals(Instance, this))
+            {
+                _isAvailable = false;
+                _mainThreadId = 0;
+            }
+
+            ClearActions();
+            _dispatchingActions.Clear();
+            base.OnDestroy();
         }
 
     }

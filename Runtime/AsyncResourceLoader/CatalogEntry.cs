@@ -1,4 +1,5 @@
 using System;
+using Newtonsoft.Json;
 
 namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 {
@@ -7,7 +8,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     {
         public string Id;
         public DataType Type;
+
+        [JsonProperty("relativePath")]
         public string RelativePath;
+
+        [JsonProperty("contentHash")]
         public string ContentHash;
+
+        [JsonProperty("path")]
+        private string LegacyRelativePath
+        {
+            set
+            {
+                if (string.IsNullOrWhiteSpace(RelativePath))
+                {
+                    RelativePath = value;
+                }
+            }
+        }
     }
 }

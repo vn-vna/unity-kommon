@@ -9,11 +9,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         menuName = "Scheherazade/Puzzle Levels/Providers/Downloadable"
     )]
     public sealed class PuzzleLevelDownloadableProvider :
-        DownloadableResourceProvider<TextAsset>
+        DownloadableResourceProvider<TextAsset>,
+        IAsyncResourceDataTypePolicy
     {
         protected override TextAsset ConvertResource(byte[] data)
         {
             return new TextAsset(Encoding.UTF8.GetString(data));
+        }
+
+        public bool SupportsDataType(DataType dataType)
+        {
+            return dataType is DataType.Unknown or DataType.Text;
         }
     }
 }

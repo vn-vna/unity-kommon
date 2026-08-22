@@ -8,7 +8,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         menuName = "Scheherazade/Puzzle Levels/Providers/Reference Table Provider"
     )]
     public sealed class PuzzleLevelReferenceTableProvider :
-        ReferenceTableAsyncResourceProvider<TextAsset>
+        ReferenceTableAsyncResourceProvider<TextAsset>,
+        ICatalogAwareAsyncResourceProvider,
+        IAsyncResourceDataTypeResolver
     {
         [SerializeField]
         private PuzzleLevelReferenceTable _table;
@@ -25,5 +27,44 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             => _table;
 
         internal string KeyFormat => _keyFormat;
+
+        public System.Collections.Generic.IReadOnlyCollection<string> CatalogedIds =>
+            _table?.CatalogedIds ?? System.Array.Empty<string>();
+
+        public bool HasResource(IAsyncResourceId resourceId)
+        {
+            if (_table == null
+                || resourceId is not IReferenceTableAsyncResourceId referenceId)
+            {
+                return false;
+            }
+
+            return _table.HasResource(referenceId.GetResourceId(this));
+        }
+
+        public DataType GetDataType(string resourceId)
+        {
+            return _table?.GetDataType(ApplyKeyFormat(resourceId))
+                ?? DataType.Unknown;
+        }
+
+        public DataType GetDataType(IAsyncResourceId resourceId)
+        {
+            if (_table == null
+                || resourceId is not IReferenceTableAsyncResourceId referenceId)
+            {
+                return DataType.Unknown;
+            }
+
+            string resolvedId = referenceId.GetResourceId(this);
+            return _table.GetDataType(resolvedId);
+        }
+
+        private string ApplyKeyFormat(string resourceId)
+        {
+            return (_keyFormat ?? "{id}")
+                .Replace("{id}", resourceId ?? string.Empty)
+                .Replace("{0}", resourceId ?? string.Empty);
+        }
     }
 }

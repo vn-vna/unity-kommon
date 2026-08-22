@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Hapiga.Scheherazade.Common.Logging;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
@@ -19,6 +20,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         {
             public string Id;
             public TextAsset Asset;
+            public DataType DataType;
         }
 
         [SerializeField]
@@ -33,6 +35,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 #endif
 
         private Dictionary<string, TextAsset> _lookup;
+        private Dictionary<string, DataType> _typeLookup;
+        private string[] _catalogedIds = Array.Empty<string>();
+
+        private static readonly Regex PlaceholderRegex = new Regex(
+            @"(?<!\{)\{([^{}]+)\}(?!\})",
+            RegexOptions.Compiled);
+
+        public IReadOnlyCollection<string> CatalogedIds => _catalogedIds;
 
         private void OnEnable()
         {
@@ -42,24 +52,36 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         private void BuildLookup()
         {
             _lookup = new Dictionary<string, TextAsset>();
+            _typeLookup = new Dictionary<string, DataType>();
+            List<string> catalogedIds = new List<string>();
             if (_entries == null)
             {
+                _catalogedIds = Array.Empty<string>();
                 return;
             }
 
             foreach (Entry entry in _entries)
             {
-                if (!string.IsNullOrEmpty(entry.Id)
-                    && entry.Asset != null
-                    && !_lookup.ContainsKey(entry.Id))
+                if (string.IsNullOrWhiteSpace(entry.Id)
+                    || entry.Asset == null
+                    || _lookup.ContainsKey(entry.Id))
                 {
-                    _lookup[entry.Id] = entry.Asset;
+                    continue;
                 }
+
+                _lookup[entry.Id] = entry.Asset;
+                _typeLookup[entry.Id] = entry.DataType == DataType.Unknown
+                    ? DataType.Text
+                    : entry.DataType;
+                catalogedIds.Add(entry.Id);
             }
+
+            _catalogedIds = catalogedIds.ToArray();
         }
 
         public TextAsset RequestResourceById(string id)
         {
+            _lookup ??= new Dictionary<string, TextAsset>();
             if (_lookup != null
                 && _lookup.TryGetValue(id, out TextAsset asset))
             {
@@ -69,23 +91,40 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             return null;
         }
 
+        public bool HasResource(string id)
+        {
+            return !string.IsNullOrWhiteSpace(id)
+                && _lookup != null
+                && _lookup.ContainsKey(id);
+        }
+
+        public DataType GetDataType(string id)
+        {
+            return _typeLookup != null
+                && !string.IsNullOrWhiteSpace(id)
+                && _typeLookup.TryGetValue(id, out DataType dataType)
+                    ? dataType
+                    : DataType.Unknown;
+        }
+
 #if UNITY_EDITOR
         private void OnValidate()
         {
-            if (_enableEntryAutoId)
-            {
-                TriggerRefreshAutoEntryId();
-            }
+            BuildLookup();
+            ValidateEntries();
         }
 
         [ContextMenu("Refresh Ids")]
         private void TriggerRefreshAutoEntryId()
         {
-            if (string.IsNullOrEmpty(_entryAutoIdTemplate) || _entries == null)
+            if (!_enableEntryAutoId
+                || string.IsNullOrEmpty(_entryAutoIdTemplate)
+                || _entries == null)
             {
                 return;
             }
 
+            UnityEditor.Undo.RecordObject(this, "Refresh Puzzle Level IDs");
             DateTime now = DateTime.Now;
 
             for (int i = 0; i < _entries.Count; i++)
@@ -94,6 +133,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             }
 
             BuildLookup();
+            ValidateEntries();
+            UnityEditor.EditorUtility.SetDirty(this);
         }
 
         private void UpdateEntryIdAtIndex(int index, DateTime dateTime)
@@ -107,17 +148,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             if (entry.Id != newId)
             {
                 entry.Id = newId;
-                _entries[index] = entry; // Reassign struct back to list
-                UnityEditor.EditorUtility.SetDirty(this);
+                _entries[index] = entry;
             }
         }
 
         private static string FormatEntryId(string template, int index, string fileName, DateTime dateTime)
         {
-            // Token regex matches single-curly placeholders while ignoring {{ and }}
-            var placeholderRegex = new System.Text.RegularExpressions.Regex(@"(?<!\{)\{([^{}]+)\}(?!\})");
-
-            string evaluated = placeholderRegex.Replace(template, match =>
+            string evaluated = PlaceholderRegex.Replace(template, match =>
             {
                 string tag = match.Groups[1].Value.Trim();
                 return ResolvePlaceholder(tag, index, fileName, dateTime, match.Value);
@@ -174,7 +211,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
                 return offset;
             }
 
-            Debug.LogWarning($"[PuzzleLevelReferenceTable] Invalid index offset format: '{rawOffset}'");
+            QuickLog.Warning<PuzzleLevelReferenceTable>(
+                "Invalid index offset format: '{0}'",
+                rawOffset);
             return 0;
         }
 
@@ -196,7 +235,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         {
             try
             {
-                var match = System.Text.RegularExpressions.Regex.Match(input, pattern);
+                Match match = Regex.Match(input, pattern);
                 if (!match.Success) return string.Empty;
 
                 if (int.TryParse(groupIdentifier, out int groupIdx))
@@ -208,7 +247,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[PuzzleLevelReferenceTable] Invalid Regex execution for group '{groupIdentifier}': {ex.Message}");
+                QuickLog.Warning<PuzzleLevelReferenceTable>(
+                    "Invalid regex for group '{0}': {1}",
+                    groupIdentifier,
+                    ex.Message);
                 return string.Empty;
             }
         }
@@ -225,7 +267,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[PuzzleLevelReferenceTable] Invalid DateTime format '{format}': {ex.Message}");
+                QuickLog.Warning<PuzzleLevelReferenceTable>(
+                    "Invalid DateTime format '{0}': {1}",
+                    format,
+                    ex.Message);
                 return dateTime.ToString("yyMMdd-HHmmss");
             }
         }
@@ -233,6 +278,57 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         private static string UnescapeBrackets(string input)
         {
             return input.Replace("{{", "{").Replace("}}", "}");
+        }
+
+        private void ValidateEntries()
+        {
+            if (_entries == null)
+            {
+                return;
+            }
+
+            HashSet<string> ids = new HashSet<string>();
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                Entry entry = _entries[i];
+                if (string.IsNullOrWhiteSpace(entry.Id))
+                {
+                    QuickLog.Warning<PuzzleLevelReferenceTable>(
+                        "Entry {0} has an empty level ID.",
+                        i);
+                    continue;
+                }
+
+                if (!ids.Add(entry.Id))
+                {
+                    QuickLog.Error<PuzzleLevelReferenceTable>(
+                        "Duplicate level ID '{0}' at entry {1}.",
+                        entry.Id,
+                        i);
+                }
+
+                if (entry.Asset == null)
+                {
+                    QuickLog.Warning<PuzzleLevelReferenceTable>(
+                        "Entry '{0}' has no TextAsset.",
+                        entry.Id);
+                }
+
+                if (!Enum.IsDefined(typeof(DataType), entry.DataType))
+                {
+                    QuickLog.Error<PuzzleLevelReferenceTable>(
+                        "Entry '{0}' has invalid data type value {1}.",
+                        entry.Id,
+                        (int)entry.DataType);
+                }
+                else if (entry.DataType == DataType.Unknown)
+                {
+                    QuickLog.Warning<PuzzleLevelReferenceTable>(
+                        "Entry '{0}' has no explicit data type and will "
+                        + "default to Text.",
+                        entry.Id);
+                }
+            }
         }
 #endif
     }

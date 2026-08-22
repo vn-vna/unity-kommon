@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
@@ -19,22 +21,31 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         IAsyncResourceProvider<ResourceType>,
         IDownloadableResourceProvider<ResourceType>,
         ICatalogAwareAsyncResourceProvider,
-        IInvalidatableCatalog
+        IInvalidatableCatalog,
+        ISelectiveAsyncResourceCache,
+        IAsyncResourceCacheKeyProvider,
+        IAsyncResourceInterpolationTagReceiver,
+        IAsyncResourceDataTypeResolver,
+        IAsyncResourceInitializationStatus,
+        IAsyncResourceReleaseProvider<ResourceType>
         where ResourceType : UnityEngine.Object
     {
         [SerializeField]
         private int priority;
 
         [SerializeField]
-        private float timeout;
+        [Min(0.1f)]
+        private float timeout = 35f;
 
         [SerializeField]
         private float requestTimeout = 30f;
 
         [SerializeField]
+        [Min(1)]
         private int maxConcurrentDownloads = 5;
 
         [SerializeField]
+        [Min(1)]
         private int maxCacheEntries = 50;
 
         [SerializeField]
@@ -83,6 +94,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         private readonly LinkedList<string> _lruList = new();
         private readonly Dictionary<string, ActiveDownload> _activeDownloads = new();
         private readonly Queue<DownloadRequest> _pendingQueue = new();
+        private readonly Dictionary<ResourceType, int> _resourceLeaseCounts
+            = new Dictionary<ResourceType, int>();
+        private readonly Dictionary<string, HashSet<string>> _cacheKeysByResourceId
+            = new();
         private readonly object _lock = new();
         private IReadOnlyDictionary<string, string> _catalogInterpolationTags;
         private uint _catalogGeneration;
@@ -92,6 +107,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         {
             public string Url;
             public string ResourceId;
+            public string CacheKey;
             public ResourceLoadingHandler<ResourceType> Handler;
         }
 
@@ -103,15 +119,18 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             public float LastProgress;
             public string Url;
             public string ResourceId;
+            public string CacheKey;
+            public volatile bool IsCanceled;
         }
 
         public int Priority => priority;
         public bool IsInitialized => _isInitialized;
-        public float ResourceLoadingTimeout => timeout;
+        public Exception InitializationException { get; private set; }
+        public float ResourceLoadingTimeout => timeout > 0f ? timeout : 35f;
         public float RequestTimeout => requestTimeout;
         public float CacheTTL => cacheTTL;
-        public int MaxConcurrentDownloads => maxConcurrentDownloads;
-        public int MaxCacheEntries => maxCacheEntries;
+        public int MaxConcurrentDownloads => Mathf.Max(1, maxConcurrentDownloads);
+        public int MaxCacheEntries => Mathf.Max(1, maxCacheEntries);
         public string CacheSubFolder => cacheSubFolder;
         public CacheBasePathType CacheBasePath => cacheBasePath;
         public CustomDownloadHeader[] Headers => headers;
@@ -122,27 +141,60 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public virtual void Initialize()
         {
+            uint generation = ++_catalogGeneration;
+            AbortActiveCatalogRequest();
+            CancelAllRequests(new OperationCanceledException(
+                "Download provider was reinitialized."));
+            _isInitialized = false;
+            InitializationException = null;
             _catalogData = new CatalogData();
-            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
-            {
-                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
-                uint gen = ++_catalogGeneration;
-
-                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Catalog load dispatched [gen={0}] URL: {1}",
-                    gen, catalogUrl
-                );
-
-                Dispatcher.DispatchCoroutine(
-                    LoadCatalogCoroutine(catalogUrl, gen)
-                );
-            }
-
             _cachedDiskBasePath = cacheBasePath == CacheBasePathType.PersistentDataPath
                 ? Application.persistentDataPath
                 : Application.temporaryCachePath;
 
-            _isInitialized = true;
+            if (_forceRequiredCatalog
+                && (!_useCatalog || string.IsNullOrWhiteSpace(_catalogFileName)))
+            {
+                HandleInitializationFailure(
+                    generation,
+                    new InvalidOperationException(
+                        "A required catalog must be enabled and have a file name."
+                    ));
+                return;
+            }
+
+            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
+            {
+                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
+                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog load dispatched [gen={0}] URL: {1}",
+                    generation, catalogUrl
+                );
+
+                bool dispatched = Dispatcher.TryDispatchCoroutine(
+                    CoroutineExceptionGuard.Run(
+                        LoadCatalogCoroutine(
+                            catalogUrl,
+                            generation,
+                            _forceRequiredCatalog),
+                        exception => HandleInitializationFailure(
+                            generation,
+                            exception)),
+                    out _);
+                if (!dispatched)
+                {
+                    HandleInitializationFailure(
+                        generation,
+                        new InvalidOperationException(
+                            "Catalog initialization requires a Dispatcher instance."
+                        ));
+                    return;
+                }
+            }
+
+            _isInitialized = !_forceRequiredCatalog
+                || !_useCatalog
+                || string.IsNullOrEmpty(_catalogFileName);
 
             QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
                 "Downloadable resource provider initialized."
@@ -154,6 +206,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             ResourceLoadingHandler<ResourceType> handler
         )
         {
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return;
+            }
+
             if (!_isInitialized)
             {
                 handler.LoadingStatus = LoadingStatus.Completed;
@@ -190,6 +248,17 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(id.ResourceId))
+            {
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Failed;
+                handler.ProviderSource = GetType().Name;
+                handler.Exception = new ArgumentException(
+                    "Resource ID cannot be null, empty, or whitespace.",
+                    nameof(id));
+                return;
+            }
+
             string url = ResolveDownloadUrl(id.ResourceId, downloadableId);
             if (string.IsNullOrEmpty(url))
             {
@@ -207,52 +276,86 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             handler.ProviderSource = GetType().Name;
 
             string resourceId = id.ResourceId;
+            string cacheKey = BuildCacheKey(resourceId, url);
+            RegisterCacheKey(resourceId, cacheKey);
 
+            byte[] memoryData = null;
             lock (_lock)
             {
-                if (_memoryCache.TryGetValue(resourceId, out (byte[] data, DateTime timestamp) cached))
+                if (_memoryCache.TryGetValue(
+                        cacheKey,
+                        out (byte[] data, DateTime timestamp) cached))
                 {
                     if (IsCacheValid(cached.timestamp))
                     {
-                        TouchLru(resourceId);
-
-                        ResourceType resource = ConvertResource(cached.data);
-                        handler.Resouce = resource;
-                        handler.LoadingStatus = LoadingStatus.Completed;
-                        handler.ResourceStatus = ResourceStatus.Loaded;
-                        return;
+                        TouchLru(cacheKey);
+                        memoryData = cached.data;
                     }
-
-                    EvictFromMemory(resourceId);
+                    else
+                    {
+                        EvictFromMemory(cacheKey);
+                    }
                 }
             }
 
-            if (TryLoadFromDiskCache(resourceId, handler))
+            if (memoryData != null)
+            {
+                Exception cacheException;
+                if (TryValidateContentHash(
+                        resourceId,
+                        memoryData,
+                        out cacheException)
+                    && TryCompleteFromCachedBytes(
+                        handler,
+                        memoryData,
+                        url,
+                        out cacheException))
+                {
+                    return;
+                }
+
+                QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
+                    "Discarding invalid memory cache entry for '{0}': {1}",
+                    resourceId,
+                    cacheException?.Message ?? "Unknown cache conversion error");
+                lock (_lock)
+                {
+                    EvictFromMemory(cacheKey);
+                }
+
+                DeleteDiskCacheEntry(cacheKey);
+            }
+
+            if (TryLoadFromDiskCache(cacheKey, resourceId, handler))
             {
                 return;
             }
 
             lock (_lock)
             {
-                if (_activeDownloads.TryGetValue(resourceId, out ActiveDownload existing))
+                if (_activeDownloads.TryGetValue(cacheKey, out ActiveDownload existing))
                 {
                     existing.Handlers.Add(handler);
                     return;
                 }
 
-                if (_activeDownloads.Count >= maxConcurrentDownloads)
+                if (_activeDownloads.Count >= MaxConcurrentDownloads)
                 {
                     _pendingQueue.Enqueue(new DownloadRequest
                     {
                         Url = url,
                         ResourceId = resourceId,
+                        CacheKey = cacheKey,
                         Handler = handler
                     });
                     return;
                 }
             }
 
-            StartDownload(url, resourceId, handler);
+            if (!StartDownload(url, resourceId, cacheKey, handler))
+            {
+                ProcessQueue();
+            }
         }
 
         public IReadOnlyCollection<string> CatalogedIds =>
@@ -260,6 +363,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public bool HasResource(IAsyncResourceId resourceId)
         {
+            if (resourceId == null)
+            {
+                return false;
+            }
+
             if (_catalogData == null || !_catalogData.IsLoaded)
             {
                 return !_forceRequiredCatalog;
@@ -271,56 +379,60 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         public DataType GetDataType(string resourceId) =>
             _catalogData?.GetDataType(resourceId) ?? DataType.Unknown;
 
+        public DataType GetDataType(IAsyncResourceId resourceId)
+        {
+            return GetDataType(resourceId?.ResourceId);
+        }
+
+        public string GetCacheKey(IAsyncResourceId resourceId)
+        {
+            if (resourceId is not IDownloadableAsyncResourceId downloadableId)
+            {
+                return resourceId?.ResourceId;
+            }
+
+            string url = ResolveDownloadUrl(
+                resourceId.ResourceId,
+                downloadableId);
+            return BuildCacheKey(resourceId.ResourceId, url);
+        }
+
         public void SetCatalogInterpolationTags(
             IReadOnlyDictionary<string, string> tags)
         {
-            _catalogInterpolationTags = tags;
+            if (tags == null)
+            {
+                _catalogInterpolationTags = null;
+                return;
+            }
+
+            Dictionary<string, string> snapshot
+                = new Dictionary<string, string>(tags.Count);
+            foreach (KeyValuePair<string, string> tag in tags)
+            {
+                snapshot[tag.Key] = tag.Value ?? string.Empty;
+            }
+
+            _catalogInterpolationTags = snapshot;
+        }
+
+        public void SetInterpolationTags(
+            IReadOnlyDictionary<string, string> tags)
+        {
+            SetCatalogInterpolationTags(tags);
         }
 
         public void InvalidateCatalog(CatalogInvalidationMode mode)
         {
-            QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                "Catalog invalidation requested [mode={0}].",
-                mode
-            );
-
-            _catalogData?.Reset();
-
-            if (_activeCatalogRequest != null)
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    InvalidateCatalogCoroutine(mode),
+                    HandleCatalogInvalidationFailure),
+                out _);
+            if (!dispatched)
             {
-                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Aborting in-flight catalog request."
-                );
-                try { _activeCatalogRequest.Abort(); } catch { }
-                _activeCatalogRequest = null;
-            }
-
-            if (mode == CatalogInvalidationMode.Aggressive)
-            {
-                lock (_lock)
-                {
-                    _memoryCache.Clear();
-                    _lruList.Clear();
-                }
-
-                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Aggressive mode — memory cache cleared."
-                );
-            }
-
-            uint gen = ++_catalogGeneration;
-            if (_useCatalog && !string.IsNullOrEmpty(_catalogFileName))
-            {
-                string catalogUrl = ResolveCatalogUrl(_catalogFileName, BaseUrl);
-
-                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Catalog re-fetch dispatched [gen={0}] URL: {1}",
-                    gen, catalogUrl
-                );
-
-                Dispatcher.DispatchCoroutine(
-                    LoadCatalogCoroutine(catalogUrl, gen)
-                );
+                QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
+                    "Catalog invalidation requires a Dispatcher instance.");
             }
         }
 
@@ -334,25 +446,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
             _catalogData?.Reset();
 
-            if (_activeCatalogRequest != null)
-            {
-                QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Aborting in-flight catalog request."
-                );
-                try { _activeCatalogRequest.Abort(); } catch { }
-                _activeCatalogRequest = null;
-            }
+            AbortActiveCatalogRequest();
 
             if (mode == CatalogInvalidationMode.Aggressive)
             {
-                lock (_lock)
-                {
-                    _memoryCache.Clear();
-                    _lruList.Clear();
-                }
+                ClearCache();
 
                 QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
-                    "Aggressive mode — memory cache cleared."
+                    "Aggressive mode — memory and disk caches cleared."
                 );
             }
 
@@ -366,7 +467,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                     gen, catalogUrl
                 );
 
-                yield return LoadCatalogCoroutine(catalogUrl, gen);
+                yield return LoadCatalogCoroutine(catalogUrl, gen, true);
             }
         }
 
@@ -384,7 +485,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 if (!string.IsNullOrEmpty(relativePath))
                 {
                     return ApplyInterpolationTags(
-                        AcquireBaseUrl() + relativePath);
+                        CombineUrl(AcquireBaseUrl(), relativePath));
                 }
             }
 
@@ -395,14 +496,17 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             return ApplyInterpolationTags(
-                AcquireBaseUrl() + string.Format(_urlFormat, resourceId));
+                CombineUrl(
+                    AcquireBaseUrl(),
+                    string.Format(_urlFormat, resourceId)));
         }
 
         protected virtual string ResolveCatalogUrl(
             string catalogFileName,
             string baseUrl)
         {
-            return ApplyInterpolationTags(baseUrl + catalogFileName);
+            return ApplyInterpolationTags(
+                CombineUrl(baseUrl, catalogFileName));
         }
 
         private string ApplyInterpolationTags(string url)
@@ -412,18 +516,40 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 return url;
             }
 
-            if (_catalogInterpolationTags == null
-                || _catalogInterpolationTags.Count == 0)
+            if (_catalogInterpolationTags != null)
             {
-                return url;
+                foreach (KeyValuePair<string, string> kvp
+                         in _catalogInterpolationTags)
+                {
+                    url = url.Replace($"{{{kvp.Key}}}", kvp.Value);
+                }
             }
 
-            foreach (KeyValuePair<string, string> kvp in _catalogInterpolationTags)
+            int unresolvedTagStart = url.IndexOf('{');
+            if (unresolvedTagStart >= 0 && url.IndexOf('}', unresolvedTagStart) > 0)
             {
-                url = url.Replace($"{{{kvp.Key}}}", kvp.Value);
+                throw new FormatException(
+                    $"URL contains an unresolved interpolation tag: '{url}'.");
             }
 
             return url;
+        }
+
+        private static string CombineUrl(string baseUrl, string relativePath)
+        {
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                return relativePath;
+            }
+
+            if (Uri.TryCreate(relativePath, UriKind.Absolute, out Uri absoluteUri))
+            {
+                return absoluteUri.AbsoluteUri;
+            }
+
+            return baseUrl.TrimEnd('/')
+                + "/"
+                + (relativePath ?? string.Empty).TrimStart('/');
         }
 
 
@@ -433,7 +559,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             yield return LoadCatalogCoroutine(url, gen);
         }
 
-        private IEnumerator LoadCatalogCoroutine(string url, uint generation)
+        private IEnumerator LoadCatalogCoroutine(
+            string url,
+            uint generation,
+            bool throwOnFailure = false)
         {
             QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
                 "Catalog download started [gen={0}] URL: {1}",
@@ -453,7 +582,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             yield return webRequest.SendWebRequest();
-            _activeCatalogRequest = null;
+            if (ReferenceEquals(_activeCatalogRequest, webRequest))
+            {
+                _activeCatalogRequest = null;
+            }
 
             if (generation != _catalogGeneration)
             {
@@ -475,18 +607,41 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
                 _catalogData.LoadFromBytes(data);
 
+                if (_forceRequiredCatalog)
+                {
+                    _isInitialized = _catalogData.IsLoaded;
+                }
+
                 QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
                     "Catalog parsed [gen={0}] — {1} entries loaded.",
                     generation,
                     _catalogData?.CatalogedIds?.Count ?? 0
                 );
+
+                if (throwOnFailure)
+                {
+                    _catalogData.ThrowIfFailed(
+                        $"Downloadable catalog refresh failed for '{url}'.");
+                }
             }
             else
             {
+                if (_forceRequiredCatalog)
+                {
+                    _isInitialized = false;
+                }
+
                 QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
                     "Failed to download catalog [gen={0}] from '{1}': {2}",
                     generation, url, webRequest.error ?? "Unknown error"
                 );
+
+                if (throwOnFailure)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to download catalog '{url}': "
+                        + (webRequest.error ?? "Unknown error"));
+                }
             }
         }
 
@@ -498,6 +653,34 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             }
 
             return (DateTime.UtcNow - timestamp).TotalSeconds < cacheTTL;
+        }
+
+        private bool TryCompleteFromCachedBytes(
+            ResourceLoadingHandler<ResourceType> handler,
+            byte[] data,
+            string source,
+            out Exception exception)
+        {
+            try
+            {
+                ResourceType resource = ConvertResource(data);
+                if (resource == null)
+                {
+                    throw new InvalidOperationException(
+                        $"ConvertResource returned null for '{source}'.");
+                }
+
+                handler.Resouce = resource;
+                handler.LoadingStatus = LoadingStatus.Completed;
+                handler.ResourceStatus = ResourceStatus.Loaded;
+                exception = null;
+                return true;
+            }
+            catch (Exception caughtException)
+            {
+                exception = caughtException;
+                return false;
+            }
         }
 
         private void TouchLru(string key)
@@ -514,7 +697,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         private void AddToMemoryCache(string key, byte[] data)
         {
-            while (_memoryCache.Count >= maxCacheEntries && _lruList.Count > 0)
+            while (_memoryCache.Count >= MaxCacheEntries
+                && _lruList.Count > 0)
             {
                 string oldest = _lruList.First.Value;
                 _lruList.RemoveFirst();
@@ -526,11 +710,18 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         }
 
         private bool TryLoadFromDiskCache(
+            string cacheKey,
             string resourceId,
             ResourceLoadingHandler<ResourceType> handler
         )
         {
-            string filePath = GetDiskCachePath(resourceId);
+            if (handler.IsCancellationRequested)
+            {
+                handler.Cancel();
+                return true;
+            }
+
+            string filePath = GetDiskCachePath(cacheKey);
             if (!File.Exists(filePath))
             {
                 return false;
@@ -542,7 +733,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
                 if (fileData.Length < 8)
                 {
-                    File.Delete(filePath);
+                    DeleteDiskCacheEntry(cacheKey);
                     return false;
                 }
 
@@ -551,19 +742,38 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
                 if (!IsCacheValid(timestamp))
                 {
-                    File.Delete(filePath);
+                    DeleteDiskCacheEntry(cacheKey);
                     return false;
                 }
 
                 byte[] data = new byte[fileData.Length - 8];
                 Array.Copy(fileData, 8, data, 0, data.Length);
 
+                if (!TryValidateContentHash(
+                        resourceId,
+                        data,
+                        out Exception hashException))
+                {
+                    QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
+                        "Discarding invalid disk cache entry for '{0}': {1}",
+                        resourceId,
+                        hashException.Message);
+                    DeleteDiskCacheEntry(cacheKey);
+                    return false;
+                }
+
                 lock (_lock)
                 {
-                    AddToMemoryCache(resourceId, data);
+                    AddToMemoryCache(cacheKey, data);
                 }
 
                 ResourceType resource = ConvertResource(data);
+                if (resource == null)
+                {
+                    DeleteDiskCacheEntry(cacheKey);
+                    return false;
+                }
+
                 handler.Resouce = resource;
                 handler.LoadingStatus = LoadingStatus.Completed;
                 handler.ResourceStatus = ResourceStatus.Loaded;
@@ -575,14 +785,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                     "Failed to load resource '{0}' from disk cache: {1}",
                     resourceId, ex.Message
                 );
-                try { File.Delete(filePath); } catch { }
+                DeleteDiskCacheEntry(cacheKey);
                 return false;
             }
         }
 
-        private void StartDownload(
+        private bool StartDownload(
             string url,
             string resourceId,
+            string cacheKey,
             ResourceLoadingHandler<ResourceType> handler
         )
         {
@@ -591,15 +802,37 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 Handlers = new List<ResourceLoadingHandler<ResourceType>> { handler },
                 StartTime = Time.realtimeSinceStartup,
                 Url = url,
-                ResourceId = resourceId
+                ResourceId = resourceId,
+                CacheKey = cacheKey
             };
 
             lock (_lock)
             {
-                _activeDownloads[resourceId] = download;
+                _activeDownloads[cacheKey] = download;
             }
 
-            Dispatcher.DispatchCoroutine(DownloadCoroutine(download));
+            bool dispatched = Dispatcher.TryDispatchCoroutine(
+                CoroutineExceptionGuard.Run(
+                    DownloadCoroutine(download),
+                    exception => HandleDownloadCoroutineFailure(
+                        download,
+                        exception)),
+                out _);
+            if (dispatched)
+            {
+                return true;
+            }
+
+            lock (_lock)
+            {
+                _activeDownloads.Remove(cacheKey);
+            }
+
+            FailHandlers(
+                download,
+                new InvalidOperationException(
+                    "Download requires a Dispatcher instance."));
+            return false;
         }
 
         private IEnumerator DownloadCoroutine(ActiveDownload download)
@@ -621,6 +854,25 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
             while (!operation.isDone)
             {
+                if (download.IsCanceled)
+                {
+                    webRequest.Abort();
+                    yield break;
+                }
+
+                RemoveCanceledHandlers(download);
+                if (download.Handlers.Count == 0)
+                {
+                    webRequest.Abort();
+                    lock (_lock)
+                    {
+                        _activeDownloads.Remove(download.CacheKey);
+                    }
+
+                    ProcessQueue();
+                    yield break;
+                }
+
                 float elapsed = Time.realtimeSinceStartup - download.StartTime;
                 download.LastProgress = webRequest.downloadProgress;
 
@@ -636,6 +888,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
                 }
 
                 yield return null;
+            }
+
+            if (download.IsCanceled)
+            {
+                yield break;
             }
 
             foreach (ResourceLoadingHandler<ResourceType> h in download.Handlers)
@@ -658,7 +915,13 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         {
             lock (_lock)
             {
-                _activeDownloads.Remove(download.ResourceId);
+                _activeDownloads.Remove(download.CacheKey);
+            }
+
+            if (download.IsCanceled)
+            {
+                ProcessQueue();
+                return;
             }
 
             if (timedOut)
@@ -676,9 +939,44 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             {
                 byte[] data = webRequest.downloadHandler.data;
 
+                if (!TryValidateContentHash(
+                        download.ResourceId,
+                        data,
+                        out Exception hashException))
+                {
+                    FailHandlers(download, hashException);
+                    ProcessQueue();
+                    return;
+                }
+
+                ResourceType resource;
                 try
                 {
-                    CacheToDisk(download.ResourceId, data);
+                    resource = ConvertResource(data);
+                    if (resource == null)
+                    {
+                        throw new InvalidOperationException(
+                            $"ConvertResource returned null for "
+                            + $"'{download.Url}'.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
+                        "Failed to convert downloaded resource '{0}': {1}",
+                        download.Url,
+                        ex.Message);
+                    FailHandlers(download, ex);
+                    ProcessQueue();
+                    return;
+                }
+
+                try
+                {
+                    CacheToDisk(
+                        download.ResourceId,
+                        download.CacheKey,
+                        data);
                 }
                 catch (Exception ex)
                 {
@@ -690,23 +988,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
                 lock (_lock)
                 {
-                    AddToMemoryCache(download.ResourceId, data);
+                    AddToMemoryCache(download.CacheKey, data);
                 }
 
-                try
-                {
-                    ResourceType resource = ConvertResource(data);
-                    CompleteHandlers(download, resource);
-                }
-                catch (Exception ex)
-                {
-                    QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
-                        "Failed to convert downloaded resource '{0}': {1}",
-                        download.Url, ex.Message
-                    );
-
-                    FailHandlers(download, ex);
-                }
+                CompleteHandlers(download, resource);
             }
             else
             {
@@ -725,9 +1010,30 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             ProcessQueue();
         }
 
-        private void CacheToDisk(string resourceId, byte[] data)
+        private void HandleDownloadCoroutineFailure(
+            ActiveDownload download,
+            Exception exception)
         {
-            string filePath = GetDiskCachePath(resourceId);
+            lock (_lock)
+            {
+                _activeDownloads.Remove(download.CacheKey);
+            }
+
+            download.Request = null;
+            FailHandlers(
+                download,
+                new InvalidOperationException(
+                    $"Download coroutine failed for '{download.Url}'.",
+                    exception));
+            ProcessQueue();
+        }
+
+        private void CacheToDisk(
+            string resourceId,
+            string cacheKey,
+            byte[] data)
+        {
+            string filePath = GetDiskCachePath(cacheKey);
             string dir = Path.GetDirectoryName(filePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
@@ -738,16 +1044,48 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
             BitConverter.GetBytes(DateTime.UtcNow.Ticks).CopyTo(fileData, 0);
             data.CopyTo(fileData, 8);
 
-            File.WriteAllBytes(filePath, fileData);
+            DiskCacheIdentity.Write(filePath, resourceId, fileData);
         }
 
         private void CompleteHandlers(ActiveDownload download, ResourceType resource)
         {
+            if (resource == null)
+            {
+                FailHandlers(
+                    download,
+                    new InvalidOperationException(
+                        $"ConvertResource returned null for '{download.Url}'."));
+                return;
+            }
+
+            int completedHandlerCount = 0;
             foreach (ResourceLoadingHandler<ResourceType> h in download.Handlers)
             {
+                if (h.IsCancellationRequested)
+                {
+                    h.Cancel();
+                    continue;
+                }
+
                 h.Resouce = resource;
                 h.LoadingStatus = LoadingStatus.Completed;
                 h.ResourceStatus = ResourceStatus.Loaded;
+                completedHandlerCount++;
+            }
+
+            if (completedHandlerCount == 0)
+            {
+                DestroyRuntimeResource(resource);
+                return;
+            }
+
+            lock (_lock)
+            {
+                _resourceLeaseCounts.TryGetValue(
+                    resource,
+                    out int existingLeaseCount);
+                _resourceLeaseCounts[resource]
+                    = existingLeaseCount + completedHandlerCount;
             }
         }
 
@@ -755,8 +1093,28 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         {
             foreach (ResourceLoadingHandler<ResourceType> h in download.Handlers)
             {
+                if (h.IsCompleted)
+                {
+                    continue;
+                }
+
+                if (exception is OperationCanceledException)
+                {
+                    h.Cancel();
+                    h.Exception = exception;
+                    continue;
+                }
+
+                if (h.IsCancellationRequested)
+                {
+                    h.Cancel();
+                    continue;
+                }
+
                 h.LoadingStatus = LoadingStatus.Completed;
-                h.ResourceStatus = ResourceStatus.Failed;
+                h.ResourceStatus = exception is OperationCanceledException
+                    ? ResourceStatus.Canceled
+                    : ResourceStatus.Failed;
                 h.Exception = exception;
             }
         }
@@ -765,69 +1123,168 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
         {
             lock (_lock)
             {
-                while (_pendingQueue.Count > 0 && _activeDownloads.Count < maxConcurrentDownloads)
+                while (_pendingQueue.Count > 0
+                    && _activeDownloads.Count < MaxConcurrentDownloads)
                 {
                     DownloadRequest request = _pendingQueue.Dequeue();
 
-                    if (_activeDownloads.TryGetValue(request.ResourceId, out ActiveDownload existing))
+                    if (request.Handler.IsCancellationRequested)
+                    {
+                        request.Handler.Cancel();
+                        continue;
+                    }
+
+                    if (_activeDownloads.TryGetValue(
+                            request.CacheKey,
+                            out ActiveDownload existing))
                     {
                         existing.Handlers.Add(request.Handler);
                         continue;
                     }
 
-                    StartDownload(request.Url, request.ResourceId, request.Handler);
+                    StartDownload(
+                        request.Url,
+                        request.ResourceId,
+                        request.CacheKey,
+                        request.Handler);
                 }
+            }
+        }
+
+        private static void RemoveCanceledHandlers(ActiveDownload download)
+        {
+            for (int i = download.Handlers.Count - 1; i >= 0; i--)
+            {
+                ResourceLoadingHandler<ResourceType> handler
+                    = download.Handlers[i];
+                if (!handler.IsCancellationRequested)
+                {
+                    continue;
+                }
+
+                handler.Cancel();
+                download.Handlers.RemoveAt(i);
             }
         }
 
         private string GetDiskCachePath(string resourceId)
         {
+            string cacheRoot = GetDiskCacheRoot();
+            string fileName = ComputeStableCacheFileName(resourceId);
+            return Path.Combine(cacheRoot, fileName);
+        }
+
+        private string GetDiskCacheRoot()
+        {
             string basePath = _cachedDiskBasePath
                 ?? (cacheBasePath == CacheBasePathType.PersistentDataPath
                     ? Application.persistentDataPath
                     : Application.temporaryCachePath);
+            string subFolder = string.IsNullOrWhiteSpace(cacheSubFolder)
+                ? "downloadable_cache"
+                : cacheSubFolder.Trim();
+            string fullBasePath = Path.GetFullPath(basePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string cacheRoot = Path.GetFullPath(
+                Path.Combine(fullBasePath, subFolder));
+            string requiredPrefix = fullBasePath + Path.DirectorySeparatorChar;
+            if (!cacheRoot.StartsWith(
+                    requiredPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Download cache subfolder must remain inside the selected "
+                    + "cache base path.");
+            }
 
-            string sanitized = SanitizeFileName(resourceId);
-            return Path.Combine(basePath, cacheSubFolder, sanitized);
+            return cacheRoot;
         }
 
-        private static string SanitizeFileName(string name)
+        private bool TryValidateContentHash(
+            string resourceId,
+            byte[] data,
+            out Exception exception)
         {
-            if (string.IsNullOrEmpty(name))
+            return CatalogContentHash.TryValidate(
+                resourceId,
+                data,
+                _catalogData?.GetContentHash(resourceId),
+                out exception);
+        }
+
+        private void DeleteDiskCacheEntry(string cacheKey)
+        {
+            try
+            {
+                string filePath = GetDiskCachePath(cacheKey);
+                DiskCacheIdentity.Delete(filePath);
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Warning<DownloadableResourceProvider<ResourceType>>(
+                    "Failed to delete disk cache entry '{0}': {1}",
+                    cacheKey,
+                    exception.Message);
+            }
+        }
+
+        private static string ComputeStableCacheFileName(string cacheKey)
+        {
+            if (string.IsNullOrEmpty(cacheKey))
             {
                 return "_empty";
             }
 
-            char[] invalid = Path.GetInvalidFileNameChars();
-            char[] chars = name.ToCharArray();
-            for (int i = 0; i < chars.Length; i++)
+            using SHA256 sha256 = SHA256.Create();
+            byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(cacheKey));
+            StringBuilder builder = new StringBuilder(hash.Length * 2);
+            for (int i = 0; i < hash.Length; i++)
             {
-                if (Array.IndexOf(invalid, chars[i]) >= 0)
-                {
-                    chars[i] = '_';
-                }
+                builder.Append(hash[i].ToString("x2"));
             }
 
-            return new string(chars);
+            return builder.ToString();
+        }
+
+        private string BuildCacheKey(string resourceId, string url)
+        {
+            string contentHash = _catalogData?.GetContentHash(resourceId)
+                ?? string.Empty;
+            return $"{resourceId ?? string.Empty}\n{url ?? string.Empty}\n{contentHash}";
+        }
+
+        private void RegisterCacheKey(string resourceId, string cacheKey)
+        {
+            lock (_lock)
+            {
+                if (!_cacheKeysByResourceId.TryGetValue(
+                        resourceId,
+                        out HashSet<string> keys))
+                {
+                    keys = new HashSet<string>(StringComparer.Ordinal);
+                    _cacheKeysByResourceId[resourceId] = keys;
+                }
+
+                keys.Add(cacheKey);
+            }
         }
 
         public void ClearCache()
         {
+            CancelAllRequests(
+                new OperationCanceledException(
+                    "Download requests were canceled because the cache was cleared."));
+
             lock (_lock)
             {
                 _memoryCache.Clear();
                 _lruList.Clear();
+                _cacheKeysByResourceId.Clear();
             }
 
             try
             {
-                string folder = Path.Combine(
-                    _cachedDiskBasePath
-                        ?? (cacheBasePath == CacheBasePathType.PersistentDataPath
-                            ? Application.persistentDataPath
-                            : Application.temporaryCachePath),
-                    cacheSubFolder
-                );
+                string folder = GetDiskCacheRoot();
 
                 if (Directory.Exists(folder))
                 {
@@ -847,46 +1304,322 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
 
         public void ClearCache(string resourceId)
         {
+            CancelRequestsForResource(
+                resourceId,
+                new OperationCanceledException(
+                    $"Download for '{resourceId}' was canceled because its "
+                    + "cache entry was cleared."
+                )
+            );
+
+            string[] cacheKeys;
             lock (_lock)
             {
-                EvictFromMemory(resourceId);
-            }
-
-            try
-            {
-                string filePath = GetDiskCachePath(resourceId);
-                if (File.Exists(filePath))
+                if (!_cacheKeysByResourceId.TryGetValue(
+                        resourceId,
+                        out HashSet<string> registeredKeys))
                 {
-                    File.Delete(filePath);
+                    cacheKeys = Array.Empty<string>();
+                }
+                else
+                {
+                    cacheKeys = new string[registeredKeys.Count];
+                    registeredKeys.CopyTo(cacheKeys);
+                    _cacheKeysByResourceId.Remove(resourceId);
+                }
+
+                for (int i = 0; i < cacheKeys.Length; i++)
+                {
+                    EvictFromMemory(cacheKeys[i]);
                 }
             }
-            catch (Exception ex)
+
+            for (int i = 0; i < cacheKeys.Length; i++)
+            {
+                DeleteDiskCacheEntry(cacheKeys[i]);
+            }
+
+            DeletePersistedCacheEntries(resourceId);
+        }
+
+        public virtual void ReleaseResource(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            bool shouldDestroy = true;
+            lock (_lock)
+            {
+                if (_resourceLeaseCounts.TryGetValue(
+                        resource,
+                        out int leaseCount))
+                {
+                    if (leaseCount > 1)
+                    {
+                        _resourceLeaseCounts[resource] = leaseCount - 1;
+                        shouldDestroy = false;
+                    }
+                    else
+                    {
+                        _resourceLeaseCounts.Remove(resource);
+                    }
+                }
+            }
+
+            if (shouldDestroy)
+            {
+                DestroyRuntimeResource(resource);
+            }
+        }
+
+        private void DeletePersistedCacheEntries(string resourceId)
+        {
+            try
+            {
+                string cacheRoot = GetDiskCacheRoot();
+                if (!Directory.Exists(cacheRoot))
+                {
+                    return;
+                }
+
+                DiskCacheIdentity.DeleteByResourceId(
+                    cacheRoot,
+                    resourceId);
+            }
+            catch (Exception exception)
             {
                 QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
-                    "Failed to clear cached resource '{0}': {1}",
-                    resourceId, ex.Message
-                );
+                    "Failed to clear persisted cache for '{0}': {1}",
+                    resourceId,
+                    exception.Message);
             }
         }
 
         protected virtual void OnDisable()
         {
+            _catalogGeneration++;
+            AbortActiveCatalogRequest();
+
+            CancelAllRequests(
+                new OperationCanceledException(
+                    "Download provider was disabled."));
+            ReleaseAllLeasedResources();
+            _isInitialized = false;
+            InitializationException = null;
+        }
+
+        private void HandleInitializationFailure(
+            uint generation,
+            Exception exception)
+        {
+            if (generation != _catalogGeneration)
+            {
+                return;
+            }
+
+            InitializationException = exception;
+            _isInitialized = false;
+            QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
+                "Downloadable provider initialization failed: {0}",
+                exception);
+        }
+
+        private void AbortActiveCatalogRequest()
+        {
+            if (_activeCatalogRequest == null)
+            {
+                return;
+            }
+
+            QuickLog.Debug<DownloadableResourceProvider<ResourceType>>(
+                "Aborting in-flight catalog request."
+            );
+            try
+            {
+                _activeCatalogRequest.Abort();
+            }
+            catch
+            {
+            }
+
+            _activeCatalogRequest = null;
+        }
+
+        private static void HandleCatalogInvalidationFailure(
+            Exception exception)
+        {
+            QuickLog.Error<DownloadableResourceProvider<ResourceType>>(
+                "Downloadable catalog invalidation failed: {0}",
+                exception);
+        }
+
+        private static void DestroyRuntimeResource(ResourceType resource)
+        {
+            if (resource == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(resource);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(resource);
+            }
+        }
+
+        private void ReleaseAllLeasedResources()
+        {
+            List<ResourceType> resources;
             lock (_lock)
             {
-                foreach (ActiveDownload download in _activeDownloads.Values)
-                {
-                    try
-                    {
-                        download.Request?.Abort();
-                    }
-                    catch
-                    {
-                    }
-                }
+                resources = new List<ResourceType>(_resourceLeaseCounts.Keys);
+                _resourceLeaseCounts.Clear();
+            }
 
+            for (int i = 0; i < resources.Count; i++)
+            {
+                DestroyRuntimeResource(resources[i]);
+            }
+        }
+
+#if UNITY_EDITOR
+        protected virtual void OnValidate()
+        {
+            timeout = Mathf.Max(0.1f, timeout);
+            requestTimeout = Mathf.Max(0.1f, requestTimeout);
+            maxConcurrentDownloads = Mathf.Max(1, maxConcurrentDownloads);
+            maxCacheEntries = Mathf.Max(1, maxCacheEntries);
+            cacheTTL = Mathf.Max(0f, cacheTTL);
+            if (string.IsNullOrWhiteSpace(cacheSubFolder))
+            {
+                cacheSubFolder = "downloadable_cache";
+            }
+
+            if (string.IsNullOrWhiteSpace(_urlFormat))
+            {
+                _urlFormat = "{0}";
+            }
+        }
+#endif
+
+        private void CancelAllRequests(Exception exception)
+        {
+            List<ActiveDownload> activeDownloads;
+            List<DownloadRequest> pendingRequests;
+
+            lock (_lock)
+            {
+                activeDownloads = new List<ActiveDownload>(
+                    _activeDownloads.Values);
+                pendingRequests = new List<DownloadRequest>(_pendingQueue);
                 _activeDownloads.Clear();
                 _pendingQueue.Clear();
             }
+
+            foreach (ActiveDownload download in activeDownloads)
+            {
+                download.IsCanceled = true;
+                try
+                {
+                    download.Request?.Abort();
+                }
+                catch
+                {
+                }
+
+                FailHandlers(download, exception);
+            }
+
+            foreach (DownloadRequest request in pendingRequests)
+            {
+                if (request.Handler.IsCancellationRequested)
+                {
+                    request.Handler.Cancel();
+                    continue;
+                }
+
+                request.Handler.LoadingStatus = LoadingStatus.Completed;
+                request.Handler.ResourceStatus = ResourceStatus.Canceled;
+                request.Handler.Exception = exception;
+            }
+        }
+
+        private void CancelRequestsForResource(
+            string resourceId,
+            Exception exception)
+        {
+            List<ActiveDownload> activeDownloads
+                = new List<ActiveDownload>();
+            List<DownloadRequest> pendingRequests
+                = new List<DownloadRequest>();
+
+            lock (_lock)
+            {
+                List<string> activeKeys = new List<string>();
+                foreach (KeyValuePair<string, ActiveDownload> pair
+                    in _activeDownloads)
+                {
+                    if (!string.Equals(
+                            pair.Value.ResourceId,
+                            resourceId,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    pair.Value.IsCanceled = true;
+                    activeDownloads.Add(pair.Value);
+                    activeKeys.Add(pair.Key);
+                }
+
+                for (int i = 0; i < activeKeys.Count; i++)
+                {
+                    _activeDownloads.Remove(activeKeys[i]);
+                }
+
+                int pendingCount = _pendingQueue.Count;
+                for (int i = 0; i < pendingCount; i++)
+                {
+                    DownloadRequest request = _pendingQueue.Dequeue();
+                    if (string.Equals(
+                            request.ResourceId,
+                            resourceId,
+                            StringComparison.Ordinal))
+                    {
+                        pendingRequests.Add(request);
+                    }
+                    else
+                    {
+                        _pendingQueue.Enqueue(request);
+                    }
+                }
+            }
+
+            foreach (ActiveDownload download in activeDownloads)
+            {
+                try
+                {
+                    download.Request?.Abort();
+                }
+                catch
+                {
+                }
+
+                FailHandlers(download, exception);
+            }
+
+            foreach (DownloadRequest request in pendingRequests)
+            {
+                request.Handler.Cancel();
+                request.Handler.Exception = exception;
+            }
+
+            ProcessQueue();
         }
     }
 }

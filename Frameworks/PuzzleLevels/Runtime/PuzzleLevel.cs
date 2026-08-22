@@ -49,7 +49,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         #region Public Methods
 
-        public static void Initialize(float timeout = float.MaxValue)
+        public static void Initialize(float timeout = 30f)
         {
             if (!TryValidateTimeout(timeout, out Exception validationError))
             {
@@ -66,14 +66,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         }
 
         public static async Awaitable InitializeAsync(
-            float timeout = float.MaxValue,
+            float timeout = 30f,
             CancellationToken cancellationToken = default)
         {
             await InitializeTaskAsync(timeout, cancellationToken);
         }
 
         public static Task InitializeTaskAsync(
-            float timeout = float.MaxValue,
+            float timeout = 30f,
             CancellationToken cancellationToken = default)
         {
             if (!TryValidateTimeout(timeout, out Exception validationError))
@@ -81,19 +81,22 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 return Task.FromException(validationError);
             }
 
-            if (!TryGetManager(out PuzzleLevelManager manager))
-            {
-                return Task.FromException(CreateManagerUnavailableException());
-            }
-
             return RunCoroutineAsTask(
-                manager.InitializeManagerCoroutine(timeout),
+                () =>
+                {
+                    if (!TryGetManager(out PuzzleLevelManager manager))
+                    {
+                        throw CreateManagerUnavailableException();
+                    }
+
+                    return manager.InitializeManagerCoroutine(timeout);
+                },
                 cancellationToken,
                 "initialize");
         }
 
         public static IEnumerator InitializeCoroutine(
-            float timeout = float.MaxValue,
+            float timeout = 30f,
             Action<Exception> onError = null)
         {
             if (!TryValidateTimeout(timeout, out Exception validationError))
@@ -160,6 +163,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 throw dispatcherError;
             }
 
+            EnsureManagerInitialized(manager);
+
             ResourceLoadingHandler<IPuzzleLevelData> handler;
             try
             {
@@ -175,9 +180,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             while (handler != null
                 && handler.LoadingStatus != LoadingStatus.Completed)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    handler.Cancel(cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+
                 if (HasTimedOut(startTime, timeoutSeconds))
                 {
+                    handler.Cancel();
                     throw CreateTimeoutException(levelId, timeoutSeconds);
                 }
 
@@ -213,12 +224,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                     out Exception validationError))
             {
                 return Task.FromException<IPuzzleLevelData>(validationError);
-            }
-
-            if (!TryGetManager(out _))
-            {
-                return Task.FromException<IPuzzleLevelData>(
-                    CreateManagerUnavailableException());
             }
 
             if (!TryGetDispatcher(out Exception dispatcherError))
@@ -260,6 +265,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 yield break;
             }
 
+            try
+            {
+                EnsureManagerInitialized(manager);
+            }
+            catch (Exception exception)
+            {
+                ReportError(onError, exception);
+                yield break;
+            }
+
             ResourceLoadingHandler<IPuzzleLevelData> handler;
             try
             {
@@ -277,6 +292,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
+                    handler?.Cancel(cancellationToken);
                     ReportError(
                         onError,
                         new OperationCanceledException(cancellationToken));
@@ -285,6 +301,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
                 if (HasTimedOut(startTime, timeoutSeconds))
                 {
+                    handler?.Cancel();
                     ReportError(
                         onError,
                         CreateTimeoutException(levelId, timeoutSeconds));
@@ -358,6 +375,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
             if (TryGetManager(out PuzzleLevelManager manager))
             {
+                try
+                {
+                    EnsureManagerInitialized(manager);
+                }
+                catch (Exception exception)
+                {
+                    LogError(exception);
+                    return;
+                }
+
                 manager.PreloadLevel(levelId);
             }
         }
@@ -381,6 +408,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
             if (TryGetManager(out PuzzleLevelManager manager))
             {
+                try
+                {
+                    EnsureManagerInitialized(manager);
+                }
+                catch (Exception exception)
+                {
+                    LogError(exception);
+                    return;
+                }
+
                 manager.RefreshCatalogs(mode);
             }
         }
@@ -401,13 +438,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 return Task.FromException(validationError);
             }
 
-            if (!TryGetManager(out PuzzleLevelManager manager))
-            {
-                return Task.FromException(CreateManagerUnavailableException());
-            }
-
             return RunCoroutineAsTask(
-                manager.RefreshCatalogsCoroutine(mode),
+                () =>
+                {
+                    if (!TryGetManager(out PuzzleLevelManager manager))
+                    {
+                        throw CreateManagerUnavailableException();
+                    }
+
+                    EnsureManagerInitialized(manager);
+                    return manager.RefreshCatalogsCoroutine(mode);
+                },
                 cancellationToken,
                 "refresh catalogs");
         }
@@ -425,6 +466,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             if (!TryGetManager(out PuzzleLevelManager manager))
             {
                 ReportError(onError, CreateManagerUnavailableException());
+                yield break;
+            }
+
+            try
+            {
+                EnsureManagerInitialized(manager);
+            }
+            catch (Exception exception)
+            {
+                ReportError(onError, exception);
                 yield break;
             }
 
@@ -461,7 +512,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         #region Private Methods
 
         private static Task RunCoroutineAsTask(
-            IEnumerator operation,
+            Func<IEnumerator> operationFactory,
             CancellationToken cancellationToken,
             string operationName)
         {
@@ -482,20 +533,52 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             registration = cancellationToken.Register(
                 () => completion.TrySetCanceled(cancellationToken));
 
-            Coroutine coroutine = Dispatcher.DispatchCoroutine(
-                CompleteCoroutine(
-                    operation,
-                    completion,
-                    cancellationToken,
-                    operationName,
-                    registration.Dispose));
-
-            if (coroutine == null)
+            bool dispatched = Dispatcher.TryDispatchOnMainThread(() =>
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    registration.Dispose();
+                    return;
+                }
+
+                IEnumerator operation;
+                try
+                {
+                    operation = operationFactory.Invoke();
+                }
+                catch (Exception exception)
+                {
+                    registration.Dispose();
+                    completion.TrySetException(exception);
+                    return;
+                }
+
+                bool coroutineDispatched = Dispatcher.TryDispatchCoroutine(
+                    CompleteCoroutine(
+                        operation,
+                        completion,
+                        cancellationToken,
+                        operationName,
+                        registration.Dispose),
+                    out _);
+
+                if (coroutineDispatched)
+                {
+                    return;
+                }
+
                 registration.Dispose();
                 completion.TrySetException(
                     new InvalidOperationException(
                         $"Puzzle level {operationName} coroutine could not be dispatched."));
+            });
+
+            if (!dispatched)
+            {
+                registration.Dispose();
+                completion.TrySetException(
+                    new InvalidOperationException(
+                        $"Puzzle level {operationName} could not be queued."));
             }
 
             return completion.Task;
@@ -528,20 +611,40 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 timeoutSeconds,
                 cancellationToken);
 
-            Coroutine coroutine = Dispatcher.DispatchCoroutine(
-                CompleteLevelCoroutine(
-                    operation,
-                    completion,
-                    cancellationToken,
-                    levelId,
-                    registration.Dispose));
-
-            if (coroutine == null)
+            bool dispatched = Dispatcher.TryDispatchOnMainThread(() =>
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    registration.Dispose();
+                    return;
+                }
+
+                bool coroutineDispatched = Dispatcher.TryDispatchCoroutine(
+                    CompleteLevelCoroutine(
+                        operation,
+                        completion,
+                        cancellationToken,
+                        levelId,
+                        registration.Dispose),
+                    out _);
+
+                if (coroutineDispatched)
+                {
+                    return;
+                }
+
                 registration.Dispose();
                 completion.TrySetException(
                     new InvalidOperationException(
                         "Puzzle level coroutine could not be dispatched."));
+            });
+
+            if (!dispatched)
+            {
+                registration.Dispose();
+                completion.TrySetException(
+                    new InvalidOperationException(
+                        "Puzzle level coroutine could not be queued."));
             }
 
             return completion.Task;
@@ -554,7 +657,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             string operationName,
             Action disposeRegistration)
         {
-            while (!completion.Task.IsCompleted)
+            while (true)
             {
                 bool hasNext;
                 object current = null;
@@ -604,7 +707,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             string levelId,
             Action disposeRegistration)
         {
-            while (!completion.Task.IsCompleted)
+            while (true)
             {
                 bool hasNext;
                 object current = null;
@@ -651,10 +754,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             Exception exception,
             CancellationToken cancellationToken)
         {
-            if (exception is OperationCanceledException
-                && cancellationToken.IsCancellationRequested)
+            if (exception is OperationCanceledException)
             {
-                completion.TrySetCanceled(cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    completion.TrySetCanceled(cancellationToken);
+                }
+                else
+                {
+                    completion.TrySetCanceled();
+                }
+
                 return;
             }
 
@@ -675,7 +785,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
 
         private static bool TryGetDispatcher(out Exception error)
         {
-            if (Dispatcher.Instance != null)
+            if (Dispatcher.IsAvailable)
             {
                 error = null;
                 return true;
@@ -686,6 +796,21 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
                 + "Ensure the Scheherazade dispatcher is present before loading levels.");
             LogError(error);
             return false;
+        }
+
+        private static void EnsureManagerInitialized(
+            PuzzleLevelManager manager)
+        {
+            if (manager.Status == ResourceManagerStatus.Initialized)
+            {
+                return;
+            }
+
+            throw manager.InitializationException
+                ?? new InvalidOperationException(
+                    $"PuzzleLevelManager is {manager.Status}. Call and await "
+                    + "PuzzleLevel.InitializeAsync before loading or refreshing "
+                    + "puzzle levels.");
         }
 
         private static bool TryValidateLevelRequest(
@@ -721,7 +846,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             float timeout,
             out Exception error)
         {
-            if (timeout >= 0f && !float.IsNaN(timeout)
+            if (timeout > 0f && !float.IsNaN(timeout)
                 && !float.IsInfinity(timeout))
             {
                 error = null;
@@ -731,7 +856,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
             error = new ArgumentOutOfRangeException(
                 nameof(timeout),
                 timeout,
-                "Timeout must be finite and greater than or equal to zero.");
+                "Timeout must be finite and greater than zero.");
             return false;
         }
 

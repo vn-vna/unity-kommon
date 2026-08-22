@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Com.Hapiga.Scheherazade.Common.Editor;
 using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
@@ -87,9 +88,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             NoBuildSettings s = NoBuildToolbarState.GetSettings();
             if (s == null) return;
-            UnityEditor.PopupWindow.Show(
+            CustomPopupDropdown.Show(
                 new Rect(worldBound.x, worldBound.yMax, 0, 0),
-                new NoBuildCombinedPopup(s));
+                new NoBuildCombinedPopup(s)
+            );
         }
     }
 
@@ -242,11 +244,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
                     if (GUILayout.Button("\u25B6", GUILayout.Width(26), GUILayout.Height(BtnH)))
                     {
-                        Rect btnRect =
-                            GUILayoutUtility.GetLastRect();
-                        btnRect.position +=
-                            editorWindow.position.position;
-                        UnityEditor.PopupWindow.Show(btnRect,
+                        CustomPopupDropdown.ShowLastRect(
                             NoBuildDropdowns.CreateDeviceSelectPopup(
                                 (option, serial) =>
                                 {
@@ -254,7 +252,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                                         .BuildAndRunWithOptions(
                                             bp, option,
                                             serial);
-                                }));
+                                }
+                            )
+                        );
                         editorWindow.Close();
                     }
                     GUI.backgroundColor = Color.white;
