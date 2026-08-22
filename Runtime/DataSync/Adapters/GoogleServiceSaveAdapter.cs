@@ -140,12 +140,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
-            if (!PlayGamesPlatform.Instance.IsAuthenticated())
-            {
-                return false;
-            }
-
+            await ValidateConnection();
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
+            ct.ThrowIfCancellationRequested();
             Client.Delete(metadata);
             return true;
 #else
@@ -157,7 +154,9 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string key, CancellationToken ct = default)
         {
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
-            return (await OpenConnection(key, ct)) != null;
+            ISavedGameMetadata metadata = await OpenConnection(key, ct);
+            using Stream stream = await OpenByteReadStream(metadata, ct);
+            return stream != null && stream.Length > 0;
 #else
             return false;
 #endif
@@ -179,8 +178,7 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
-            if (metadata == null) return null;
-            return await OpenByteReadStream(metadata);
+            return await OpenByteReadStream(metadata, ct);
 #else
             return null;
 #endif
@@ -190,9 +188,15 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
             string key, Stream data,
             CancellationToken ct = default)
         {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
 #if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
-            ISavedGameMetadata metadata = await OpenConnection(key, ct);
-            if (metadata == null) return;
+            ct.ThrowIfCancellationRequested();
+            ISavedGameMetadata metadata = await OpenConnection(
+                key,
+                ct
+            );
+            ct.ThrowIfCancellationRequested();
             byte[] bytes = null;
             if (data is MemoryStream stream)
                 bytes = stream.ToArray();
@@ -203,7 +207,15 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 bytes = ms.ToArray();
             }
 
-            await WriteToStorage(metadata, bytes);
+            if (bytes.Length == 0)
+            {
+                throw new DataSyncException(
+                    "Google Play Saved Games cannot distinguish an empty "
+                    + "payload from a missing save."
+                );
+            }
+
+            await WriteToStorage(metadata, bytes, ct);
 #endif
         }
 
@@ -306,7 +318,10 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             await ValidateConnection();
             TaskCompletionSource<ISavedGameMetadata> tsc =
-                new TaskCompletionSource<ISavedGameMetadata>();
+                new TaskCompletionSource<ISavedGameMetadata>(
+                    TaskCreationOptions.RunContinuationsAsynchronously
+                );
+            ct.ThrowIfCancellationRequested();
 
             if (_openMode == OpenMode.Manual)
             {
@@ -323,7 +338,21 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 );
             }
 
-            ct.Register(() => tsc.TrySetCanceled());
+            using CancellationTokenRegistration registration = ct.Register(
+                () => tsc.TrySetCanceled()
+            );
+            Task completedTask = await Task.WhenAny(
+                tsc.Task,
+                Task.Delay(ReadTimeout, ct)
+            );
+            if (completedTask != tsc.Task)
+            {
+                ct.ThrowIfCancellationRequested();
+                throw new TimeoutException(
+                    $"Saved game open timed out after {ReadTimeout.TotalSeconds:F1}s."
+                );
+            }
+
             return await tsc.Task;
         }
 
@@ -334,11 +363,13 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         {
             if (status != SavedGameRequestStatus.Success)
             {
-                tsc.SetResult(null);
+                tsc.TrySetException(new DataSyncException(
+                    $"Saved game open failed with status '{status}'."
+                ));
                 return;
             }
 
-            tsc.SetResult(game);
+            tsc.TrySetResult(game);
         }
 
         private void OnConflict(
@@ -406,32 +437,52 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
         }
 
         private async Task<Stream> OpenByteReadStream(
-            ISavedGameMetadata metadata)
+            ISavedGameMetadata metadata,
+            CancellationToken cancellationToken)
         {
             await ValidateConnection();
 
-            TaskCompletionSource<Stream> tsc = new TaskCompletionSource<Stream>();
+            TaskCompletionSource<Stream> tsc = new TaskCompletionSource<Stream>(
+                TaskCreationOptions.RunContinuationsAsynchronously
+            );
+            cancellationToken.ThrowIfCancellationRequested();
             Client.ReadBinaryData(metadata, (readStatus, data) =>
             {
                 if (readStatus != SavedGameRequestStatus.Success)
                 {
-                    tsc.SetResult(null);
+                    tsc.TrySetException(new DataSyncException(
+                        $"Saved game read failed with status '{readStatus}'."
+                    ));
                     return;
                 }
 
-                tsc.SetResult(new MemoryStream(data));
+                if (data == null || data.Length == 0)
+                {
+                    tsc.TrySetResult(null);
+                    return;
+                }
+
+                tsc.TrySetResult(new MemoryStream(data, writable: false));
             });
+            using CancellationTokenRegistration registration
+                = cancellationToken.Register(() => tsc.TrySetCanceled());
             return await tsc.Task;
         }
 
         private async Task<ISavedGameMetadata> WriteToStorage(
-            ISavedGameMetadata metadata, byte[] bytes)
+            ISavedGameMetadata metadata,
+            byte[] bytes,
+            CancellationToken cancellationToken)
         {
             await ValidateConnection();
+            cancellationToken.ThrowIfCancellationRequested();
 
             TaskCompletionSource<ISavedGameMetadata> tsc =
-                new TaskCompletionSource<ISavedGameMetadata>();
+                new TaskCompletionSource<ISavedGameMetadata>(
+                    TaskCreationOptions.RunContinuationsAsynchronously
+                );
             SavedGameMetadataUpdate update = BuildUpdate(metadata, bytes);
+            cancellationToken.ThrowIfCancellationRequested();
 
             Client.CommitUpdate(
                 metadata, update, bytes,
@@ -439,15 +490,33 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
                 {
                     if (status != SavedGameRequestStatus.Success)
                     {
-                        tsc.SetResult(null);
+                        tsc.TrySetException(new DataSyncException(
+                            $"Saved game commit failed with status '{status}'."
+                        ));
                         return;
                     }
 
-                    tsc.SetResult(updated);
+                    tsc.TrySetResult(updated);
                 }
             );
 
-            return await tsc.Task;
+            using CancellationTokenRegistration registration
+                = cancellationToken.Register(() => tsc.TrySetCanceled());
+            Task completedTask = await Task.WhenAny(
+                tsc.Task,
+                Task.Delay(ReadTimeout, cancellationToken)
+            );
+            if (completedTask != tsc.Task)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new TimeoutException(
+                    $"Saved game commit timed out after {ReadTimeout.TotalSeconds:F1}s."
+                );
+            }
+
+            ISavedGameMetadata result = await tsc.Task;
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
         }
 
         private SavedGameMetadataUpdate BuildUpdate(

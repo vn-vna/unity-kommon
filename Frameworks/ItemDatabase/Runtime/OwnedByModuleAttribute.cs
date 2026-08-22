@@ -14,7 +14,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 
         public OwnedByModuleAttribute(string moduleName)
         {
-            ModuleName = moduleName;
+            ModuleName = moduleName?.Trim();
         }
     }
 }

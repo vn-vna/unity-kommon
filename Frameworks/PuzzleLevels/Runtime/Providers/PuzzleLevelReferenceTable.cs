@@ -111,11 +111,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
         private void OnValidate()
         {
             BuildLookup();
-            ValidateEntries();
         }
 
         [ContextMenu("Refresh Ids")]
-        private void TriggerRefreshAutoEntryId()
+        public void RefreshEntryIds()
         {
             if (!_enableEntryAutoId
                 || string.IsNullOrEmpty(_entryAutoIdTemplate)
@@ -133,7 +132,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             }
 
             BuildLookup();
-            ValidateEntries();
             UnityEditor.EditorUtility.SetDirty(this);
         }
 

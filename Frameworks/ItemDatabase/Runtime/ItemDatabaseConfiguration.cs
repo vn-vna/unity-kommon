@@ -16,6 +16,12 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     public class ItemDatabaseConfiguration
         : SingletonScriptableObject<ItemDatabaseConfiguration>
     {
+        private const string CanonicalResourcesPath
+            = "Integration/Managers/ItemDatabaseConfiguration";
+
+        private static ItemDatabaseConfiguration _canonicalConfiguration;
+        private static bool _canonicalLoadAttempted;
+
         [SerializeField]
         private ItemDefinition[] _itemDefinitions = Array.Empty<ItemDefinition>();
 
@@ -50,17 +56,62 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         /// <summary>Build a lookup dictionary: itemId → ItemDefinition.</summary>
         public Dictionary<string, ItemDefinition> BuildDefinitionLookup()
         {
-            var lookup = new Dictionary<string, ItemDefinition>();
+            var lookup = new Dictionary<string, ItemDefinition>(StringComparer.Ordinal);
             foreach (var def in ItemDefinitions)
             {
-                if (def != null && !string.IsNullOrEmpty(def.ItemId)
-                    && !lookup.ContainsKey(def.ItemId))
+                if (def == null)
                 {
-                    lookup[def.ItemId] = def;
+                    throw new ItemDatabaseException(
+                        "Item Database configuration contains a missing definition reference."
+                    );
+                }
+
+                if (string.IsNullOrWhiteSpace(def.ItemId))
+                {
+                    throw new ItemDatabaseException(
+                        $"Definition '{def.name}' has an empty item ID."
+                    );
+                }
+
+                if (!lookup.TryAdd(def.ItemId, def))
+                {
+                    throw new ItemDatabaseException(
+                        $"Duplicate item definition ID '{def.ItemId}'."
+                    );
                 }
             }
 
             return lookup;
+        }
+
+        internal static ItemDatabaseConfiguration LoadCanonical()
+        {
+            if (!_canonicalLoadAttempted)
+            {
+                _canonicalConfiguration
+                    = Resources.Load<ItemDatabaseConfiguration>(
+                        CanonicalResourcesPath
+                    );
+                _canonicalLoadAttempted = true;
+            }
+
+            Instance = _canonicalConfiguration;
+            return _canonicalConfiguration;
+        }
+
+        internal static void SetCanonical(
+            ItemDatabaseConfiguration configuration)
+        {
+            _canonicalConfiguration = configuration;
+            _canonicalLoadAttempted = true;
+            Instance = configuration;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetCanonical()
+        {
+            _canonicalConfiguration = null;
+            _canonicalLoadAttempted = false;
         }
     }
 }

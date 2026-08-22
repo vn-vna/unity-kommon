@@ -9,7 +9,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     /// Saved via DataSyncDirector.SaveAsync("item_db", state).
     /// </summary>
     [Serializable]
-    [CurrentDataVersion("1.0.0")]
+    [CurrentDataVersion("2.0.0")]
     public class ItemDatabaseState
     {
         public List<InventoryItem> items = new List<InventoryItem>();
@@ -17,5 +17,22 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         public List<InventoryTagEntry> tags = new List<InventoryTagEntry>();
 
         public string savedAtUtc;
+
+        public long revision;
+
+        public bool requiresLegacyBackup;
+
+        public List<QuarantinedInventoryItem> quarantine
+            = new List<QuarantinedInventoryItem>();
+    }
+
+    [Serializable]
+    public class QuarantinedInventoryItem
+    {
+        public InventoryItem item;
+
+        public List<InventoryTagEntry> tags = new List<InventoryTagEntry>();
+
+        public string reason;
     }
 }

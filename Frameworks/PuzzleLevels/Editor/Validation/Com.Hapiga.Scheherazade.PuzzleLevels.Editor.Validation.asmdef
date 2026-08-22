@@ -1,0 +1,19 @@
+{
+    "name": "Com.Hapiga.Scheherazade.PuzzleLevels.Editor.Validation",
+    "rootNamespace": "Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation",
+    "references": [
+        "Com.Hapiga.Scheherazade.PuzzleLevels",
+        "Com.Hapiga.Scheherazade.Common"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

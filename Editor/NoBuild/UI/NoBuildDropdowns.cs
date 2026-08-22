@@ -95,13 +95,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             public override void OnGUI(Rect rect)
             {
-                EditorGuiLayout.DrawSectionHeader("Scene Sets",
+                EditorGuiLayout.DrawHeaderBox("Scene Sets",
                     "Switch all scenes at once.");
 
                 if (_s.sceneSets.Count == 0)
                 {
-                    EditorGUILayout.LabelField("  (none)",
-                        EditorStyles.miniLabel);
+                    EditorGuiLayout.DrawEmptyState(
+                        "No scene sets.",
+                        "Create one in Project Settings → No Build."
+                    );
                 }
                 else
                 {
@@ -114,7 +116,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
-                        GUI.color = isActive ? Color.green : Color.gray;
+                        GUI.color = isActive
+                            ? EditorGuiColors.ActiveGreen
+                            : EditorGuiColors.InactiveGray;
                         GUILayout.Label(isActive ? "\u25C9" : "\u25CB",
                             GUILayout.Width(20));
                         GUI.color = Color.white;
@@ -149,8 +153,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 if (activeSet == null || combos == null || combos.Count == 0)
                 {
-                    EditorGUILayout.LabelField("  (no active set or no combinations)",
-                        EditorStyles.miniLabel);
+                    EditorGUILayout.HelpBox(
+                        "No active scene set or shortcut combinations.",
+                        MessageType.Info
+                    );
                 }
                 else
                 {
@@ -162,7 +168,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
                         GUI.enabled = valid;
-                        GUI.color = valid ? Color.white : Color.gray;
+                        GUI.color = valid
+                            ? Color.white
+                            : EditorGuiColors.InactiveGray;
                         string num = (i + 1).ToString();
                         GUILayout.Label(
                             num.Length == 1 ? " " + num : num,
@@ -238,7 +246,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     bool active = _s.activeScriptDefinitionSetIndex == i;
 
                     EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                    GUI.color = active ? Color.green : Color.gray;
+                    GUI.color = active
+                        ? EditorGuiColors.ActiveGreen
+                        : EditorGuiColors.InactiveGray;
                     GUILayout.Label(active ? "\u25C9" : "\u25CB",
                         GUILayout.Width(20));
                     GUI.color = Color.white;
@@ -336,9 +346,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         EditorGUILayout.EndVertical();
                         GUILayout.FlexibleSpace();
                         Color old = GUI.backgroundColor;
-                        GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
-                        if (GUILayout.Button("Build", GUILayout.Width(52),
-                                GUILayout.Height(22)))
+                        GUI.backgroundColor = EditorGuiColors.BuildGreen;
+                        if (GUILayout.Button(
+                                PlatformIconUtility.BuildActionIcon,
+                                GUILayout.Width(68),
+                                GUILayout.Height(22)
+                            ))
                         {
                             _onBuild?.Invoke(p);
                             editorWindow.Close();
@@ -433,16 +446,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     Event.current.mousePosition);
                 if (!isSelected && isHovered)
                 {
-                    EditorGUI.DrawRect(bgRect,
-                        new Color(0.35f, 0.5f, 0.75f,
-                            0.3f));
+                    EditorGUI.DrawRect(
+                        bgRect,
+                        EditorGuiColors.HoverHoverBg
+                    );
                 }
 
                 // Selection highlight
                 if (isSelected)
                 {
-                    EditorGUI.DrawRect(bgRect,
-                        new Color(0.2f, 0.4f, 0.7f, 0.45f));
+                    EditorGUI.DrawRect(
+                        bgRect,
+                        EditorGuiColors.SelectionBlueBg
+                    );
                 }
 
                 // Icon centered in the tile
@@ -614,10 +630,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                GUI.backgroundColor =
-                    new Color(0.3f, 0.7f, 0.3f);
+                GUI.backgroundColor = EditorGuiColors.BuildGreen;
                 if (GUILayout.Button(
-                        "  Build  ", GUILayout.Height(28)))
+                        PlatformIconUtility.BuildActionIcon,
+                        GUILayout.Height(28)))
                 {
                     _onBuild?.Invoke();
                     editorWindow.Close();
@@ -628,10 +644,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     == BuildTarget.Android)
                 {
                     GUILayout.Space(6);
-                    GUI.backgroundColor =
-                        new Color(0.3f, 0.5f, 0.9f);
+                    GUI.backgroundColor = EditorGuiColors.RunBlue;
                     if (GUILayout.Button(
-                            "Build && Run",
+                            PlatformIconUtility.BuildAndRunActionIcon,
                             GUILayout.Height(28)))
                     {
                         CustomPopupDropdown.ShowLastRect(

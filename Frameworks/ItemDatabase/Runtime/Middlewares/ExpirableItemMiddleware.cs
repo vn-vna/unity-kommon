@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
 
 namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
@@ -11,7 +13,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
     /// every expired item from the database.
     /// </summary>
     [ItemDatabaseMiddleware(DefaultPriority = 200,
-        Description = "Rejects expired expirable batches and sweeps expired items. Use ExpireNow() on a timer to purge.")]
+        Description = "Rejects expired payloads. The director schedules atomic expiry purges automatically.")]
     public class ExpirableItemMiddleware : IItemDatabaseBeforeSetTagMiddleware
     {
         public int Priority => 200;
@@ -23,30 +25,45 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
             if (!expirable.IsExpired) return;
 
             throw new ItemDatabaseException(
-                $"Cannot set expired ExpirableData on item '{key}' — " +
-                $"expiresAt {expirable.expiresAt:o} is in the past.");
+                ItemDatabaseErrorCode.InvalidTagData,
+                $"Cannot set expired ExpirableData on item '{key}' — "
+                + $"expiresAt {expirable.expiresAt:o} is in the past."
+            );
         }
 
         /// <summary>
         /// Removes every item whose ExpirableData has already passed.
         /// Returns the number of removed items. Safe to call on a timer.
         /// </summary>
+        [Obsolete("Use ExpireNowAsync and await completion.", true)]
         public int ExpireNow()
         {
+            _ = ExpireNowAsync();
+            return 0;
+        }
+
+        public async Task<int> ExpireNowAsync(
+            CancellationToken cancellationToken = default)
+        {
+            ItemOperationResult result = await ItemDatabase.ExpireNowAsync(
+                cancellationToken
+            );
+            result.ThrowIfRejected();
+
             int removed = 0;
-            var now = DateTime.UtcNow;
-            foreach (var item in ItemDatabase.AllItems)
+            foreach (ItemStackDelta delta in result.Deltas)
             {
-                var expData = ItemDatabaseDirector.Instance.Engine
-                    .GetTagData(item.key, typeof(ExpirableTag)) as ExpirableData;
-                if (expData != null && expData.expiresAt <= now)
-                {
-                    ItemDatabase.RemoveItem(item.key);
-                    removed++;
-                }
+                if (delta.WasRemoved) removed++;
             }
 
-            if (removed > 0) QuickLog.Info<ExpirableItemMiddleware>("Expired {0} items", removed);
+            if (removed > 0)
+            {
+                QuickLog.Info<ExpirableItemMiddleware>(
+                    "Expired {0} item stacks",
+                    removed
+                );
+            }
+
             return removed;
         }
     }

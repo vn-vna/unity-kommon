@@ -1,40 +1,61 @@
 using System;
-using System.Collections.Generic;
 
 namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 {
     public class ItemQueryResult
     {
-        private readonly ItemDatabaseEngine _engine;
-        private readonly List<InventoryItem> _items;
+        private readonly ItemQueryRecord[] _records;
+        private readonly InventoryItem[] _items;
 
-        internal ItemQueryResult(
-            ItemDatabaseEngine engine,
-            List<InventoryItem> items)
+        internal ItemQueryResult(ItemQueryRecord[] records)
         {
-            _engine = engine;
-            _items = items;
+            _records = records ?? Array.Empty<ItemQueryRecord>();
+            _items = new InventoryItem[_records.Length];
+            for (int i = 0; i < _records.Length; i++)
+            {
+                _items[i] = _records[i].Item;
+            }
         }
 
-        public int Count => _items.Count;
-        public InventoryItem[] Items => _items.ToArray();
+        public int Count => _items.Length;
+
+        public InventoryItem[] Items => (InventoryItem[])_items.Clone();
 
         /// <summary>Get tag data (resolved via [TagData] attribute).</summary>
         public T GetTag<T>(int itemIndex = 0) where T : class, ITagData
         {
-            if (_engine == null || itemIndex < 0 || itemIndex >= _items.Count) return null;
-            var tagDefType = TagDataRegistry.GetTagDefType(typeof(T));
-            return tagDefType != null
-                ? _engine.GetTagData<T>(_items[itemIndex].key, tagDefType)
-                : null;
+            if (itemIndex < 0 || itemIndex >= _records.Length) return null;
+
+            Type tagDefinitionType = TagDataRegistry.GetTagDefType(typeof(T));
+            if (tagDefinitionType == null
+                || !_records[itemIndex].Tags.TryGetValue(
+                    tagDefinitionType,
+                    out string json))
+            {
+                return null;
+            }
+
+            return ItemTagDataSerializer.Deserialize(json, typeof(T)) as T;
         }
 
         /// <summary>Get all non-marker tag data for the item.</summary>
         public ITagData[] GetTags(int itemIndex = 0)
         {
-            if (_engine == null || itemIndex < 0 || itemIndex >= _items.Count)
+            if (itemIndex < 0 || itemIndex >= _records.Length)
                 return Array.Empty<ITagData>();
-            return _engine.GetTagDatas(_items[itemIndex].key);
+
+            var result = new ITagData[_records[itemIndex].Tags.Count];
+            int resultIndex = 0;
+            foreach (var entry in _records[itemIndex].Tags)
+            {
+                Type dataType = TagDataRegistry.GetDataType(entry.Key);
+                result[resultIndex++] = ItemTagDataSerializer.Deserialize(
+                    entry.Value,
+                    dataType
+                );
+            }
+
+            return result;
         }
     }
 }

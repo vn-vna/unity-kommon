@@ -12,6 +12,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         private string _itemIdFilter;
         private Type _tagDefTypeFilter;
         private Func<InventoryItem, bool> _customPredicate;
+        private bool _hasInvalidFilter;
 
         internal ItemQueryBuilder(ItemDatabaseEngine engine)
         {
@@ -20,6 +21,13 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 
         public ItemQueryBuilder WithDefinition(string itemId)
         {
+            if (string.IsNullOrWhiteSpace(itemId))
+            {
+                _hasInvalidFilter = true;
+                _itemIdFilter = null;
+                return this;
+            }
+
             _itemIdFilter = itemId;
             return this;
         }
@@ -28,40 +36,45 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         public ItemQueryBuilder WithTag<T>() where T : ITagData
         {
             _tagDefTypeFilter = TagDataRegistry.GetTagDefType(typeof(T));
+            if (_tagDefTypeFilter == null) _hasInvalidFilter = true;
             return this;
         }
 
         public ItemQueryBuilder Where(Func<InventoryItem, bool> predicate)
         {
+            if (predicate == null)
+            {
+                _hasInvalidFilter = true;
+                return this;
+            }
+
             _customPredicate = predicate;
             return this;
         }
 
         public ItemQueryResult Execute()
         {
-            if (_engine == null)
-                return new ItemQueryResult(null, new List<InventoryItem>());
-
-            var results = new List<InventoryItem>();
-
-            foreach (var kvp in _engine.Items)
+            if (_engine == null || _hasInvalidFilter)
             {
-                var item = kvp.Value;
-
-                if (_itemIdFilter != null && item.itemId != _itemIdFilter)
-                    continue;
-
-                if (_tagDefTypeFilter != null
-                    && !_engine.HasTagData(item.key, _tagDefTypeFilter))
-                    continue;
-
-                if (_customPredicate != null && !_customPredicate(item))
-                    continue;
-
-                results.Add(item);
+                return new ItemQueryResult(Array.Empty<ItemQueryRecord>());
             }
 
-            return new ItemQueryResult(_engine, results);
+            ItemQueryRecord[] records = _engine.CaptureQueryRecords(
+                _itemIdFilter,
+                _tagDefTypeFilter
+            );
+            if (_customPredicate == null)
+            {
+                return new ItemQueryResult(records);
+            }
+
+            var results = new List<ItemQueryRecord>(records.Length);
+            foreach (ItemQueryRecord record in records)
+            {
+                if (_customPredicate(record.Item)) results.Add(record);
+            }
+
+            return new ItemQueryResult(results.ToArray());
         }
     }
 }

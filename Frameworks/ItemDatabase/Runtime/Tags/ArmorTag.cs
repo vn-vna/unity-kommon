@@ -7,6 +7,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     /// Example tag with schema fields. Shows how to create custom
     /// TagDefinitions that carry editor-defined configuration.
     /// </summary>
+    [ItemTagId("armor")]
     public class ArmorTag : TagDefinition
     {
 #if UNITY_EDITOR

@@ -20,9 +20,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         private ItemDatabaseConfiguration _config;
         private SerializedProperty _itemIdProp;
         private SerializedProperty _descriptionProp;
-
-        private readonly Dictionary<int, UnityEditor.Editor> _tagEditors
-            = new Dictionary<int, UnityEditor.Editor>();
+        private bool _isExternal;
 
         #endregion
 
@@ -31,14 +29,26 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         private void OnEnable()
         {
             _def = (ItemDefinition)target;
-            _config = ItemDatabaseConfiguration.Instance;
+            _isExternal = false;
+            try
+            {
+                _config = ItemDefinitionTagUtils.ResolveConfiguration(
+                    ItemDatabaseConfiguration.Instance,
+                    _def
+                );
+            }
+            catch (InvalidOperationException)
+            {
+                _config = null;
+                _isExternal = true;
+            }
+
             _itemIdProp = serializedObject.FindProperty("_itemId");
             _descriptionProp = serializedObject.FindProperty("_description");
         }
 
         private void OnDisable()
         {
-            DestroyTagEditors();
         }
 
         #endregion
@@ -49,7 +59,34 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         {
             serializedObject.Update();
 
-            DrawIdentityFields();
+            string owner = ItemDatabase.GetDefinitionOwner(_def);
+            bool isReadOnly = _isExternal || !string.IsNullOrEmpty(owner);
+            if (_isExternal)
+            {
+                EditorGUILayout.HelpBox(
+                    "This definition is not hosted by an Item Database "
+                    + "configuration and is read-only here.",
+                    MessageType.Warning
+                );
+            }
+
+            if (!string.IsNullOrEmpty(owner))
+            {
+                EditorGUILayout.HelpBox(
+                    $"This definition is managed by '{owner}' and is read-only.",
+                    MessageType.Info
+                );
+            }
+
+            using (new EditorGUI.DisabledScope(isReadOnly))
+            {
+                DrawIdentityFields();
+                DrawMetadataFields();
+            }
+            if (serializedObject.ApplyModifiedProperties())
+            {
+                ItemDefinitionTagUtils.MarkDirty(_config, _def, _def.Metadata);
+            }
 
             EditorGUILayout.Space();
             EditorGUI.DrawRect(
@@ -57,10 +94,11 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
                 new Color(0.5f, 0.5f, 0.5f, 0.3f));
             EditorGUILayout.Space();
 
-            DrawTagsHeader();
-            DrawTagRows();
-
-            serializedObject.ApplyModifiedProperties();
+            using (new EditorGUI.DisabledScope(isReadOnly))
+            {
+                DrawTagsHeader();
+                DrawTagRows();
+            }
         }
 
         #endregion
@@ -74,8 +112,35 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
 
             if (_itemIdProp != null)
             {
-                EditorGUILayout.PropertyField(_itemIdProp,
-                    new GUIContent("Item ID"), true);
+                bool duplicate = HasDuplicateItemId(_itemIdProp.stringValue);
+                bool canRepairId = string.IsNullOrWhiteSpace(
+                    _itemIdProp.stringValue
+                ) || duplicate;
+                using (new EditorGUI.DisabledScope(!canRepairId))
+                {
+                    EditorGUILayout.PropertyField(_itemIdProp,
+                        new GUIContent(
+                            "Item ID",
+                            "Persistent identifier. Unique IDs are immutable without a save migration."
+                        ), true);
+                }
+
+                if (!canRepairId)
+                {
+                    EditorGUILayout.LabelField(
+                        "Item IDs are locked after assignment.",
+                        EditorStyles.miniLabel
+                    );
+                }
+
+                if (duplicate)
+                {
+                    EditorGUILayout.HelpBox(
+                        $"Item ID '{_itemIdProp.stringValue}' is duplicated. "
+                        + "Runtime initialization and builds are blocked until it is unique.",
+                        MessageType.Error
+                    );
+                }
             }
 
             if (_descriptionProp != null)
@@ -89,6 +154,73 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
                 EditorGUILayout.HelpBox(
                     "Could not find ItemDefinition serialized fields.",
                     MessageType.Error);
+            }
+        }
+
+        private void DrawMetadataFields()
+        {
+            if (_def.Metadata == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Metadata is missing. Adding a tag will recreate it, or use Repair Metadata.",
+                    MessageType.Error
+                );
+                if (GUILayout.Button("Repair Metadata", GUILayout.Width(120)))
+                {
+                    ItemDefinitionTagUtils.EnsureMetadata(_config, _def);
+                }
+
+                return;
+            }
+
+            bool requiresClone = ItemDefinitionTagUtils.RequiresMetadataClone(
+                _config,
+                _def
+            );
+            if (requiresClone)
+            {
+                EditorGUILayout.HelpBox(
+                    "Metadata is shared or external. Clone it before editing.",
+                    MessageType.Warning
+                );
+                if (GUILayout.Button("Clone Metadata", GUILayout.Width(130)))
+                {
+                    ItemDefinitionTagUtils.CloneSharedMetadataForDefinition(
+                        _config,
+                        _def
+                    );
+                    return;
+                }
+            }
+
+            var metadataObject = new SerializedObject(_def.Metadata);
+            SerializedProperty iconProperty = metadataObject.FindProperty("_icon");
+            SerializedProperty extrasProperty = metadataObject.FindProperty("_extras");
+            metadataObject.Update();
+
+            using (new EditorGUI.DisabledScope(requiresClone))
+            {
+                if (iconProperty != null)
+                {
+                    EditorGUILayout.PropertyField(
+                        iconProperty,
+                        new GUIContent("Icon")
+                    );
+                }
+
+                if (extrasProperty != null)
+                {
+                    EditorGUILayout.PropertyField(
+                        extrasProperty,
+                        new GUIContent("Extras (JSON)"),
+                        true
+                    );
+                }
+            }
+
+            if (metadataObject.ApplyModifiedProperties())
+            {
+                ItemDefinitionTagUtils.MarkDirty(_config, _def.Metadata);
             }
         }
 
@@ -112,9 +244,16 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
 
                 GUILayout.FlexibleSpace();
 
-                if (GUILayout.Button("+ Add Tag", GUILayout.Width(90)))
+                using (new EditorGUI.DisabledScope(
+                           ItemDefinitionTagUtils.RequiresMetadataClone(
+                               _config,
+                               _def
+                           )))
                 {
-                    DrawAddTagPopup();
+                    if (GUILayout.Button("+ Add Tag", GUILayout.Width(90)))
+                    {
+                        DrawAddTagPopup();
+                    }
                 }
             }
         }
@@ -140,8 +279,13 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         private void DrawTagRow(TagDefinition tag)
         {
             bool hasData = TagDataRegistry.GetDataType(tag.GetType()) != null;
+            bool hasDefinitionFields = HasEditableDefinitionFields(tag);
             bool usesDefaults = _config != null
                 && ItemDefinitionTagUtils.IsSharedTemplate(_config, tag);
+            bool isExternal = _config != null
+                && !ItemDefinitionTagUtils.IsOwnedSubAsset(_config, tag);
+            bool requiresClone = usesDefaults || isExternal;
+            string owner = ItemDatabase.GetTagOwner(tag.GetType());
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
@@ -159,20 +303,48 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
                         DrawBadge("uses defaults", new Color(0.4f, 0.5f, 0.6f));
                     }
 
-                    GUILayout.FlexibleSpace();
-
-                    if (usesDefaults && GUILayout.Button("Clone", EditorStyles.miniButton, GUILayout.Width(46)))
+                    if (!string.IsNullOrEmpty(owner))
                     {
-                        ItemDefinitionTagUtils.CloneTagIntoDefinition(_config, _def, tag);
-                        DestroyTagEditors();
-                        return;
+                        DrawBadge(
+                            $"managed by {owner}",
+                            new Color(0.55f, 0.4f, 0.75f)
+                        );
                     }
 
-                    if (DrawSmallDeleteButton())
+                    GUILayout.FlexibleSpace();
+
+                    using (new EditorGUI.DisabledScope(
+                               !string.IsNullOrEmpty(owner)))
                     {
-                        ItemDefinitionTagUtils.RemoveTagFromDefinition(_config, _def, tag);
-                        DestroyTagEditors();
-                        return;
+                        if (requiresClone
+                            && GUILayout.Button(
+                                new GUIContent(
+                                    "Clone",
+                                    "Create an editable per-definition copy."
+                                ),
+                                EditorStyles.miniButton,
+                                GUILayout.Width(46)))
+                        {
+                            ItemDefinitionTagUtils.CloneTagIntoDefinition(
+                                _config,
+                                _def,
+                                tag
+                            );
+                            return;
+                        }
+                    }
+
+                    using (new EditorGUI.DisabledScope(!string.IsNullOrEmpty(owner)))
+                    {
+                        if (DrawSmallDeleteButton())
+                        {
+                            ItemDefinitionTagUtils.RemoveTagFromDefinition(
+                                _config,
+                                _def,
+                                tag
+                            );
+                            return;
+                        }
                     }
                 }
 
@@ -181,14 +353,38 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
                     EditorGUILayout.LabelField($"Asset: {tag.name}", EditorStyles.miniLabel);
                 }
 
-                if (hasData)
+                if (usesDefaults)
                 {
-                    DrawTagDataEditor(tag);
+                    EditorGUILayout.HelpBox(
+                        "This definition references the shared default template. "
+                        + "Clone it before editing; clearing the default is blocked until references are materialized.",
+                        MessageType.Warning
+                    );
+                }
+                else if (isExternal)
+                {
+                    EditorGUILayout.HelpBox(
+                        "This tag is external. Clone it before editing.",
+                        MessageType.Warning
+                    );
+                }
+
+                if (hasDefinitionFields)
+                {
+                    using (new EditorGUI.DisabledScope(
+                               requiresClone || !string.IsNullOrEmpty(owner)))
+                    {
+                        DrawTagDefinitionFields(tag);
+                    }
                 }
                 else
                 {
                     EditorGUILayout.LabelField(
-                        "(marker tag — no runtime data)", EditorStyles.miniLabel);
+                        hasData
+                            ? "Runtime payload only — no definition-level fields."
+                            : "Marker tag — no definition-level fields.",
+                        EditorStyles.miniLabel
+                    );
                 }
             }
         }
@@ -220,7 +416,6 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         {
             if (_config == null) return;
             ItemDefinitionTagUtils.AddTagToDefinition(_config, _def, tagType);
-            DestroyTagEditors();
             Repaint();
         }
 
@@ -232,31 +427,46 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
             foreach (var type in all)
             {
                 bool exists = Array.Exists(attached, t => t != null && t.GetType() == type);
-                if (!exists) result.Add(type);
+                if (!exists && string.IsNullOrEmpty(ItemDatabase.GetTagOwner(type)))
+                {
+                    result.Add(type);
+                }
             }
             return result.ToArray();
         }
 
-        private void DrawTagDataEditor(TagDefinition tag)
+        private static bool HasEditableDefinitionFields(TagDefinition tag)
         {
-            int id = tag.GetInstanceID();
-            if (!_tagEditors.TryGetValue(id, out var editor) || editor == null)
+            if (tag == null) return false;
+            var tagObject = new SerializedObject(tag);
+            SerializedProperty iterator = tagObject.GetIterator();
+            bool enterChildren = true;
+            while (iterator.NextVisible(enterChildren))
             {
-                _tagEditors[id] = UnityEditor.Editor.CreateEditor(tag);
-                editor = _tagEditors[id];
+                enterChildren = false;
+                if (iterator.propertyPath != "m_Script") return true;
             }
 
-            if (editor == null) return;
-            editor.OnInspectorGUI();
+            return false;
         }
 
-        private void DestroyTagEditors()
+        private static void DrawTagDefinitionFields(TagDefinition tag)
         {
-            foreach (var editor in _tagEditors.Values)
+            var tagObject = new SerializedObject(tag);
+            tagObject.Update();
+            SerializedProperty iterator = tagObject.GetIterator();
+            bool enterChildren = true;
+            while (iterator.NextVisible(enterChildren))
             {
-                if (editor != null) DestroyImmediate(editor);
+                enterChildren = false;
+                if (iterator.propertyPath == "m_Script") continue;
+                EditorGUILayout.PropertyField(iterator, true);
             }
-            _tagEditors.Clear();
+
+            if (tagObject.ApplyModifiedProperties())
+            {
+                ItemDefinitionTagUtils.MarkDirty(tag);
+            }
         }
 
         #endregion
@@ -281,7 +491,21 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
         private static bool DrawSmallDeleteButton()
         {
             var content = EditorGUIUtility.IconContent("TreeEditor.Trash");
+            content.tooltip = "Remove this tag from the definition.";
             return GUILayout.Button(content, EditorStyles.miniButton, GUILayout.Width(26));
+        }
+
+        private bool HasDuplicateItemId(string itemId)
+        {
+            if (_config == null || string.IsNullOrWhiteSpace(itemId)) return false;
+
+            int count = 0;
+            foreach (ItemDefinition definition in _config.ItemDefinitions)
+            {
+                if (definition != null && definition.ItemId == itemId) count++;
+            }
+
+            return count > 1;
         }
 
         #endregion

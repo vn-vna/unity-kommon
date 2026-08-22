@@ -188,27 +188,28 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         public void RemoveDrifter(IDrifter drifter)
         {
-            if (drifter == _driftMaster)
+            if (!_drifters.Remove(drifter))
             {
-                foreach (KeyValuePair<IDrifter, DrifterInformation> pair in _drifters)
-                {
-                    if (pair.Key == drifter) continue;
-                    _driftMaster = pair.Key;
-                    break;
-                }
                 return;
             }
 
-            if (!_drifters.Remove(drifter)) return;
             drifter.HandleDriftDetached();
+            if (drifter == _driftMaster)
+            {
+                _driftMaster = GetFirstDrifter();
+            }
+
             DrifterRemoved?.Invoke();
 
-            if (_drifters.Count == 0)
+            if (_drifters.Count > 0)
             {
-                _drifting = false;
-                _driftMaster = null;
-                DriftingFinished?.Invoke();
+                return;
             }
+
+            _drifting = false;
+            _driftMaster = null;
+            _hoveringCell = null;
+            DriftingFinished?.Invoke();
         }
 
         #endregion
@@ -232,6 +233,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                         coordinates.CellToWorld(drifter.Occupant.HookedCell.GridPosition);
                 }
             }
+        }
+
+        private IDrifter GetFirstDrifter()
+        {
+            foreach (IDrifter drifter in _drifters.Keys)
+            {
+                return drifter;
+            }
+
+            return null;
         }
 
         private void UpdateDrifterMovementAbility()

@@ -13,7 +13,7 @@ namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
     /// <summary>
     /// Consolidated ADB and Android SDK path resolution.
     /// Replaces the duplicated logic previously spread across
-    /// RoapAdbClient, AdbUtility, and DirectCmdForwardingWindow.
+    /// RoapAdbClient, AdbUtility, and DirectCmdSettingsProvider.
     /// </summary>
     public static class AdbPathResolver
     {

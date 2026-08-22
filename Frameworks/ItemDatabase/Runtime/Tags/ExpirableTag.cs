@@ -10,6 +10,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     /// are auto-merged by AutoStackMiddleware.
     /// ExpirableItemMiddleware rejects expired batches and sweeps them.
     /// </summary>
+    [ItemTagId("expirable")]
     public class ExpirableTag : TagDefinition
     {
     }
@@ -23,9 +24,34 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     [TagData(typeof(ExpirableTag))]
     public class ExpirableData : ITagData
     {
+        [NonSerialized]
         public DateTime expiresAt;
 
+        [SerializeField]
+        private long _expiresAtUnixMilliseconds;
+
+        [SerializeField]
+        private bool _hasPersistedExpiresAt;
+
         /// <summary>True when the expiry date has passed.</summary>
-        public bool IsExpired => expiresAt <= DateTime.UtcNow;
+        public bool IsExpired => expiresAt != default
+            && expiresAt <= DateTime.UtcNow;
+
+        internal void PrepareForSerialization()
+        {
+            expiresAt = ItemDatabaseTime.NormalizeUtc(expiresAt);
+            _expiresAtUnixMilliseconds = ItemDatabaseTime.ToUnixMilliseconds(expiresAt);
+            _hasPersistedExpiresAt = true;
+        }
+
+        internal bool TryRestoreAfterDeserialization()
+        {
+            if (!_hasPersistedExpiresAt) return false;
+
+            expiresAt = ItemDatabaseTime.FromUnixMilliseconds(
+                _expiresAtUnixMilliseconds
+            );
+            return true;
+        }
     }
 }

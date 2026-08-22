@@ -321,7 +321,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         )
             => _map.MoveOccupants(occupants, from, to);
 
-        public bool RemoveObject(IGridOccupant occupant) => _map.RemoveObject(occupant);
+        public bool RemoveObject(IGridOccupant occupant)
+        {
+            if (occupant is IDrifter drifter)
+            {
+                _drifter?.RemoveDrifter(drifter);
+            }
+
+            return _map.RemoveObject(occupant);
+        }
         public GridCell AccessCell(GridCoord position) => _map.AccessCell(position);
         public GridCell AccessCell(int x, int y) => _map.AccessCell(new GridCoord(x, y));
         public void Clear() => _map.ClearAllCells();

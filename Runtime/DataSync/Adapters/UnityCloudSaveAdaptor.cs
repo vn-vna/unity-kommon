@@ -78,97 +78,157 @@ namespace Com.Hapiga.Scheherazade.Common.DataSync
 
         public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
+            if (!await ExistsAsync(key, ct)) return false;
+
             try
             {
-
+                ct.ThrowIfCancellationRequested();
                 await CloudSaveService.Instance
                     .Files
                     .Player.DeleteAsync(key);
+                ct.ThrowIfCancellationRequested();
                 return true;
             }
-            catch
+            catch (Exception exception)
             {
                 QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot delete file saved by unity cloud save adaptor"
+                    "Cannot delete cloud save file '{0}': {1}",
+                    key,
+                    exception.Message
                 );
+                throw;
             }
-
-            return false;
         }
 
         public async Task<bool> ExistsAsync(string key, CancellationToken ct = default)
         {
-            try
-            {
-                FileItem metadata = await CloudSaveService.Instance
-                    .Files
-                    .Player.GetMetadataAsync(key);
-                return metadata != null;
-            }
-            catch
-            {
-                QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot delete file saved by unity cloud save adaptor"
-                );
-            }
-
-            return false;
+            ct.ThrowIfCancellationRequested();
+            List<FileItem> files = await CloudSaveService.Instance
+                .Files
+                .Player
+                .ListAllAsync();
+            ct.ThrowIfCancellationRequested();
+            return files.Exists(file => string.Equals(
+                file.Key,
+                key,
+                StringComparison.Ordinal
+            ));
         }
 
         public async Task<DateTime?> GetLastWriteTimeAsync(string key, CancellationToken ct = default)
         {
-            try
-            {
-                FileItem metadata = await CloudSaveService.Instance
-                    .Files
-                    .Player.GetMetadataAsync(key);
+            if (!await ExistsAsync(key, ct)) return null;
 
-                return metadata?.Modified;
-            }
-            catch
-            {
-                QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot delete file saved by unity cloud save adaptor"
-                );
-            }
-
-            return null;
+            ct.ThrowIfCancellationRequested();
+            FileItem metadata = await CloudSaveService.Instance
+                .Files
+                .Player.GetMetadataAsync(key);
+            ct.ThrowIfCancellationRequested();
+            return metadata?.Modified;
         }
 
         public async Task<Stream> OpenReadAsync(string key, CancellationToken ct = default)
         {
-            try
+            if (!await ExistsAsync(key, ct)) return null;
+
+            ct.ThrowIfCancellationRequested();
+            Stream stream = await CloudSaveService.Instance
+                .Files
+                .Player
+                .LoadStreamAsync(key);
+            if (ct.IsCancellationRequested)
             {
-                return await CloudSaveService.Instance
-                    .Files
-                    .Player
-                    .LoadStreamAsync(key);
-            }
-            catch
-            {
-                QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot delete file saved by unity cloud save adaptor"
-                );
+                stream?.Dispose();
+                ct.ThrowIfCancellationRequested();
             }
 
-            return null;
+            return stream;
         }
 
         public async Task WriteAsync(string key, Stream data, CancellationToken ct = default)
         {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+
             try
             {
-                await CloudSaveService.Instance
-                    .Files
-                    .Player
-                    .SaveAsync(key, data);
+                ct.ThrowIfCancellationRequested();
+                using var payloadBuffer = new MemoryStream();
+                await data.CopyToAsync(payloadBuffer, 81920, ct);
+                var uploadStream = new MemoryStream(
+                    payloadBuffer.ToArray(),
+                    writable: false
+                );
+                Task saveTask;
+                try
+                {
+                    saveTask = CloudSaveService.Instance
+                        .Files
+                        .Player
+                        .SaveAsync(key, uploadStream);
+                }
+                catch
+                {
+                    uploadStream.Dispose();
+                    throw;
+                }
+
+                Task completedTask = await Task.WhenAny(
+                    saveTask,
+                    Task.Delay(ReadTimeout, ct)
+                );
+                if (completedTask != saveTask)
+                {
+                    ObservePendingUpload(saveTask, uploadStream);
+                    ct.ThrowIfCancellationRequested();
+                    throw new TimeoutException(
+                        $"Cloud save write timed out for '{key}'."
+                    );
+                }
+
+                try
+                {
+                    await saveTask;
+                    ct.ThrowIfCancellationRequested();
+                }
+                finally
+                {
+                    uploadStream.Dispose();
+                }
             }
-            catch
+            catch (OperationCanceledException)
+                when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
             {
                 QuickLog.Warning<UnityCloudSaveAdaptor>(
-                    "Cannot delete file saved by unity cloud save adaptor"
+                    "Cannot write cloud save file '{0}': {1}",
+                    key,
+                    exception.Message
                 );
+                throw;
             }
+        }
+
+        private static void ObservePendingUpload(
+            Task saveTask,
+            Stream uploadStream)
+        {
+            _ = saveTask.ContinueWith(
+                completedTask =>
+                {
+                    if (completedTask.IsFaulted)
+                    {
+                        _ = completedTask.Exception;
+                    }
+
+                    uploadStream.Dispose();
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default
+            );
         }
     }
 }

@@ -16,18 +16,25 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
     public sealed class NoBuildSettingsProvider : SettingsProvider
     {
         public const string Path = "Project/Tools/No Build";
-        private const float SidebarW = 190f;
-        private const float LabelW = 130f;
-        private const float EntryH = 26f;
+        private const float LabelW = EditorGuiLayout.DefaultLabelWidth;
         private static readonly string[] Tabs =
             { "Scene Sets", "Defines", "Build Profiles", "Devices", "Flags" };
+        private static readonly string[] StateFilters =
+            { "All", "Active", "Inactive" };
+        private static readonly string[] PlatformFilters =
+            { "All", "Android", "Other Platforms" };
+        private static readonly string[] FlagFilters =
+            { "All", "Template", "Custom" };
 
         private SerializedObject _so;
         private SerializedProperty _sceneSets, _defineSets, _buildProfiles, _flagDefs;
         private SerializedProperty _activeScene, _activeDefine;
         private int _tab;
         private int _selSet = -1, _selDef = -1, _selBuild = -1, _selFlag = -1;
-        private Vector2 _sbScroll, _pvScroll;
+        private Vector2 _pvScroll;
+        private string _searchQuery = string.Empty;
+        private int _filterIndex;
+        private int _expandedEntryIndex = -1;
 
         // ── Device Tab State ───────────────────────
         private List<AdbDeviceInfo> _cachedDevices;
@@ -37,62 +44,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private string _installAabPath = "";
         private List<WirelessDeviceInfo> _wirelessDevices;
         private string _pairingCode = "";
-
-        // ── GUI Styles (lazy) ────────────────────────
-        private GUIStyle _entryStyle, _entrySelStyle, _entryActStyle, _badgeStyle;
-        private GUIStyle _tabStyleActive, _tabStyleInactive;
-        private bool _stylesBuilt;
-
-        private void BuildStyles()
-        {
-            if (_stylesBuilt) return;
-            _stylesBuilt = true;
-
-            _entryStyle = new GUIStyle
-            {
-                fixedHeight = EntryH,
-                alignment = TextAnchor.MiddleLeft,
-                padding = new RectOffset(8, 4, 0, 0),
-                margin = new RectOffset(),
-                clipping = TextClipping.Clip,
-                fontSize = 11,
-                normal = { textColor = new Color(0.85f, 0.85f, 0.85f), background = EditorGuiTextures.ClearTex },
-                hover = { textColor = Color.white, background = EditorGuiTextures.ClearTex },
-            };
-            _entrySelStyle = new GUIStyle(_entryStyle)
-            {
-                normal = { textColor = Color.white },
-                fontStyle = FontStyle.Bold
-            };
-            _entryActStyle = new GUIStyle(_entryStyle)
-            {
-                normal = { textColor = new Color(0.3f, 0.95f, 0.3f) }
-            };
-            _badgeStyle = new GUIStyle(GUI.skin.box)
-            {
-                fixedHeight = 18,
-                fixedWidth = 22,
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = 10,
-                padding = new RectOffset(),
-                margin = new RectOffset(2, 4, 2, 2)
-            };
-
-            _tabStyleInactive = new GUIStyle(GUI.skin.button)
-            {
-                fixedHeight = 24f,
-                padding = new RectOffset(12, 12, 2, 2),
-                margin = new RectOffset(1, 1, 2, 0),
-                fontSize = 11,
-                fontStyle = FontStyle.Normal,
-                normal = { background = Texture2D.whiteTexture },
-                border = new RectOffset(0, 0, 0, 0)
-            };
-            _tabStyleActive = new GUIStyle(_tabStyleInactive)
-            {
-                fontStyle = FontStyle.Bold
-            };
-        }
 
         private NoBuildSettingsProvider(string p, SettingsScope sc,
             IEnumerable<string> kw = null) : base(p, sc, kw)
@@ -111,18 +62,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             base.OnGUI(searchContext);
             if (_so?.targetObject == null) { Refresh(); if (_so?.targetObject == null) return; }
             _so.Update();
-            BuildStyles();
-
             // Auto-select first entry when tab has no selection
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
             if (_tab == 0 && (_selSet < 0 || _selSet >= s.sceneSets.Count) && s.sceneSets.Count > 0)
                 _selSet = 0;
             if (_tab == 1 && (_selDef < 0 || _selDef >= s.scriptDefinitionSets.Count) && s.scriptDefinitionSets.Count > 0)
                 _selDef = 0;
+            if (_tab == 2 && (_selBuild < 0 || _selBuild >= s.buildProfiles.Count) && s.buildProfiles.Count > 0)
+                _selBuild = 0;
             if (_tab == 4 && (_selFlag < 0 || _selFlag >= s.flagDefinitions.Count) && s.flagDefinitions.Count > 0)
                 _selFlag = 0;
 
-            DrawCustomTabBar(ref _tab, Tabs);
+            DrawProviderHeader(s);
+            int selectedTab = EditorGuiLayout.DrawTabBar(_tab, Tabs);
+            if (selectedTab != _tab)
+            {
+                _tab = selectedTab;
+                _filterIndex = 0;
+                _expandedEntryIndex = -1;
+                _searchQuery = string.Empty;
+            }
+
             GUILayout.Space(4);
 
             if (_tab == 3)
@@ -131,112 +91,147 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
             else
             {
-                EditorGUILayout.BeginHorizontal();
-                DrawSidebar();
-                GUILayout.Space(2);
-                DrawPreview();
-                EditorGUILayout.EndHorizontal();
+                DrawCollectionBrowser();
             }
 
             _so.ApplyModifiedProperties();
         }
 
-        // ══════════════════════════════════════════════════
-        // ── Custom Tab Bar (flat, minimal)
-        // ══════════════════════════════════════════════════
-
-        private void DrawCustomTabBar(ref int selectedTab, string[] tabNames)
+        private static void DrawProviderHeader(NoBuildSettings settings)
         {
-            BuildStyles();
-
-            EditorGUILayout.BeginHorizontal();
-            for (int i = 0; i < tabNames.Length; i++)
-            {
-                bool isActive = selectedTab == i;
-                GUIStyle tabStyle = isActive
-                    ? _tabStyleActive : _tabStyleInactive;
-
-                Color oldBg = GUI.backgroundColor;
-                Color oldContent = GUI.contentColor;
-
-                if (isActive)
-                {
-                    GUI.backgroundColor =
-                        new Color(0.25f, 0.45f, 0.75f, 1f);
-                    GUI.contentColor = Color.white;
-                }
-                else
-                {
-                    GUI.backgroundColor = Color.clear;
-                    GUI.contentColor =
-                        new Color(0.6f, 0.6f, 0.6f);
-                }
-
-                Rect btnRect = GUILayoutUtility.GetRect(
-                    new GUIContent(tabNames[i]), tabStyle,
-                    GUILayout.ExpandWidth(false));
-
-                if (isActive)
-                {
-                    Rect accentRect = new(
-                        btnRect.x, btnRect.yMax - 2f,
-                        btnRect.width, 2f);
-                    EditorGUI.DrawRect(accentRect,
-                        new Color(0.3f, 0.6f, 1f));
-                }
-
-                if (GUI.Button(btnRect, tabNames[i], tabStyle))
-                    selectedTab = i;
-
-                GUI.backgroundColor = oldBg;
-                GUI.contentColor = oldContent;
-            }
-
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-            GUILayout.Space(2);
+            string sceneSet = settings.ActiveSceneSet?.setName ?? "No active scene set";
+            string defineSet = settings.ActiveScriptDefinitionSet?.setName ?? "No active define set";
+            EditorGuiLayout.DrawHeaderBox(
+                "No Build",
+                $"Scenes: {sceneSet}  •  Defines: {defineSet}"
+            );
         }
 
-        // ══════════════════════════════════════════════════
-        // ── Sidebar (fixed-width, constant-height entries)
-        // ══════════════════════════════════════════════════
-
-        private void DrawSidebar()
+        private void DrawCollectionBrowser()
         {
-            EditorGUILayout.BeginVertical(GUILayout.Width(SidebarW));
-            _sbScroll = EditorGUILayout.BeginScrollView(_sbScroll, GUIStyle.none, GUI.skin.verticalScrollbar);
+            DrawCollectionToolbar();
+            _pvScroll = EditorGUILayout.BeginScrollView(_pvScroll);
+            DrawCollectionList();
+            EditorGUILayout.EndScrollView();
+        }
 
+        private void DrawCollectionToolbar()
+        {
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Search", GUILayout.Width(LabelW));
+            _searchQuery = EditorGUILayout.TextField(
+                _searchQuery,
+                EditorStyles.toolbarSearchField,
+                GUILayout.ExpandWidth(true)
+            );
+            if (!string.IsNullOrEmpty(_searchQuery)
+                && GUILayout.Button("Clear", GUILayout.Width(48)))
+            {
+                _searchQuery = string.Empty;
+                GUI.FocusControl(null);
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            GUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(
+                "Filter",
+                GUILayout.Width(LabelW)
+            );
+            _filterIndex = GUILayout.Toolbar(
+                _filterIndex,
+                GetFilterLabels(),
+                GUILayout.ExpandWidth(true)
+            );
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button(GetAddButtonLabel(), GUILayout.Height(22)))
+            {
+                AddNew();
+            }
+
+            EditorGUI.BeginDisabledGroup(!HasSelection());
+            Color previousBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RunBlue;
+            if (GUILayout.Button(
+                    "Clone Selected",
+                    GUILayout.Height(22)
+                ))
+            {
+                CloneSelected();
+            }
+
+            GUI.backgroundColor = previousBackground;
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawCollectionList()
+        {
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
+            EditorGUILayout.LabelField(
+                GetCollectionLabel(),
+                EditorGuiStyles.SectionHeader
+            );
+            GUILayout.Space(2);
+            bool hasVisibleEntries = false;
 
             switch (_tab)
             {
                 case 0:
-                    DrawSidebarList(s.sceneSets.Select(x => x.setName).ToList(),
-                    s.activeSceneSetIndex, ref _selSet); break;
+                    hasVisibleEntries = DrawCollectionEntries(
+                        s.sceneSets.Select(x => x.setName).ToList(),
+                        s.activeSceneSetIndex,
+                        ref _selSet
+                    );
+                    break;
                 case 1:
-                    DrawSidebarList(s.scriptDefinitionSets.Select(x => x.setName).ToList(),
-                    s.activeScriptDefinitionSetIndex, ref _selDef); break;
+                    hasVisibleEntries = DrawCollectionEntries(
+                        s.scriptDefinitionSets.Select(x => x.setName).ToList(),
+                        s.activeScriptDefinitionSetIndex,
+                        ref _selDef
+                    );
+                    break;
                 case 2:
-                    DrawSidebarList(s.buildProfiles.Select(x =>
-                    x.profileName).ToList(),
-                    -1, ref _selBuild,
-                    s.buildProfiles.Select(x =>
-                        (BuildTarget?)x.buildConfiguration.platform)
-                         .ToList()); break;
+                    hasVisibleEntries = DrawCollectionEntries(
+                        s.buildProfiles.Select(x => x.profileName).ToList(),
+                        -1,
+                        ref _selBuild,
+                        s.buildProfiles.Select(
+                            x => (BuildTarget?)x.buildConfiguration.platform
+                        ).ToList()
+                    );
+                    break;
                 case 4:
-                    DrawSidebarList(
-                    s.flagDefinitions.Select((x, i) =>
-                        FlagDisplayName(x, i, s)).ToList(),
-                    -1, ref _selFlag); break;
+                    hasVisibleEntries = DrawCollectionEntries(
+                        s.flagDefinitions.Select((x, i) =>
+                            FlagDisplayName(x, i, s)
+                        ).ToList(),
+                        -1,
+                        ref _selFlag
+                    );
+                    break;
             }
 
-            EditorGUILayout.EndScrollView();
-            GUILayout.Space(4);
+            if (!hasVisibleEntries)
+            {
+                EditorGuiLayout.DrawEmptyState(
+                    string.IsNullOrEmpty(_searchQuery)
+                        ? $"No {GetCollectionLabel().ToLowerInvariant()} created."
+                        : "No matching entries.",
+                    string.IsNullOrEmpty(_searchQuery)
+                        ? "Use the create button above to add one."
+                        : "Clear or broaden the search and filter."
+                );
+            }
 
-            string add = _tab switch { 0 => "+ Scene Set", 1 => "+ Define Set", 2 => "+ Build Profile", 4 => "+ Flag Definition", _ => "" };
-            if (GUILayout.Button(add, GUILayout.Height(28))) AddNew();
+        }
 
-            bool hasSelection = _tab switch
+        private bool HasSelection()
+        {
+            return _tab switch
             {
                 0 => _selSet >= 0 && _selSet < _sceneSets.arraySize,
                 1 => _selDef >= 0 && _selDef < _defineSets.arraySize,
@@ -244,105 +239,255 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 4 => _selFlag >= 0 && _selFlag < _flagDefs.arraySize,
                 _ => false
             };
-
-            if (hasSelection)
-            {
-                GUI.backgroundColor = new Color(0.25f, 0.45f, 0.75f);
-                if (GUILayout.Button("Clone", GUILayout.Height(24)))
-                    CloneSelected();
-                GUI.backgroundColor = Color.white;
-            }
-
-            EditorGUILayout.EndVertical();
-
-            // Vertical separator
-            GUILayout.Box("", GUILayout.Width(2), GUILayout.ExpandHeight(true));
         }
 
-        private void DrawSidebarList(
+        private string GetAddButtonLabel()
+        {
+            return _tab switch
+            {
+                0 => "+ Scene Set",
+                1 => "+ Define Set",
+                2 => "+ Build Profile",
+                4 => "+ Flag Definition",
+                _ => string.Empty
+            };
+        }
+
+        private bool DrawCollectionEntries(
             List<string> names, int activeIdx, ref int selIdx,
             List<BuildTarget?> platforms = null)
         {
+            bool hasVisibleEntries = false;
             for (int i = 0; i < names.Count; i++)
             {
+                if (!MatchesCollectionFilter(names[i], i, activeIdx))
+                {
+                    continue;
+                }
+
+                hasVisibleEntries = true;
                 bool isSel = selIdx == i;
                 bool isAct = activeIdx == i;
-
-                Rect rowRect = GUILayoutUtility.GetRect(
-                    new GUIContent(names[i]), _entryStyle,
-                    GUILayout.Height(EntryH), GUILayout.ExpandWidth(true));
-
-                // ── Background + Border ──
-                Color bgColor, borderColor;
-                float borderW;
-
-                if (isAct)
+                bool isExpanded = _expandedEntryIndex == i;
+                if (DrawCollectionCard(
+                        names[i],
+                        isSel,
+                        isAct,
+                        isExpanded,
+                        platforms != null && i < platforms.Count
+                            ? platforms[i]
+                            : null,
+                        ref selIdx,
+                        i
+                    ))
                 {
-                    bgColor = new Color(0.15f, 0.5f, 0.15f, 0.45f);
-                    borderColor = isSel
-                        ? new Color(0.35f, 0.65f, 0.9f, 1f)
-                        : new Color(0.2f, 0.55f, 0.2f, 0.7f);
-                    borderW = isSel ? 2f : 1f;
-                }
-                else if (isSel)
-                {
-                    bgColor = new Color(0.22f, 0.42f, 0.7f, 0.35f);
-                    borderColor = new Color(0.35f, 0.55f, 0.85f, 0.9f);
-                    borderW = 2f;
-                }
-                else
-                {
-                    bgColor = new Color(0.25f, 0.25f, 0.25f, 0.15f);
-                    borderColor = new Color(0.4f, 0.4f, 0.4f, 0.4f);
-                    borderW = 1f;
-                }
-
-                // Fill
-                EditorGUI.DrawRect(rowRect, bgColor);
-                // Inner fill (slightly smaller for border effect)
-                Rect inner = rowRect;
-                inner.x += borderW; inner.y += borderW;
-                inner.width -= borderW * 2f; inner.height -= borderW * 2f;
-                EditorGUI.DrawRect(inner, new Color(bgColor.r, bgColor.g, bgColor.b, bgColor.a * 0.7f));
-                // Border (draw edges)
-                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, rowRect.width, borderW), borderColor);               // top
-                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.yMax - borderW, rowRect.width, borderW), borderColor);    // bottom
-                EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, borderW, rowRect.height), borderColor);                // left
-                EditorGUI.DrawRect(new Rect(rowRect.xMax - borderW, rowRect.y, borderW, rowRect.height), borderColor);    // right
-
-                // ── Label ──
-                var style = isSel ? _entrySelStyle : isAct ? _entryActStyle : _entryStyle;
-                string label = EditorGuiStrings.Truncate(names[i], 18);
-
-                Rect btnRect = rowRect;
-                if (platforms != null && i < platforms.Count
-                    && platforms[i].HasValue)
-                {
-                    // Draw platform icon on the RIGHT side
-                    GUIContent platIcon =
-                        PlatformIconUtility.GetPlatformIcon(
-                            platforms[i].Value);
-                    if (platIcon != null && platIcon.image != null)
-                    {
-                        Rect iconRect = new(
-                            rowRect.xMax - 20f,
-                            rowRect.y + 5f,
-                            16f, 16f);
-                        GUI.DrawTexture(iconRect,
-                            platIcon.image, ScaleMode.ScaleToFit);
-                    }
-
-                    // Shrink button so it doesn't overlap the icon
-                    btnRect = new Rect(
-                        rowRect.x, rowRect.y,
-                        rowRect.width - 22f, rowRect.height);
-                }
-
-                if (GUI.Button(btnRect, label, style))
-                {
-                    selIdx = i;
+                    break;
                 }
             }
+
+            return hasVisibleEntries;
+        }
+
+        private bool DrawCollectionCard(
+            string entryName,
+            bool isSelected,
+            bool isActive,
+            bool isExpanded,
+            BuildTarget? platform,
+            ref int selectedIndex,
+            int entryIndex)
+        {
+            int entryCountBefore = GetCurrentCollectionCount();
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.BeginHorizontal();
+
+            if (platform.HasValue)
+            {
+                GUIContent icon = PlatformIconUtility.GetPlatformIcon(
+                    platform.Value
+                );
+                GUILayout.Label(
+                    icon,
+                    GUILayout.Width(22),
+                    GUILayout.Height(22)
+                );
+
+                GUILayout.Label(
+                    PlatformIconUtility.GetPlatformDisplayName(
+                        platform.Value
+                    ),
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(92)
+                );
+            }
+
+            GUIStyle titleStyle = isSelected
+                ? EditorGuiStyles.HoverBoldLabel
+                : EditorGuiStyles.HoverLabel;
+            if (GUILayout.Button(
+                    new GUIContent(entryName, entryName),
+                    titleStyle,
+                    GUILayout.ExpandWidth(true)
+                ))
+            {
+                selectedIndex = entryIndex;
+                _expandedEntryIndex = entryIndex;
+            }
+
+            if (GUILayout.Button(
+                    isExpanded ? "Collapse" : "Expand",
+                    GUILayout.Width(70)
+                ))
+            {
+                selectedIndex = entryIndex;
+                _expandedEntryIndex = isExpanded ? -1 : entryIndex;
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            if (isExpanded)
+            {
+                GUILayout.Space(4);
+                DrawPreview();
+            }
+
+            EditorGUILayout.EndVertical();
+            Rect cardRect = GUILayoutUtility.GetLastRect();
+            if (isActive)
+            {
+                DrawCardOutline(cardRect, EditorGuiColors.ActiveGreen);
+            }
+
+            GUILayout.Space(4);
+            bool itemDeleted = GetCurrentCollectionCount() < entryCountBefore;
+            if (itemDeleted)
+            {
+                _expandedEntryIndex = -1;
+            }
+
+            return itemDeleted;
+        }
+
+        private static void DrawCardOutline(Rect rect, Color color)
+        {
+            if (Event.current.type != EventType.Repaint)
+            {
+                return;
+            }
+
+            const float Thickness = 2f;
+            EditorGUI.DrawRect(
+                new Rect(rect.x, rect.y, rect.width, Thickness),
+                color
+            );
+            EditorGUI.DrawRect(
+                new Rect(rect.x, rect.yMax - Thickness, rect.width, Thickness),
+                color
+            );
+            EditorGUI.DrawRect(
+                new Rect(rect.x, rect.y, Thickness, rect.height),
+                color
+            );
+            EditorGUI.DrawRect(
+                new Rect(rect.xMax - Thickness, rect.y, Thickness, rect.height),
+                color
+            );
+        }
+
+        private int GetCurrentCollectionCount()
+        {
+            NoBuildSettings settings = (NoBuildSettings)_so.targetObject;
+            return _tab switch
+            {
+                0 => settings.sceneSets.Count,
+                1 => settings.scriptDefinitionSets.Count,
+                2 => settings.buildProfiles.Count,
+                4 => settings.flagDefinitions.Count,
+                _ => 0
+            };
+        }
+
+        private string GetCollectionLabel()
+        {
+            return _tab switch
+            {
+                0 => "Scene Sets",
+                1 => "Define Sets",
+                2 => "Build Profiles",
+                4 => "Flag Definitions",
+                _ => string.Empty
+            };
+        }
+
+        private string[] GetFilterLabels()
+        {
+            return _tab switch
+            {
+                0 => StateFilters,
+                1 => StateFilters,
+                2 => PlatformFilters,
+                4 => FlagFilters,
+                _ => Array.Empty<string>()
+            };
+        }
+
+        private bool MatchesCollectionFilter(
+            string entryName,
+            int entryIndex,
+            int activeIndex)
+        {
+            if (!string.IsNullOrWhiteSpace(_searchQuery)
+                && entryName.IndexOf(
+                    _searchQuery,
+                    StringComparison.OrdinalIgnoreCase
+                ) < 0)
+            {
+                return false;
+            }
+
+            return _tab switch
+            {
+                0 => MatchesStateFilter(entryIndex, activeIndex),
+                1 => MatchesStateFilter(entryIndex, activeIndex),
+                2 => MatchesPlatformFilter(entryIndex),
+                4 => MatchesFlagFilter(entryIndex),
+                _ => true
+            };
+        }
+
+        private bool MatchesStateFilter(int entryIndex, int activeIndex)
+        {
+            return _filterIndex switch
+            {
+                1 => entryIndex == activeIndex,
+                2 => entryIndex != activeIndex,
+                _ => true
+            };
+        }
+
+        private bool MatchesPlatformFilter(int entryIndex)
+        {
+            NoBuildSettings settings = (NoBuildSettings)_so.targetObject;
+            BuildTarget platform = settings.buildProfiles[entryIndex]
+                .buildConfiguration.platform;
+            return _filterIndex switch
+            {
+                1 => platform == BuildTarget.Android,
+                2 => platform != BuildTarget.Android,
+                _ => true
+            };
+        }
+
+        private bool MatchesFlagFilter(int entryIndex)
+        {
+            NoBuildSettings settings = (NoBuildSettings)_so.targetObject;
+            FlagDefinitionType type = settings.flagDefinitions[entryIndex].type;
+            return _filterIndex switch
+            {
+                1 => type == FlagDefinitionType.Template,
+                2 => type == FlagDefinitionType.Custom,
+                _ => true
+            };
         }
 
         private void AddNew()
@@ -542,13 +687,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private void DrawPreview()
         {
-            EditorGUILayout.BeginVertical();
-            _pvScroll = EditorGUILayout.BeginScrollView(_pvScroll);
-
             switch (_tab) { case 0: DrawSceneSetPreview(); break; case 1: DrawDefinePreview(); break; case 2: DrawBuildPreview(); break; case 4: DrawFlagPreview(); break; }
-
-            EditorGUILayout.EndScrollView();
-            EditorGUILayout.EndVertical();
         }
 
         // ──────────────────────────────────────────────
@@ -559,7 +698,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
             if (_selSet < 0 || _selSet >= _sceneSets.arraySize)
-            { EditorGUILayout.LabelField("Select a scene set from the sidebar.", EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true)); return; }
+            { EditorGUILayout.LabelField("Select a scene set above.", EditorStyles.centeredGreyMiniLabel, GUILayout.ExpandHeight(true)); return; }
 
             var sp = _sceneSets.GetArrayElementAtIndex(_selSet);
             var nameP = sp.FindPropertyRelative("setName");
@@ -567,15 +706,30 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var combosP = sp.FindPropertyRelative("combinations");
             bool active = s.activeSceneSetIndex == _selSet;
 
-            // Title
+            EditorGuiLayout.DrawSectionHeader(
+                "Scene Set Configuration",
+                active ? "Currently active." : "Select this set to switch all configured scenes."
+            );
             EditorGUILayout.BeginHorizontal();
-            var oldC = GUI.contentColor;
-            if (active) GUI.contentColor = Color.green;
+            Color oldC = GUI.contentColor;
+            if (active) GUI.contentColor = EditorGuiColors.ActiveGreen;
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUI.contentColor = oldC; GUILayout.FlexibleSpace();
-            if (!active && GUILayout.Button("Set Active", GUILayout.Width(80)))
-            { s.activeSceneSetIndex = _selSet; EditorUtility.SetDirty(s); }
-            GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
+            if (!active)
+            {
+                Color previousBackground = GUI.backgroundColor;
+                GUI.backgroundColor = EditorGuiColors.BuildGreen;
+                if (GUILayout.Button("Set Active", GUILayout.Width(80)))
+                {
+                    s.activeSceneSetIndex = _selSet;
+                    EditorUtility.SetDirty(s);
+                }
+
+                GUI.backgroundColor = previousBackground;
+            }
+
+            Color previousDeleteBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RemoveRed;
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
             {
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
@@ -586,7 +740,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return;
                 }
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousDeleteBackground;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
@@ -607,42 +761,124 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
             GUILayout.Space(8);
 
-            // ── Combinations ──
-            EditorGUILayout.LabelField("Shortcut Combinations", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("  Toolbar [1]..[9] map to these when this set is active.",
-                EditorStyles.miniLabel);
+            DrawShortcutCombinations(combosP, scenesP);
+        }
 
-            for (int i = 0; i < combosP.arraySize; i++)
+        private void DrawShortcutCombinations(
+            SerializedProperty combinations,
+            SerializedProperty parentScenes)
+        {
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.LabelField(
+                "Shortcut Combinations",
+                EditorGuiStyles.SectionHeader
+            );
+            EditorGUILayout.HelpBox(
+                "Toolbar shortcuts [1]–[9] open these scene combinations when this set is active.",
+                MessageType.None
+            );
+
+            if (combinations.arraySize == 0)
             {
-                var cp = combosP.GetArrayElementAtIndex(i);
-                var cName = cp.FindPropertyRelative("name");
-                var cEn = cp.FindPropertyRelative("enabled");
-                var cRefs = cp.FindPropertyRelative("sceneReferences");
+                EditorGUILayout.HelpBox(
+                    "No shortcut combinations configured.",
+                    MessageType.Info
+                );
+            }
 
-                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                EditorGUILayout.BeginHorizontal();
-                GUI.backgroundColor = Color.gray;
-                GUILayout.Label((i + 1).ToString(), _badgeStyle);
-                GUI.backgroundColor = Color.white;
-                cEn.boolValue = EditorGUILayout.Toggle(cEn.boolValue, GUILayout.Width(16));
-                cName.stringValue = EditorGUILayout.TextField(cName.stringValue, GUILayout.Width(120));
-                if (GUILayout.Button("\u00D7", GUILayout.Width(22)))
-                { combosP.DeleteArrayElementAtIndex(i); break; }
-                EditorGUILayout.EndHorizontal();
+            for (int index = 0; index < combinations.arraySize; index++)
+            {
+                if (DrawShortcutCombinationCard(
+                        index,
+                        combinations,
+                        parentScenes
+                    ))
+                {
+                    break;
+                }
+            }
 
-                // Scene dropdowns from parent set
-                DrawComboSceneReferences(cRefs, scenesP);
+            Color previousBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.BuildGreen;
+            if (GUILayout.Button(
+                    "+ Add Shortcut Combination",
+                    GUILayout.Height(24)
+                ))
+            {
+                combinations.arraySize++;
+                SerializedProperty combination = combinations
+                    .GetArrayElementAtIndex(combinations.arraySize - 1);
+                combination.FindPropertyRelative("name").stringValue =
+                    "Shortcut " + combinations.arraySize;
+                combination.FindPropertyRelative("enabled").boolValue = true;
+            }
 
+            GUI.backgroundColor = previousBackground;
+            EditorGUILayout.EndVertical();
+        }
+
+        private bool DrawShortcutCombinationCard(
+            int index,
+            SerializedProperty combinations,
+            SerializedProperty parentScenes)
+        {
+            SerializedProperty combination = combinations
+                .GetArrayElementAtIndex(index);
+            SerializedProperty name = combination.FindPropertyRelative("name");
+            SerializedProperty enabled = combination.FindPropertyRelative("enabled");
+            SerializedProperty references = combination.FindPropertyRelative(
+                "sceneReferences"
+            );
+
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.BeginHorizontal();
+            Color previousBadgeColor = GUI.color;
+            GUI.color = enabled.boolValue
+                ? EditorGuiColors.ActiveGreen
+                : EditorGuiColors.InactiveGray;
+            GUILayout.Label(
+                $"{index + 1}",
+                EditorGuiStyles.Badge,
+                GUILayout.Width(24),
+                GUILayout.Height(20)
+            );
+            GUI.color = previousBadgeColor;
+
+            EditorGUILayout.LabelField(
+                $"Shortcut {index + 1}",
+                EditorStyles.boldLabel
+            );
+            GUILayout.FlexibleSpace();
+            enabled.boolValue = EditorGUILayout.ToggleLeft(
+                "Enabled",
+                enabled.boolValue,
+                GUILayout.Width(72)
+            );
+
+            Color previousDeleteBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RemoveRed;
+            bool shouldDelete = GUILayout.Button(
+                "Delete",
+                GUILayout.Width(58)
+            );
+            GUI.backgroundColor = previousDeleteBackground;
+            EditorGUILayout.EndHorizontal();
+
+            if (shouldDelete)
+            {
+                combinations.DeleteArrayElementAtIndex(index);
                 EditorGUILayout.EndVertical();
-                GUILayout.Space(2);
+                return true;
             }
 
-            if (GUILayout.Button("+ Add Combination", GUILayout.Height(22)))
-            {
-                combosP.arraySize++; var nc = combosP.GetArrayElementAtIndex(combosP.arraySize - 1);
-                nc.FindPropertyRelative("name").stringValue = "Combo " + combosP.arraySize;
-                nc.FindPropertyRelative("enabled").boolValue = true;
-            }
+            EditorGuiLayout.LabeledTextField("Name", name);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Scenes", EditorStyles.miniBoldLabel);
+            DrawComboSceneReferences(references, parentScenes);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(4);
+            return false;
         }
 
         private void DrawSceneReorderableList(SerializedProperty scenesP)
@@ -733,9 +969,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             if (sceneNames.Count == 0)
             {
-                EditorGUILayout.LabelField(
-                    "  (parent set has no scenes)",
-                    EditorStyles.miniLabel);
+                EditorGUILayout.HelpBox(
+                    "Add scenes to this scene set before creating a shortcut combination.",
+                    MessageType.Info
+                );
                 return;
             }
 
@@ -748,28 +985,41 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 var enP = refP.FindPropertyRelative("enabled");
 
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Space(42); // indent
+                EditorGUILayout.LabelField(
+                    $"Scene {j + 1}",
+                    GUILayout.Width(LabelW)
+                );
 
                 enP.boolValue = EditorGUILayout.Toggle(
                     enP.boolValue, GUILayout.Width(16));
 
-                int currentIndex = Mathf.Clamp(
-                    indexP.intValue, 0, sceneNames.Count - 1);
-                if (indexP.intValue < 0 && sceneNames.Count > 0)
-                    indexP.intValue = 0;
+                indexP.intValue = Mathf.Clamp(
+                    indexP.intValue,
+                    0,
+                    sceneNames.Count - 1
+                );
 
                 indexP.intValue = EditorGUILayout.Popup(
                     indexP.intValue, nameArray);
 
-                if (GUILayout.Button("\u2212", GUILayout.Width(22)))
+                Color previousRemoveBackground = GUI.backgroundColor;
+                GUI.backgroundColor = EditorGuiColors.RemoveRed;
+                if (GUILayout.Button("Remove", GUILayout.Width(62)))
                 {
                     sceneRefsP.DeleteArrayElementAtIndex(j);
+                    GUI.backgroundColor = previousRemoveBackground;
+                    EditorGUILayout.EndHorizontal();
                     break;
                 }
+
+                GUI.backgroundColor = previousRemoveBackground;
                 EditorGUILayout.EndHorizontal();
             }
 
-            if (GUILayout.Button("+ Add Scene", GUILayout.Height(20)))
+            if (GUILayout.Button(
+                    "+ Add Referenced Scene",
+                    GUILayout.Height(20)
+                ))
             {
                 sceneRefsP.arraySize++;
                 var newRef = sceneRefsP.GetArrayElementAtIndex(
@@ -794,18 +1044,31 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var slotsP = sp.FindPropertyRelative("slots");
             bool active = s.activeScriptDefinitionSetIndex == _selDef;
 
+            EditorGuiLayout.DrawSectionHeader(
+                "Script Define Set Configuration",
+                active ? "Currently applied." : "Apply this set to update scripting defines."
+            );
             EditorGUILayout.BeginHorizontal();
-            var oldC = GUI.contentColor;
-            if (active) GUI.contentColor = Color.green;
+            Color oldC = GUI.contentColor;
+            if (active) GUI.contentColor = EditorGuiColors.ActiveGreen;
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUI.contentColor = oldC; GUILayout.FlexibleSpace();
-            if (!active && GUILayout.Button("Apply", GUILayout.Width(60)))
+            if (!active)
             {
-                s.activeScriptDefinitionSetIndex = _selDef; EditorUtility.SetDirty(s);
-                _so.ApplyModifiedProperties();
-                ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]);
+                Color previousBackground = GUI.backgroundColor;
+                GUI.backgroundColor = EditorGuiColors.BuildGreen;
+                if (GUILayout.Button("Apply", GUILayout.Width(60)))
+                {
+                    s.activeScriptDefinitionSetIndex = _selDef;
+                    EditorUtility.SetDirty(s);
+                    _so.ApplyModifiedProperties();
+                    ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]);
+                }
+
+                GUI.backgroundColor = previousBackground;
             }
-            GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
+            Color previousDeleteBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RemoveRed;
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
             {
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
@@ -816,7 +1079,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return;
                 }
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousDeleteBackground;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
@@ -859,34 +1122,50 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var cfgP = pp.FindPropertyRelative("buildConfiguration");
             var folderP = pp.FindPropertyRelative("buildFolder.template");
             var nameTplP = pp.FindPropertyRelative("buildNameTemplate.template");
+            BuildProfile profile = s.buildProfiles[_selBuild];
+            string readiness = profile.HasValidSceneSet(s)
+                ? "Scene set configured."
+                : "Select a scene set before building.";
 
-            // Title
+            EditorGuiLayout.DrawSectionHeader(
+                "Build Profile Configuration",
+                $"{profile.buildConfiguration.platform} • {readiness}"
+            );
+
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
-            GUI.backgroundColor = new Color(0.3f, 0.7f, 0.3f);
-            if (GUILayout.Button("\u25B6 Build", GUILayout.Width(70)))
+            Color previousBuildBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.BuildGreen;
+            if (GUILayout.Button(
+                    PlatformIconUtility.BuildActionIcon,
+                    GUILayout.Width(78)
+                ))
             {
                 _so.ApplyModifiedProperties();
-                var profile = s.buildProfiles[_selBuild];
+                var selectedProfile = s.buildProfiles[_selBuild];
                 CustomPopupDropdown.ShowLastRect(
                     NoBuildDropdowns.CreateBuildConfirmPopup(
-                        profile, s,
-                        () => BuildExecutor.Build(profile),
+                        selectedProfile, s,
+                        () => BuildExecutor.Build(selectedProfile),
                         (option, serial) =>
                             BuildExecutor
                                 .BuildAndRunWithOptions(
-                                    profile, option,
+                                    selectedProfile, option,
                                     serial
                                 )
                         )
                     );
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousBuildBackground;
             if (s.buildProfiles[_selBuild].buildConfiguration.platform == BuildTarget.Android)
             {
-                GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
-                if (GUILayout.Button("\u25B6\u25B6 Run", GUILayout.Width(65)))
+                Color previousRunBackground = GUI.backgroundColor;
+                GUI.backgroundColor = EditorGuiColors.RunBlue;
+                if (GUILayout.Button(
+                        PlatformIconUtility.BuildAndRunActionIcon,
+                        GUILayout.Width(112)
+                    ))
                 {
                     _so.ApplyModifiedProperties();
                     CustomPopupDropdown.ShowLastRect(
@@ -902,9 +1181,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         )
                     );
                 }
-                GUI.backgroundColor = Color.white;
+                GUI.backgroundColor = previousRunBackground;
             }
-            GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
+            Color previousDeleteBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RemoveRed;
             if (GUILayout.Button("Delete", GUILayout.Width(55)))
             {
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
@@ -913,7 +1193,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1); return;
                 }
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousDeleteBackground;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
@@ -952,23 +1232,44 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
             var devBuildP = cfgP.FindPropertyRelative("developmentBuild");
             LblChk("Development Build", devBuildP);
-            bool isDev = devBuildP.boolValue;
-            GUI.enabled = isDev;
-            LblChk("Script Debugging", cfgP.FindPropertyRelative("allowDebugging"));
-            LblChk("Connect Profiler", cfgP.FindPropertyRelative("connectWithProfiler"));
-            GUI.enabled = true;
+            if (devBuildP.boolValue)
+            {
+                EditorGUI.indentLevel++;
+                LblChk(
+                    "Script Debugging",
+                    cfgP.FindPropertyRelative("allowDebugging")
+                );
+                LblChk(
+                    "Connect Profiler",
+                    cfgP.FindPropertyRelative("connectWithProfiler")
+                );
+                EditorGUI.indentLevel--;
+            }
 
             var sbeP = cfgP.FindPropertyRelative("scriptingBackend");
             LblBtnGroup("Scripting Backend", sbeP,
                 new[] { "Mono", "IL2CPP" },
                 new[] { (int)ScriptingImplementation.Mono2x, (int)ScriptingImplementation.IL2CPP });
-            bool isIL2CPP = sbeP.enumValueIndex == (int)ScriptingImplementation.IL2CPP;
-            GUI.enabled = isIL2CPP;
-            LblBtnGroup("IL2CPP Code Gen", cfgP.FindPropertyRelative("il2CppCodeGeneration"),
-                new[] { "Opt Size", "Opt Speed" },
-                new[] { (int)Il2CppCodeGeneration.OptimizeSize, (int)Il2CppCodeGeneration.OptimizeSpeed });
-            LblChk("Strip Engine Code", cfgP.FindPropertyRelative("stripEngineCode"));
-            GUI.enabled = true;
+            if (sbeP.enumValueIndex
+                == (int)ScriptingImplementation.IL2CPP)
+            {
+                EditorGUI.indentLevel++;
+                LblBtnGroup(
+                    "IL2CPP Code Gen",
+                    cfgP.FindPropertyRelative("il2CppCodeGeneration"),
+                    new[] { "Opt Size", "Opt Speed" },
+                    new[]
+                    {
+                        (int)Il2CppCodeGeneration.OptimizeSize,
+                        (int)Il2CppCodeGeneration.OptimizeSpeed
+                    }
+                );
+                LblChk(
+                    "Strip Engine Code",
+                    cfgP.FindPropertyRelative("stripEngineCode")
+                );
+                EditorGUI.indentLevel--;
+            }
 
             LblProp("Stripping Level", cfgP.FindPropertyRelative("strippingLevel"));
             LblTxt("Bundle Identifier", cfgP.FindPropertyRelative("bundleIdentifierOverride"));
@@ -990,8 +1291,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUILayout.Space(4);
                 EditorGUILayout.LabelField("Android", EditorStyles.boldLabel);
                 LblChk("Export Project", cfgP.FindPropertyRelative("androidExportProject"));
-                LblChk("Build App Bundle (AAB)", cfgP.FindPropertyRelative("androidBuildAppBundle"));
-                LblChk("Split Binary", cfgP.FindPropertyRelative("androidSplitBinary"));
+                SerializedProperty buildAppBundle = cfgP.FindPropertyRelative(
+                    "androidBuildAppBundle"
+                );
+                LblChk("Build App Bundle (AAB)", buildAppBundle);
+                if (!buildAppBundle.boolValue)
+                {
+                    EditorGUI.indentLevel++;
+                    LblChk(
+                        "Split Binary",
+                        cfgP.FindPropertyRelative("androidSplitBinary")
+                    );
+                    EditorGUI.indentLevel--;
+                }
 #if UNITY_ANDROID
                 LblProp("Debug Symbols", cfgP.FindPropertyRelative(
                     "debugSymbolLevel"));
@@ -1025,7 +1337,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 || _selFlag >= _flagDefs.arraySize)
             {
                 EditorGUILayout.LabelField(
-                    "Select a flag definition from the sidebar.",
+                    "Select a flag definition above.",
                     EditorStyles.centeredGreyMiniLabel,
                     GUILayout.ExpandHeight(true));
                 return;
@@ -1042,7 +1354,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var trueP = fp.FindPropertyRelative("trueFlag");
             var falseP = fp.FindPropertyRelative("falseFlag");
 
-            // Title
+            EditorGuiLayout.DrawSectionHeader(
+                "Flag Definition Configuration",
+                "Resolve a build-name placeholder from a template or custom define."
+            );
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(
                 FlagDisplayName(
@@ -1050,8 +1365,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     _selFlag, s),
                 EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
-            GUI.backgroundColor =
-                new Color(0.9f, 0.3f, 0.3f);
+            Color previousDeleteBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RemoveRed;
             if (GUILayout.Button("Delete",
                     GUILayout.Width(55)))
             {
@@ -1069,7 +1384,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     return;
                 }
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousDeleteBackground;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
@@ -1181,29 +1496,36 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private void DrawDevicePanel()
         {
-            // ── ADB Status ──
+            EditorGuiLayout.DrawHeaderBox(
+                "Devices",
+                "Manage Android Debug Bridge connections and install builds."
+            );
             string adbPath = AdbUtility.AdbPath;
             bool adbFound = !string.IsNullOrEmpty(adbPath)
                 && System.IO.File.Exists(adbPath);
 
-            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.LabelField("Environment", EditorGuiStyles.SectionHeader);
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("ADB:", GUILayout.Width(40));
-            GUI.color = adbFound ? Color.green : Color.red;
+            Color previousAdbColor = GUI.color;
+            GUI.color = adbFound
+                ? EditorGuiColors.ActiveGreen
+                : EditorGuiColors.RemoveRed;
             EditorGUILayout.LabelField(
                 adbFound ? "Found" : "Not found",
                 EditorStyles.boldLabel, GUILayout.Width(65));
-            GUI.color = Color.white;
+            GUI.color = previousAdbColor;
             EditorGUILayout.LabelField(adbPath ?? "(unknown)",
                 EditorStyles.miniLabel);
             EditorGUILayout.EndHorizontal();
 
-            // ── Package ──
             string pkg = "";
 #if UNITY_ANDROID
             pkg = PlayerSettings.GetApplicationIdentifier(
                 UnityEditor.Build.NamedBuildTarget.Android);
 #endif
-            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Package:",
                 GUILayout.Width(60));
             EditorGUILayout.LabelField(
@@ -1211,20 +1533,24 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     : pkg,
                 EditorStyles.boldLabel);
             EditorGUILayout.EndHorizontal();
-            GUILayout.Space(6);
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(4);
 
-            // ── Action Buttons ──
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.LabelField("Operations", EditorGuiStyles.SectionHeader);
             EditorGUILayout.BeginHorizontal();
-            GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
+            Color previousRefreshBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RunBlue;
             if (GUILayout.Button("\u21BB Refresh Devices",
                     GUILayout.Height(26)))
             {
                 RefreshDevices();
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousRefreshBackground;
 
             GUILayout.Space(8);
-            GUI.backgroundColor = new Color(0.5f, 0.7f, 0.5f);
+            Color previousApkBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.BuildGreen;
             if (GUILayout.Button("Install APK...",
                     GUILayout.Height(26)))
             {
@@ -1233,10 +1559,11 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 if (!string.IsNullOrEmpty(picked))
                     _installApkPath = picked;
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousApkBackground;
 
             GUILayout.Space(8);
-            GUI.backgroundColor = new Color(0.7f, 0.5f, 0.2f);
+            Color previousAabBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.WarningAmber;
             if (GUILayout.Button("Install AAB...",
                     GUILayout.Height(26)))
             {
@@ -1245,14 +1572,16 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 if (!string.IsNullOrEmpty(picked))
                     _installAabPath = picked;
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousAabBackground;
             EditorGUILayout.EndHorizontal();
-            GUILayout.Space(4);
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(6);
 
-            // ── Devices List ──
-            EditorGUILayout.LabelField("Connected Devices",
-                EditorStyles.boldLabel);
-            GUILayout.Space(2);
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.LabelField(
+                "Connected Devices",
+                EditorGuiStyles.SectionHeader
+            );
 
             var devices = GetCachedDevices();
 
@@ -1274,16 +1603,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         GUILayout.Space(2);
                 }
             }
+            EditorGUILayout.EndVertical();
 
-            GUILayout.Space(12);
+            GUILayout.Space(6);
 
-            // ── Wireless ADB ──
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
             EditorGUILayout.LabelField(
-                "Wireless Devices", EditorStyles.boldLabel);
-            GUILayout.Space(2);
+                "Wireless ADB",
+                EditorGuiStyles.SectionHeader
+            );
 
             EditorGUILayout.BeginHorizontal();
-            GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
+            Color previousScanBackground = GUI.backgroundColor;
+            GUI.backgroundColor = EditorGuiColors.RunBlue;
             if (GUILayout.Button(
                     "\uD83D\uDD0D Scan Network",
                     GUILayout.Height(26)))
@@ -1305,7 +1637,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         "OK");
                 }
             }
-            GUI.backgroundColor = Color.white;
+            GUI.backgroundColor = previousScanBackground;
             GUILayout.Space(8);
             if (_wirelessDevices != null
                 && _wirelessDevices.Count > 0)
@@ -1333,30 +1665,34 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     DrawWirelessRow(w, i);
                 }
             }
+            EditorGUILayout.EndVertical();
 
-            GUILayout.Space(12);
+            GUILayout.Space(6);
 
-            // ── Remembered Device ──
             string lastSerial = EditorPrefs.GetString(
                 "NoBuild_LastAdbDevice", "");
             if (!string.IsNullOrEmpty(lastSerial))
             {
+                EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
                 EditorGUILayout.LabelField(
-                    "Remembered Device", EditorStyles.boldLabel);
-                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                    "Remembered Device",
+                    EditorGuiStyles.SectionHeader
+                );
+                EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField(lastSerial,
                     EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
-                GUI.backgroundColor =
-                    new Color(0.9f, 0.3f, 0.3f);
+                Color previousForgetBackground = GUI.backgroundColor;
+                GUI.backgroundColor = EditorGuiColors.RemoveRed;
                 if (GUILayout.Button("Forget",
                         GUILayout.Width(65)))
                 {
                     EditorPrefs.DeleteKey(
                         "NoBuild_LastAdbDevice");
                 }
-                GUI.backgroundColor = Color.white;
+                GUI.backgroundColor = previousForgetBackground;
                 EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
             }
         }
 

@@ -105,6 +105,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             Action<string, float> onProgress,
             Action<S3Result> onComplete)
         {
+            UploadDirectory(
+                settings,
+                localDirectory,
+                null,
+                shouldCancel,
+                onProgress,
+                onComplete);
+        }
+
+        public static void UploadDirectory(
+            S3UploadSettings settings,
+            string localDirectory,
+            string finalRelativePath,
+            Func<bool> shouldCancel,
+            Action<string, float> onProgress,
+            Action<S3Result> onComplete)
+        {
             if (!ValidateSettings(settings, onComplete))
             {
                 return;
@@ -121,6 +138,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
 
             string[] files = DiscoverFiles(localDirectory);
+            MoveFinalFileToEnd(files, localDirectory, finalRelativePath);
 
             if (files.Length == 0)
             {
@@ -335,6 +353,37 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
 
             return filtered.ToArray();
+        }
+
+        private static void MoveFinalFileToEnd(
+            string[] files,
+            string localDirectory,
+            string finalRelativePath)
+        {
+            if (files == null
+                || files.Length < 2
+                || string.IsNullOrWhiteSpace(finalRelativePath))
+            {
+                return;
+            }
+
+            string finalPath = Path.GetFullPath(
+                Path.Combine(localDirectory, finalRelativePath));
+            for (int i = 0; i < files.Length; i++)
+            {
+                if (!string.Equals(
+                        Path.GetFullPath(files[i]),
+                        finalPath,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string file = files[i];
+                Array.Copy(files, i + 1, files, i, files.Length - i - 1);
+                files[files.Length - 1] = file;
+                return;
+            }
         }
 
         private static void AppendContentHeaders(
@@ -662,14 +711,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             string stringToSign = BuildStringToSign(
                 amzDate, settings.Region, canonicalRequest);
             string signature = CalculateSignature(
-                settings.SecretKey, amzDate,
+                settings.ResolvedSecretKey, amzDate,
                 settings.Region, stringToSign);
             string signedHeaders = BuildSignedHeaders(headers);
             string dateStamp
                 = DateTime.UtcNow.ToString(DateStampFormat);
 
             return $"{Algorithm} "
-                + $"Credential={settings.AccessKey}/{dateStamp}"
+                + $"Credential={settings.ResolvedAccessKey}/{dateStamp}"
                 + $"/{settings.Region}/{ServiceName}/{Terminator}, "
                 + $"SignedHeaders={signedHeaders}, "
                 + $"Signature={signature}";

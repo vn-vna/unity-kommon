@@ -4,7 +4,8 @@
     "references": [
         "Com.Hapiga.Scheherazade.PuzzleLevels",
         "Com.Hapiga.Scheherazade.Common",
-        "Com.Hapiga.Scheherazade.Editor"
+        "Com.Hapiga.Scheherazade.Editor",
+        "Com.Hapiga.Scheherazade.PuzzleLevels.Editor.Validation"
     ],
     "includePlatforms": [
         "Editor"

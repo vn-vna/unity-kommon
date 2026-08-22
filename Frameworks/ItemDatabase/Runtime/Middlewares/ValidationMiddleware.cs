@@ -13,31 +13,43 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
 
         public void OnBeforeAdd(InventoryItem item)
         {
-            if (string.IsNullOrEmpty(item.key))
-                throw new ItemDatabaseException("Item key cannot be empty");
-            if (ItemDatabase.GetDefinition(item.itemId) == null)
-                throw new ItemDatabaseException($"Definition '{item.itemId}' not found");
+            if (string.IsNullOrWhiteSpace(item.key))
+            {
+                throw new ItemDatabaseException(
+                    ItemDatabaseErrorCode.InvalidItemKey,
+                    "Item key cannot be empty."
+                );
+            }
+
+            if (string.IsNullOrWhiteSpace(item.itemId))
+            {
+                throw new ItemDatabaseException(
+                    ItemDatabaseErrorCode.InvalidItemId,
+                    "Item ID cannot be empty."
+                );
+            }
         }
 
         public void OnBeforeRemove(string key)
         {
-            if (string.IsNullOrEmpty(key))
-                throw new ItemDatabaseException("Remove key cannot be empty");
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new ItemDatabaseException(
+                    ItemDatabaseErrorCode.InvalidItemKey,
+                    "Remove key cannot be empty."
+                );
+            }
         }
 
         public void OnBeforeSetTag(string key, Type tagDefType, ITagData data)
         {
-            if (!ItemDatabase.HasItem(key))
-                throw new ItemDatabaseException($"Item '{key}' not found");
-            var item = ItemDatabase.GetItem(key);
-            if (!item.HasValue) return;
-            var def = ItemDatabase.GetDefinition(item.Value.itemId);
-            if (def == null) return;
-            bool allowed = false;
-            foreach (var tagDef in def.Tags)
-                if (tagDef.GetType() == tagDefType) { allowed = true; break; }
-            if (!allowed)
-                throw new ItemDatabaseException($"Tag '{tagDefType.Name}' not allowed on '{item.Value.itemId}'");
+            if (tagDefType == null || data == null)
+            {
+                throw new ItemDatabaseException(
+                    ItemDatabaseErrorCode.InvalidTagData,
+                    "Tag type and data are required."
+                );
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 #if UNITY_EDITOR
         [Tooltip("Human-readable description")]
 #endif
+        [TextArea(2, 5)]
         [SerializeField]
         private string _description;
 
@@ -30,7 +31,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         public string ItemId
         {
             get => _itemId;
-            set => _itemId = value;
+            internal set => _itemId = value;
         }
 
         public string Description

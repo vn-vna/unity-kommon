@@ -7,11 +7,13 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     /// Items with this tag can be stacked.
     /// Runtime data: StackableData { count }.
     /// </summary>
+    [ItemTagId("stackable")]
     public class StackableTag : TagDefinition
     {
 #if UNITY_EDITOR
         [Tooltip("Maximum items per stack")]
 #endif
+        [Min(1)]
         [SerializeField]
         private int _maxStack = 99999999;
 

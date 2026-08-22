@@ -128,6 +128,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         public override void OnGUI(Rect rect)
         {
+            EditorGuiLayout.DrawHeaderBox(
+                "No Build",
+                "Switch scenes and defines, then start a configured build."
+            );
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
             DrawSceneSets(); GUILayout.Space(SectSpace);
             DrawCombos();   GUILayout.Space(SectSpace);
@@ -149,7 +153,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 var s = _settings.sceneSets[i];
                 bool a = _settings.activeSceneSetIndex == i;
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                GUI.color = a ? Color.green : Color.gray;
+                GUI.color = a
+                    ? EditorGuiColors.ActiveGreen
+                    : EditorGuiColors.InactiveGray;
                 GUILayout.Label(a ? BulletOn : BulletOff, GUILayout.Width(BulletW));
                 GUI.color = Color.white;
                 if (GUILayout.Button(EditorGuiStrings.Truncate(s.setName, LabelMax), EditorGuiStyles.HoverLabel))
@@ -175,9 +181,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 var c = combos[i];
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                GUI.backgroundColor = Color.gray;
-                GUILayout.Label((i + One).ToString(), GUI.skin.box, GUILayout.Width(BadgeW), GUILayout.Height(BadgeH));
-                GUI.backgroundColor = Color.white;
+                Color previousBadgeColor = GUI.color;
+                GUI.color = EditorGuiColors.InactiveGray;
+                GUILayout.Label(
+                    (i + One).ToString(),
+                    EditorGuiStyles.Badge,
+                    GUILayout.Width(BadgeW),
+                    GUILayout.Height(BadgeH)
+                );
+                GUI.color = previousBadgeColor;
                 if (GUILayout.Button(EditorGuiStrings.Truncate(c.DisplayName, LabelMax), EditorGuiStyles.HoverLabel))
                 { SceneSwitcher.SwitchToCombination(c, active); editorWindow.Close(); }
                 int sc = c.sceneReferences?.Count(r => r.enabled && r.IsValid) ?? Zero;
@@ -196,7 +208,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 var s = _settings.scriptDefinitionSets[i];
                 bool a = _settings.activeScriptDefinitionSetIndex == i;
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                GUI.color = a ? Color.green : Color.gray;
+                GUI.color = a
+                    ? EditorGuiColors.ActiveGreen
+                    : EditorGuiColors.InactiveGray;
                 GUILayout.Label(a ? BulletOn : BulletOff, GUILayout.Width(BulletW));
                 GUI.color = Color.white;
                 if (GUILayout.Button(EditorGuiStrings.Truncate(s.setName, LabelMax), EditorGuiStyles.HoverLabel))
@@ -235,14 +249,22 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 EditorGUILayout.EndVertical();
                 GUILayout.FlexibleSpace();
                 GUI.backgroundColor = EditorGuiColors.BuildGreen;
-                if (GUILayout.Button("Build", GUILayout.Width(BtnW), GUILayout.Height(BtnH)))
+                if (GUILayout.Button(
+                        PlatformIconUtility.BuildActionIcon,
+                        GUILayout.Width(BtnW),
+                        GUILayout.Height(BtnH)
+                    ))
                 { BuildExecutor.Build(bp); editorWindow.Close(); }
                 GUI.backgroundColor = Color.white;
                 GUILayout.Space(2);
                 if (bp.buildConfiguration.platform == BuildTarget.Android)
                 {
-                    GUI.backgroundColor = new Color(0.3f, 0.5f, 0.9f);
-                    if (GUILayout.Button("\u25B6", GUILayout.Width(26), GUILayout.Height(BtnH)))
+                    GUI.backgroundColor = EditorGuiColors.RunBlue;
+                    if (GUILayout.Button(
+                            PlatformIconUtility.RunActionIcon,
+                            GUILayout.Width(34),
+                            GUILayout.Height(BtnH)
+                        ))
                     {
                         CustomPopupDropdown.ShowLastRect(
                             NoBuildDropdowns.CreateDeviceSelectPopup(

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Com.Hapiga.Scheherazade.Common.Logging;
 
 namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
@@ -16,20 +18,72 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         private readonly List<IItemDatabaseAfterAddMiddleware> _afterAdd = new List<IItemDatabaseAfterAddMiddleware>();
         private readonly List<IItemDatabaseAfterRemoveMiddleware> _afterRemove = new List<IItemDatabaseAfterRemoveMiddleware>();
         private readonly List<IItemDatabaseAfterSetTagMiddleware> _afterSetTag = new List<IItemDatabaseAfterSetTagMiddleware>();
+        private readonly Dictionary<Type, object> _registeredInstances
+            = new Dictionary<Type, object>();
 
         public void Register(object middleware)
         {
-            if (middleware is IItemDatabaseBeforeAddMiddleware bAdd) _beforeAdd.Add(bAdd);
-            if (middleware is IItemDatabaseBeforeRemoveMiddleware bRem) _beforeRemove.Add(bRem);
-            if (middleware is IItemDatabaseBeforeSetTagMiddleware bSet) _beforeSetTag.Add(bSet);
-            if (middleware is IItemDatabaseAfterAddMiddleware aAdd) _afterAdd.Add(aAdd);
-            if (middleware is IItemDatabaseAfterRemoveMiddleware aRem) _afterRemove.Add(aRem);
-            if (middleware is IItemDatabaseAfterSetTagMiddleware aSet) _afterSetTag.Add(aSet);
+            if (middleware == null) throw new ArgumentNullException(nameof(middleware));
+
+            Type middlewareType = middleware.GetType();
+            ValidateMiddlewareType(
+                middlewareType,
+                requireParameterlessConstructor: false
+            );
+            if (!_registeredInstances.TryAdd(middlewareType, middleware))
+            {
+                throw new ItemDatabaseException(
+                    $"Middleware '{middlewareType.FullName}' is registered more than once."
+                );
+            }
+
+            if (middleware is IItemDatabaseBeforeAddMiddleware beforeAdd)
+            {
+                _beforeAdd.Add(beforeAdd);
+            }
+
+            if (middleware is IItemDatabaseBeforeRemoveMiddleware beforeRemove)
+            {
+                _beforeRemove.Add(beforeRemove);
+            }
+
+            if (middleware is IItemDatabaseBeforeSetTagMiddleware beforeSetTag)
+            {
+                _beforeSetTag.Add(beforeSetTag);
+            }
+
+            if (middleware is IItemDatabaseAfterAddMiddleware afterAdd)
+            {
+                _afterAdd.Add(afterAdd);
+            }
+
+            if (middleware is IItemDatabaseAfterRemoveMiddleware afterRemove)
+            {
+                _afterRemove.Add(afterRemove);
+            }
+
+            if (middleware is IItemDatabaseAfterSetTagMiddleware afterSetTag)
+            {
+                _afterSetTag.Add(afterSetTag);
+            }
+
             SortAll();
         }
 
         public void Unregister(object middleware)
         {
+            if (middleware == null) return;
+
+            Type middlewareType = middleware.GetType();
+            if (!_registeredInstances.TryGetValue(
+                    middlewareType,
+                    out object registered)
+                || !ReferenceEquals(registered, middleware))
+            {
+                return;
+            }
+
+            _registeredInstances.Remove(middlewareType);
             if (middleware is IItemDatabaseBeforeAddMiddleware bAdd) _beforeAdd.Remove(bAdd);
             if (middleware is IItemDatabaseBeforeRemoveMiddleware bRem) _beforeRemove.Remove(bRem);
             if (middleware is IItemDatabaseBeforeSetTagMiddleware bSet) _beforeSetTag.Remove(bSet);
@@ -39,49 +93,158 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         }
 
         public void BeforeAdd(InventoryItem item)
-        { foreach (var mw in _beforeAdd) mw.OnBeforeAdd(item); }
+        {
+            foreach (IItemDatabaseBeforeAddMiddleware middleware in _beforeAdd)
+            {
+                middleware.OnBeforeAdd(item);
+            }
+        }
 
         public void BeforeRemove(string key)
-        { foreach (var mw in _beforeRemove) mw.OnBeforeRemove(key); }
+        {
+            foreach (IItemDatabaseBeforeRemoveMiddleware middleware in _beforeRemove)
+            {
+                middleware.OnBeforeRemove(key);
+            }
+        }
 
         public void BeforeSetTag(string key, Type tagDefType, ITagData data)
-        { foreach (var mw in _beforeSetTag) mw.OnBeforeSetTag(key, tagDefType, data); }
+        {
+            foreach (IItemDatabaseBeforeSetTagMiddleware middleware in _beforeSetTag)
+            {
+                middleware.OnBeforeSetTag(key, tagDefType, data);
+            }
+        }
 
         public void AfterAdd(InventoryItem item)
-        { foreach (var mw in _afterAdd) mw.OnAfterAdd(item); }
+        {
+            foreach (IItemDatabaseAfterAddMiddleware middleware in _afterAdd)
+            {
+                middleware.OnAfterAdd(item);
+            }
+        }
 
         public void AfterRemove(string key)
-        { foreach (var mw in _afterRemove) mw.OnAfterRemove(key); }
+        {
+            foreach (IItemDatabaseAfterRemoveMiddleware middleware in _afterRemove)
+            {
+                middleware.OnAfterRemove(key);
+            }
+        }
 
         public void AfterSetTag(string key, Type tagDefType, ITagData data)
-        { foreach (var mw in _afterSetTag) mw.OnAfterSetTag(key, tagDefType, data); }
+        {
+            foreach (IItemDatabaseAfterSetTagMiddleware middleware in _afterSetTag)
+            {
+                middleware.OnAfterSetTag(key, tagDefType, data);
+            }
+        }
 
         private void SortAll()
         {
-            _beforeAdd.Sort((a, b) => a.Priority.CompareTo(b.Priority));
-            _beforeRemove.Sort((a, b) => a.Priority.CompareTo(b.Priority));
-            _beforeSetTag.Sort((a, b) => a.Priority.CompareTo(b.Priority));
-            _afterAdd.Sort((a, b) => a.Priority.CompareTo(b.Priority));
-            _afterRemove.Sort((a, b) => a.Priority.CompareTo(b.Priority));
-            _afterSetTag.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+            StableSort(_beforeAdd, middleware => middleware.Priority);
+            StableSort(_beforeRemove, middleware => middleware.Priority);
+            StableSort(_beforeSetTag, middleware => middleware.Priority);
+            StableSort(_afterAdd, middleware => middleware.Priority);
+            StableSort(_afterRemove, middleware => middleware.Priority);
+            StableSort(_afterSetTag, middleware => middleware.Priority);
         }
 
         internal static InventoryMiddlewarePipeline FromConfig(ItemDatabaseConfiguration config)
         {
             var pipeline = new InventoryMiddlewarePipeline();
-            foreach (var typeName in config.MiddlewareTypeNames)
+            var configuredTypes = new HashSet<Type>();
+            foreach (string typeName in config.MiddlewareTypeNames)
             {
-                var type = Type.GetType(typeName);
-                if (type == null)
+                if (string.IsNullOrWhiteSpace(typeName))
                 {
-                    QuickLog.Warning<InventoryMiddlewarePipeline>("Middleware type not found: {0}", typeName);
-                    continue;
+                    throw new ItemDatabaseException(
+                        "Middleware configuration contains an empty type name."
+                    );
                 }
 
-                pipeline.Register((object)Activator.CreateInstance(type));
+                Type type = Type.GetType(typeName);
+                if (type == null)
+                {
+                    throw new ItemDatabaseException(
+                        $"Middleware type was not found: {typeName}"
+                    );
+                }
+
+                ValidateMiddlewareType(
+                    type,
+                    requireParameterlessConstructor: true
+                );
+                if (!configuredTypes.Add(type))
+                {
+                    throw new ItemDatabaseException(
+                        $"Middleware '{type.FullName}' is configured more than once."
+                    );
+                }
+
+                pipeline.Register(Activator.CreateInstance(type));
             }
 
             return pipeline;
+        }
+
+        private static void ValidateMiddlewareType(
+            Type type,
+            bool requireParameterlessConstructor)
+        {
+            if (type == null
+                || type.IsAbstract
+                || type.IsInterface
+                || type.ContainsGenericParameters)
+            {
+                throw new ItemDatabaseException("Middleware must be a concrete class.");
+            }
+
+            if (type.GetCustomAttribute<ItemDatabaseMiddlewareAttribute>() == null)
+            {
+                throw new ItemDatabaseException(
+                    $"Middleware '{type.FullName}' is missing [ItemDatabaseMiddleware]."
+                );
+            }
+
+            if (requireParameterlessConstructor
+                && type.GetConstructor(Type.EmptyTypes) == null)
+            {
+                throw new ItemDatabaseException(
+                    $"Middleware '{type.FullName}' needs a public parameterless constructor."
+                );
+            }
+
+            bool implementsHook = ImplementsSupportedHook(type);
+            if (!implementsHook)
+            {
+                throw new ItemDatabaseException(
+                    $"Middleware '{type.FullName}' does not implement an Item Database hook."
+                );
+            }
+        }
+
+        internal static bool ImplementsSupportedHook(Type type)
+        {
+            return type != null
+                && (typeof(IItemDatabaseBeforeAddMiddleware).IsAssignableFrom(type)
+                || typeof(IItemDatabaseBeforeRemoveMiddleware).IsAssignableFrom(type)
+                || typeof(IItemDatabaseBeforeSetTagMiddleware).IsAssignableFrom(type)
+                || typeof(IItemDatabaseAfterAddMiddleware).IsAssignableFrom(type)
+                || typeof(IItemDatabaseAfterRemoveMiddleware).IsAssignableFrom(type)
+                || typeof(IItemDatabaseAfterSetTagMiddleware).IsAssignableFrom(type));
+        }
+
+        private static void StableSort<T>(List<T> values, Func<T, int> getPriority)
+        {
+            T[] ordered = values
+                .Select((value, index) => new { value, index })
+                .OrderBy(entry => getPriority(entry.value))
+                .ThenBy(entry => entry.index)
+                .Select(entry => entry.value)
+                .ToArray();
+            values.Clear();
+            values.AddRange(ordered);
         }
     }
 }

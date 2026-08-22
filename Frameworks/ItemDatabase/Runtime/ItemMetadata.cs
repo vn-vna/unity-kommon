@@ -25,6 +25,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 #if UNITY_EDITOR
         [Tooltip("Arbitrary key-value extras (JSON string)")]
 #endif
+        [TextArea(3, 8)]
         [SerializeField]
         private string _extras;
 

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,31 +14,48 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
     /// </summary>
     public static class ItemDatabase
     {
-        private static bool _checkedEnabled;
-        private static bool _enabled;
-
         /// <summary>True if the ItemDatabase module is active (config found).</summary>
         public static bool IsEnabled
+            => ItemDatabaseConfiguration.LoadCanonical() != null;
+
+        public static ItemDatabaseLifecycleState State
+            => ItemDatabaseDirector.State;
+
+        public static Exception InitializationException
+            => ItemDatabaseDirector.InitializationException;
+
+        public static Task<ItemDatabaseInitializationResult> InitializationTask
+            => ItemDatabaseDirector.InitializationTask;
+
+        private static ItemDatabaseDirector TryGetReadyDirector()
         {
-            get
-            {
-                if (!_checkedEnabled)
-                {
-                    _enabled = ItemDatabaseConfiguration.Instance != null;
-                    _checkedEnabled = true;
-                }
-                return _enabled;
-            }
+            ItemDatabaseDirector director = ItemDatabaseDirector.Instance;
+            return ItemDatabaseDirector.State == ItemDatabaseLifecycleState.Ready
+                && director != null
+                && director.IsReady
+                ? director
+                : null;
         }
 
-        private static ItemDatabaseDirector EnsureDirector()
-            => IsEnabled ? ItemDatabaseDirector.Instance : null;
-
-        private static async Task<bool> EnsureReadyAsync()
+        private static async Task<ItemDatabaseDirector> GetReadyDirectorAsync(
+            CancellationToken cancellationToken = default)
         {
-            if (!IsEnabled) return false;
-            await ItemDatabaseDirector.ReadyTask;
-            return true;
+            if (!IsEnabled) return null;
+
+            bool ready = await ItemDatabaseTaskUtility.WaitAsync(
+                ItemDatabaseDirector.ReadyTask,
+                cancellationToken
+            );
+            return ready ? TryGetReadyDirector() : null;
+        }
+
+        private static ItemOperationResult CreateUnavailableResult()
+        {
+            return !IsEnabled
+                ? ItemOperationResult.Disabled()
+                : ItemOperationResult.Unavailable(
+                    $"Item Database is {State} and cannot accept commands."
+                );
         }
 
         // ═══════════════════════════════════════════════════════
@@ -48,14 +64,16 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 
         public static InventoryItem? GetItem(string key)
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(key)) return null;
+            ItemDatabaseDirector director = TryGetReadyDirector();
             return director != null ? director.Engine.GetItem(key) : null;
         }
 
         /// <summary>Get typed tag data for an item via the [TagData] attribute.</summary>
         public static T GetTag<T>(string key) where T : class, ITagData
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(key)) return null;
+            ItemDatabaseDirector director = TryGetReadyDirector();
             if (director == null) return null;
             var tagDefType = TagDataRegistry.GetTagDefType(typeof(T));
             return tagDefType != null
@@ -66,14 +84,16 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         /// <summary>Get all non-marker tag data attached to an item.</summary>
         public static ITagData[] GetTags(string key)
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(key)) return Array.Empty<ITagData>();
+            ItemDatabaseDirector director = TryGetReadyDirector();
             return director != null ? director.Engine.GetTagDatas(key) : Array.Empty<ITagData>();
         }
 
         /// <summary>Check if item has a specific TagDefinition (marker or data).</summary>
         public static bool HasTag<TTagDef>(string key) where TTagDef : TagDefinition
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(key)) return false;
+            ItemDatabaseDirector director = TryGetReadyDirector();
             if (director == null) return false;
 
             var dataType = TagDataRegistry.GetDataType(typeof(TTagDef));
@@ -87,14 +107,21 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
                 var def = GetDefinition(item.Value.itemId);
                 if (def == null) return false;
                 foreach (var tagDef in def.Tags)
-                    if (tagDef.GetType() == typeof(TTagDef)) return true;
+                {
+                    if (tagDef != null && tagDef.GetType() == typeof(TTagDef))
+                    {
+                        return true;
+                    }
+                }
+
                 return false;
             }
         }
 
         public static bool HasItem(string key)
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(key)) return false;
+            ItemDatabaseDirector director = TryGetReadyDirector();
             return director != null && director.Engine.HasItem(key);
         }
 
@@ -102,7 +129,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         {
             get
             {
-                var director = EnsureDirector();
+                ItemDatabaseDirector director = TryGetReadyDirector();
                 return director != null ? director.Engine.Count : 0;
             }
         }
@@ -112,17 +139,16 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         {
             get
             {
-                var director = EnsureDirector();
-                if (director == null) return Array.Empty<InventoryItem>();
-                var items = new List<InventoryItem>();
-                foreach (var kvp in director.Engine.Items) items.Add(kvp.Value);
-                return items.ToArray();
+                ItemDatabaseDirector director = TryGetReadyDirector();
+                return director != null
+                    ? director.Engine.GetItemsSnapshot()
+                    : Array.Empty<InventoryItem>();
             }
         }
 
         public static ItemQueryBuilder Query()
         {
-            var director = EnsureDirector();
+            ItemDatabaseDirector director = TryGetReadyDirector();
             return new ItemQueryBuilder(director != null ? director.Engine : null);
         }
 
@@ -134,16 +160,50 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
             InventoryItem item,
             CancellationToken ct = default)
         {
-            if (!await EnsureReadyAsync()) return;
-            await ItemDatabaseDirector.Instance.AddItemAsync(item, ct);
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return;
+            await director.AddItemAsync(item, ct);
+        }
+
+        public static async Task<ItemOperationResult> AddItemAsync(
+            AddItemRequest request,
+            CancellationToken ct = default)
+        {
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.AddItemAsync(request, ct);
         }
 
         public static async Task RemoveItemAsync(
             string key,
             CancellationToken ct = default)
         {
-            if (!await EnsureReadyAsync()) return;
-            await ItemDatabaseDirector.Instance.RemoveItemAsync(key, ct);
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return;
+            await director.RemoveItemAsync(key, ct);
+        }
+
+        public static async Task<ItemOperationResult> TryRemoveItemAsync(
+            string key,
+            CancellationToken ct = default)
+        {
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.TryRemoveItemAsync(key, ct);
+        }
+
+        public static async Task<ItemOperationResult> RemoveQuantityAsync(
+            string key,
+            int quantity,
+            CancellationToken ct = default)
+        {
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.RemoveQuantityAsync(
+                key,
+                quantity,
+                ct
+            );
         }
 
         public static async Task SetTagAsync<T>(
@@ -151,38 +211,120 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
             CancellationToken ct = default)
             where T : ITagData
         {
-            if (!await EnsureReadyAsync()) return;
-            var tagDefType = TagDataRegistry.GetTagDefType(typeof(T));
+            if (data == null)
+            {
+                throw new ItemDatabaseException("Tag data cannot be null.");
+            }
+
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return;
+            Type dataType = data.GetType();
+            Type tagDefType = TagDataRegistry.GetTagDefType(dataType);
             if (tagDefType == null)
                 throw new ItemDatabaseException(
-                    $"Type {typeof(T).Name} has no [TagData] attribute");
-            await ItemDatabaseDirector.Instance.SetTagAsync(key, tagDefType, data, ct);
+                    $"Type {dataType.Name} has no [TagData] attribute");
+            await director.SetTagAsync(key, tagDefType, data, ct);
+        }
+
+        public static async Task<ItemOperationResult> TrySetTagAsync<T>(
+            string key,
+            T data,
+            CancellationToken ct = default)
+            where T : ITagData
+        {
+            if (data == null)
+            {
+                return ItemOperationResult.Rejected(
+                    ItemDatabaseErrorCode.InvalidTagData,
+                    "Tag data cannot be null."
+                );
+            }
+
+            Type dataType = data.GetType();
+            Type tagDefinitionType = TagDataRegistry.GetTagDefType(dataType);
+            if (tagDefinitionType == null)
+            {
+                return ItemOperationResult.Rejected(
+                    ItemDatabaseErrorCode.InvalidTagData,
+                    $"Type '{dataType.Name}' has no [TagData] mapping."
+                );
+            }
+
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.TrySetTagAsync(
+                key,
+                tagDefinitionType,
+                data,
+                ct
+            );
         }
 
         public static async Task RemoveTagAsync(
             string key, Type tagDefType,
             CancellationToken ct = default)
         {
-            if (!await EnsureReadyAsync()) return;
-            await ItemDatabaseDirector.Instance.RemoveTagAsync(key, tagDefType, ct);
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return;
+            await director.RemoveTagAsync(key, tagDefType, ct);
+        }
+
+        public static async Task<ItemOperationResult> TryRemoveTagAsync(
+            string key,
+            Type tagDefinitionType,
+            CancellationToken ct = default)
+        {
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.TryRemoveTagAsync(
+                key,
+                tagDefinitionType,
+                ct
+            );
+        }
+
+        public static async Task<ItemOperationResult> ExpireNowAsync(
+            CancellationToken ct = default)
+        {
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return CreateUnavailableResult();
+            return await director.ExpireNowAsync(ct);
         }
 
         // ═══════════════════════════════════════════════════════
         // FIRE-AND-FORGET (no-ops when disabled)
         // ═══════════════════════════════════════════════════════
 
+        [Obsolete("Use AddItemAsync and await the returned Task.")]
         public static async void AddItem(InventoryItem item)
         {
-            if (!IsEnabled) return;
-            try { await ItemDatabaseDirector.Instance.AddItemAsync(item); }
-            catch (Exception ex) { QuickLog.Error<ItemDatabaseDirector>("AddItem failed: {0}", ex); }
+            try
+            {
+                await AddItemAsync(item);
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<ItemDatabaseDirector>(
+                    "AddItem failed: {0}",
+                    exception
+                );
+            }
         }
 
+        [Obsolete("Use RemoveItemAsync and await the returned Task.")]
         public static async void RemoveItem(string key)
         {
-            if (!IsEnabled) return;
-            try { await ItemDatabaseDirector.Instance.RemoveItemAsync(key); }
-            catch (Exception ex) { QuickLog.Error<ItemDatabaseDirector>("RemoveItem failed: {0}", ex); }
+            try
+            {
+                await RemoveItemAsync(key);
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<ItemDatabaseDirector>(
+                    "RemoveItem failed: {0}",
+                    exception
+                );
+            }
         }
 
         // ═══════════════════════════════════════════════════════
@@ -192,8 +334,9 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         public static async Task ForceSyncAsync(
             CancellationToken ct = default)
         {
-            if (!await EnsureReadyAsync()) return;
-            await ItemDatabaseDirector.Instance.Syncer.ForceSyncAsync(ct);
+            ItemDatabaseDirector director = await GetReadyDirectorAsync(ct);
+            if (director == null) return;
+            await director.ForceSyncAsync(ct);
         }
 
         // ═══════════════════════════════════════════════════════
@@ -202,7 +345,8 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
 
         public static ItemDefinition GetDefinition(string itemId)
         {
-            var director = EnsureDirector();
+            if (string.IsNullOrEmpty(itemId)) return null;
+            ItemDatabaseDirector director = TryGetReadyDirector();
             return director != null ? director.GetDefinition(itemId) : null;
         }
 
@@ -215,17 +359,25 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         {
             if (tagDefType == null) return null;
             var attr = tagDefType.GetCustomAttribute<OwnedByModuleAttribute>();
-            return attr?.ModuleName;
+            return string.IsNullOrWhiteSpace(attr?.ModuleName)
+                ? null
+                : attr.ModuleName;
         }
 
         /// <summary>Returns the owner module name, or null if unowned.</summary>
         public static string GetDefinitionOwner(string itemId)
         {
             var def = GetDefinition(itemId);
-            if (def == null) return null;
+            return GetDefinitionOwner(def);
+        }
 
-            foreach (var tagDef in def.Tags)
+        public static string GetDefinitionOwner(ItemDefinition definition)
+        {
+            if (definition == null) return null;
+
+            foreach (var tagDef in definition.Tags)
             {
+                if (tagDef == null) continue;
                 var owner = GetTagOwner(tagDef.GetType());
                 if (owner != null) return owner;
             }

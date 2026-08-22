@@ -34,10 +34,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private float _colPathWidth = 220f;
 
         // S3 upload state
+        private bool _validationFoldout = true;
         private bool _s3Foldout;
         private bool _isUploading;
+        private bool _canCancelUpload;
+        private bool _cancelUploadRequested;
         private float _uploadProgress;
         private string _uploadStatusMessage = "";
+        private CatalogValidationResult _lastValidation;
 
         private struct CachedHash
         {
@@ -81,6 +85,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             DrawHeader();
             DrawOutputSettings();
+            GUILayout.Space(8);
+            DrawRuntimeTargetGuidance();
+            GUILayout.Space(8);
+            DrawValidationSummary();
             GUILayout.Space(8);
             DrawDropZone();
             GUILayout.Space(8);
@@ -161,10 +169,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             _allConfigs.Sort((a, b)
                 => string.Compare(a.name, b.name, StringComparison.Ordinal));
 
+            int previousIndex = _config == null
+                ? -1
+                : _allConfigs.IndexOf(_config);
             if (_allConfigs.Count > 0)
             {
-                _selectedConfigIndex = 0;
-                SelectConfig(0);
+                SelectConfig(previousIndex >= 0 ? previousIndex : 0);
             }
             else
             {
@@ -190,10 +200,45 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             _selectedConfigIndex = index;
             _config = _allConfigs[index];
+            EnsureConfigInitialized();
             _searchFilter = "";
             _pageIndex = 0;
             _hashCache.Clear();
             InvalidateFilters();
+            _lastValidation = null;
+        }
+
+        private void EnsureConfigInitialized()
+        {
+            bool changed = false;
+            if (_config.Entries == null)
+            {
+                _config.Entries = new List<StagedCatalogEntry>();
+                changed = true;
+            }
+
+            if (_config.LastGenerated == null)
+            {
+                _config.LastGenerated = new CatalogBuildState();
+                changed = true;
+            }
+
+            if (_config.LastUploaded == null)
+            {
+                _config.LastUploaded = new CatalogBuildState();
+                changed = true;
+            }
+
+            if (_config.S3 == null)
+            {
+                _config.S3 = new S3UploadSettings();
+                changed = true;
+            }
+
+            if (changed)
+            {
+                EditorUtility.SetDirty(_config);
+            }
         }
 
         private void CreateNewConfig()
@@ -224,7 +269,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             RefreshConfigList();
 
             _selectedConfigIndex = _allConfigs.IndexOf(newConfig);
-            _config = newConfig;
+            SelectConfig(_selectedConfigIndex);
         }
 
         private void DeleteSelectedConfig()
@@ -341,8 +386,217 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 {
                     EditorUtility.SetDirty(_config);
                     AssetDatabase.SaveAssets();
+                    _lastValidation = null;
                 }
             }
+        }
+
+        #endregion
+
+        #region Runtime Target Guidance
+
+        private void DrawRuntimeTargetGuidance()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Runtime Provider", GUILayout.Width(105));
+                using (new EditorGUI.ChangeCheckScope())
+                {
+                    ScriptableObject provider = EditorGUILayout.ObjectField(
+                        _config.RuntimeProvider,
+                        typeof(ScriptableObject),
+                        false
+                    ) as ScriptableObject;
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(_config, "Set Catalog Runtime Provider");
+                        _config.RuntimeProvider = provider;
+                        EditorUtility.SetDirty(_config);
+                        AssetDatabase.SaveAssets();
+                    }
+                }
+            }
+
+            if (!CatalogBuildUtility.TryGetOutputDirectory(
+                    _config,
+                    out string outputDirectory,
+                    out _))
+            {
+                return;
+            }
+
+            string streamingAssetsDirectory = Path.GetFullPath(
+                Application.streamingAssetsPath);
+            bool isStreamingAssetsOutput = outputDirectory.StartsWith(
+                streamingAssetsDirectory,
+                StringComparison.OrdinalIgnoreCase);
+            string catalogPath = _config.CatalogFileName;
+            if (isStreamingAssetsOutput)
+            {
+                string outputRelativePath = outputDirectory.Substring(
+                    streamingAssetsDirectory.Length)
+                    .TrimStart(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar)
+                    .Replace('\\', '/');
+                catalogPath = string.IsNullOrWhiteSpace(outputRelativePath)
+                    ? _config.CatalogFileName
+                    : $"{outputRelativePath}/{_config.CatalogFileName}";
+            }
+
+            int separatorIndex = catalogPath.LastIndexOf('/');
+            string providerFolder = separatorIndex < 0
+                ? "<root>"
+                : catalogPath.Substring(0, separatorIndex);
+
+            EditorGUILayout.HelpBox(
+                isStreamingAssetsOutput
+                    ? "Streaming provider setup: enable Use Catalog, set "
+                        + $"Catalog File Name to '{catalogPath}', and set "
+                        + $"Subfolder to '{providerFolder}'."
+                    : "Online provider setup: enable Use Catalog, set Catalog "
+                        + $"File Name to '{catalogPath}', and set Base URL to "
+                        + "the S3/CDN prefix containing this catalog.",
+                MessageType.Info);
+
+            if (_config.RuntimeProvider == null)
+            {
+                return;
+            }
+
+            using (new EditorGUI.DisabledGroupScope(
+                       !CanConfigureRuntimeProvider(_config.RuntimeProvider)))
+            {
+                if (GUILayout.Button("Apply Catalog Settings to Runtime Provider"))
+                {
+                    ApplyRuntimeProviderSettings(
+                        _config.RuntimeProvider,
+                        catalogPath,
+                        providerFolder);
+                }
+            }
+        }
+
+        private static bool CanConfigureRuntimeProvider(ScriptableObject provider)
+        {
+            SerializedObject serializedProvider = new SerializedObject(provider);
+            return serializedProvider.FindProperty("_catalogFileName") != null
+                || serializedProvider.FindProperty("_catalogConfig") != null;
+        }
+
+        private static void ApplyRuntimeProviderSettings(
+            ScriptableObject provider,
+            string catalogPath,
+            string providerFolder)
+        {
+            SerializedObject serializedProvider = new SerializedObject(provider);
+            SerializedProperty downloadableCatalog = serializedProvider.FindProperty(
+                "_catalogFileName");
+            if (downloadableCatalog != null)
+            {
+                Undo.RecordObject(provider, "Configure Downloadable Catalog");
+                serializedProvider.FindProperty("_useCatalog").boolValue = true;
+                downloadableCatalog.stringValue = Path.GetFileName(catalogPath);
+                serializedProvider.ApplyModifiedProperties();
+                EditorUtility.SetDirty(provider);
+                return;
+            }
+
+            SerializedProperty streamingCatalog = serializedProvider.FindProperty(
+                "_catalogConfig");
+            if (streamingCatalog == null)
+            {
+                return;
+            }
+
+            Undo.RecordObject(provider, "Configure Streaming Catalog");
+            streamingCatalog.FindPropertyRelative("UseCatalog").boolValue = true;
+            streamingCatalog.FindPropertyRelative("CatalogFileName").stringValue
+                = catalogPath;
+            serializedProvider.FindProperty("subFolder").stringValue
+                = providerFolder == "<root>" ? string.Empty : providerFolder;
+            serializedProvider.ApplyModifiedProperties();
+            EditorUtility.SetDirty(provider);
+        }
+
+        #endregion
+
+        #region Validation
+
+        private void DrawValidationSummary()
+        {
+            _validationFoldout = EditorGUILayout.Foldout(
+                _validationFoldout,
+                "Catalog Validation",
+                true);
+            if (!_validationFoldout)
+            {
+                return;
+            }
+
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                if (_lastValidation == null)
+                {
+                    EditorGUILayout.LabelField(
+                        "Run validation before generating or uploading.",
+                        EditorStyles.miniLabel);
+                }
+                else if (_lastValidation.IsValid)
+                {
+                    string state = _config.LastGenerated?.ManifestHash
+                        == _lastValidation.ManifestHash
+                        ? "No manifest changes since the last generation."
+                        : "Manifest changes detected.";
+                    EditorGUILayout.HelpBox(
+                        $"Valid: {_lastValidation.ValidEntries.Count} entries. {state}",
+                        MessageType.Info);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(
+                        string.Join("\n", _lastValidation.Errors),
+                        MessageType.Error);
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Validate", GUILayout.Width(90)))
+                    {
+                        ValidateCatalog(true);
+                    }
+
+                    if (_config.LastGenerated?.HasBuild == true)
+                    {
+                        string hash = _config.LastGenerated.ManifestHash;
+                        EditorGUILayout.LabelField(
+                            $"Last build v{_config.LastGenerated.Version} · "
+                            + hash.Substring(0, Mathf.Min(12, hash.Length)),
+                            EditorStyles.miniLabel);
+                    }
+                }
+            }
+        }
+
+        private bool ValidateCatalog(bool showDialog)
+        {
+            _lastValidation = CatalogBuildUtility.Validate(_config);
+            if (_lastValidation.IsValid)
+            {
+                Repaint();
+                return true;
+            }
+
+            if (showDialog)
+            {
+                EditorUtility.DisplayDialog(
+                    "Catalog Validation Failed",
+                    string.Join("\n", _lastValidation.Errors),
+                    "OK");
+            }
+
+            Repaint();
+            return false;
         }
 
         #endregion
@@ -513,8 +767,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     _config.Entries.Clear();
                     _searchFilter = "";
                     _pageIndex = 0;
-                    _hashCache.Clear();
-                    InvalidateFilters();
+            _hashCache.Clear();
+            _lastValidation = null;
+            InvalidateFilters();
                     EditorUtility.SetDirty(_config);
                     AssetDatabase.SaveAssets();
                 }
@@ -629,11 +884,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 // Editable ID
                 using (new EditorGUI.ChangeCheckScope())
                 {
-                    entry.Id = EditorGUILayout.TextField(
+                    string newId = EditorGUILayout.TextField(
                         entry.Id, GUILayout.Width(_colIdWidth));
                     if (EditorGUI.EndChangeCheck())
                     {
+                        Undo.RecordObject(_config, "Change Catalog Entry ID");
+                        entry.Id = newId;
                         EditorUtility.SetDirty(_config);
+                        InvalidateFilters();
+                        _lastValidation = null;
                     }
                 }
 
@@ -653,13 +912,17 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 // Editable relative path
                 using (new EditorGUI.ChangeCheckScope())
                 {
-                    entry.RelativePath = EditorGUILayout.TextField(
+                    string newRelativePath = EditorGUILayout.TextField(
                         entry.RelativePath,
                         EditorStyles.miniTextField,
                         GUILayout.Width(_colPathWidth));
                     if (EditorGUI.EndChangeCheck())
                     {
+                        Undo.RecordObject(_config, "Change Catalog Entry Path");
+                        entry.RelativePath = newRelativePath;
                         EditorUtility.SetDirty(_config);
+                        InvalidateFilters();
+                        _lastValidation = null;
                     }
                 }
 
@@ -711,6 +974,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     _config.Entries.RemoveAt(index);
                     _hashCache.Remove(entry.SourceFilePath);
                     InvalidateFilters();
+                    _lastValidation = null;
                     EditorUtility.SetDirty(_config);
                     AssetDatabase.SaveAssets();
                 }
@@ -766,10 +1030,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                // Generate Catalog (local only)
                 using (new EditorGUI.DisabledGroupScope(
                     noEntries || _isUploading))
                 {
+                    if (GUILayout.Button("Validate",
+                            GUILayout.Height(30)))
+                    {
+                        ValidateCatalog(true);
+                    }
+
                     if (GUILayout.Button("Generate Catalog",
                             GUILayout.Height(30)))
                     {
@@ -784,8 +1053,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     if (GUILayout.Button("Upload to S3",
                             GUILayout.Height(30)))
                     {
-                        GenerateCatalog();
-                        UploadToS3();
+                        if (GenerateCatalog())
+                        {
+                            UploadToS3();
+                        }
                     }
                 }
             }
@@ -822,11 +1093,15 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                         "Region", s3.Region);
                     s3.Bucket = EditorGUILayout.TextField(
                         "Bucket", s3.Bucket);
-                    s3.AccessKey = EditorGUILayout.TextField(
-                        "Access Key", s3.AccessKey);
-
-                    s3.SecretKey = EditorGUILayout.PasswordField(
-                        "Secret Key", s3.SecretKey);
+                    s3.UseEnvironmentCredentials = EditorGUILayout.Toggle(
+                        "Use Environment Credentials",
+                        s3.UseEnvironmentCredentials);
+                    s3.AccessKeyEnvironmentVariable = EditorGUILayout.TextField(
+                        "Access Key Variable",
+                        s3.AccessKeyEnvironmentVariable);
+                    s3.SecretKeyEnvironmentVariable = EditorGUILayout.TextField(
+                        "Secret Key Variable",
+                        s3.SecretKeyEnvironmentVariable);
 
                     s3.BasePrefix = EditorGUILayout.TextField(
                         "Base Prefix", s3.BasePrefix);
@@ -861,6 +1136,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     GUILayout.Label(
                         _uploadStatusMessage,
                         EditorStyles.miniLabel);
+                    if (_canCancelUpload
+                        && GUILayout.Button("Cancel", GUILayout.Width(60)))
+                    {
+                        _cancelUploadRequested = true;
+                    }
                 }
             }
 
@@ -883,9 +1163,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             else if (!s3.IsValid)
             {
                 EditorGUILayout.HelpBox(
-                    "All S3 fields are required. Fill in Endpoint, "
-                    + "Region, Bucket, Access Key, and Secret Key.",
+                    "All S3 fields are required. Ensure Endpoint, Region, "
+                    + "Bucket, and the configured credential environment "
+                    + "variables are available to the Unity Editor.",
                     MessageType.Warning);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    s3.UseEnvironmentCredentials
+                        ? "Credentials are read from the Unity Editor process "
+                            + "environment and are not serialized in this asset."
+                        : "Legacy serialized credentials are enabled. Migrate "
+                            + "to environment variables before committing this asset.",
+                    s3.UseEnvironmentCredentials
+                        ? MessageType.Info
+                        : MessageType.Warning);
             }
 
             EditorGUI.indentLevel--;
@@ -894,6 +1187,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private void TestS3Connection()
         {
             _isUploading = true;
+            _canCancelUpload = false;
             _uploadProgress = 0f;
             _uploadStatusMessage = "Testing connection...";
             Repaint();
@@ -937,6 +1231,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
 
             _isUploading = true;
+            _canCancelUpload = true;
+            _cancelUploadRequested = false;
             _uploadProgress = 0f;
             _uploadStatusMessage = "Preparing upload...";
             Repaint();
@@ -944,43 +1240,120 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             S3Uploader.UploadDirectory(
                 _config.S3,
                 outputDir,
-                () => false, // No cancel support for now
+                _config.LastGenerated.CatalogRelativePath,
+                () => _cancelUploadRequested,
                 (status, progress) =>
                 {
                     _uploadStatusMessage = status;
                     _uploadProgress = progress;
                     Repaint();
                 },
-                result =>
+                HandleUploadComplete);
+        }
+
+        private void HandleUploadComplete(S3Result result)
+        {
+            if (!result.IsSuccess)
+            {
+                CompleteUpload(result);
+                return;
+            }
+
+            List<string> stalePaths = CatalogBuildUtility.GetStaleRelativePaths(
+                _config.LastUploaded,
+                _config.LastGenerated);
+            DeleteNextStaleRemoteFile(stalePaths, 0, result);
+        }
+
+        private void DeleteNextStaleRemoteFile(
+            List<string> stalePaths,
+            int index,
+            S3Result uploadResult)
+        {
+            if (_cancelUploadRequested)
+            {
+                CompleteUpload(new S3Result
                 {
-                    _isUploading = false;
-                    _uploadProgress = 1f;
-                    _uploadStatusMessage = "";
-
-                    if (result.IsSuccess)
-                    {
-                        EditorUtility.DisplayDialog(
-                            "Upload Complete",
-                            result.Message,
-                            "OK");
-                    }
-                    else
-                    {
-                        EditorUtility.DisplayDialog(
-                            "Upload Failed",
-                            result.Message,
-                            "OK");
-                    }
-
-                    Repaint();
+                    Status = S3UploadStatus.Cancelled,
+                    Message = "Upload cleanup was cancelled."
                 });
+                return;
+            }
+
+            if (index >= stalePaths.Count)
+            {
+                CompleteUpload(uploadResult);
+                return;
+            }
+
+            string key = CombineS3Key(_config.S3.BasePrefix, stalePaths[index]);
+            _uploadStatusMessage = $"Removing stale remote file: {stalePaths[index]}";
+            _uploadProgress = Mathf.Clamp01(
+                0.95f + ((float)index / Mathf.Max(1, stalePaths.Count)) * 0.05f);
+            S3Uploader.DeleteObject(_config.S3, key, result =>
+            {
+                if (!result.IsSuccess)
+                {
+                    CompleteUpload(new S3Result
+                    {
+                        Status = result.Status,
+                        HttpStatusCode = result.HttpStatusCode,
+                        Message = $"Upload completed, but stale remote file "
+                            + $"'{stalePaths[index]}' could not be removed: "
+                            + result.Message
+                    });
+                    return;
+                }
+
+                DeleteNextStaleRemoteFile(stalePaths, index + 1, uploadResult);
+            });
+        }
+
+        private void CompleteUpload(S3Result result)
+        {
+            _isUploading = false;
+            _canCancelUpload = false;
+            _cancelUploadRequested = false;
+            _uploadProgress = 1f;
+            _uploadStatusMessage = "";
+
+            if (result.IsSuccess)
+            {
+                Undo.RecordObject(_config, "Record Catalog Upload");
+                _config.LastUploaded = _config.LastGenerated;
+                EditorUtility.SetDirty(_config);
+                AssetDatabase.SaveAssets();
+                EditorUtility.DisplayDialog(
+                    "Upload Complete",
+                    result.Message + "\nCatalog and level payloads uploaded.",
+                    "OK");
+            }
+            else
+            {
+                EditorUtility.DisplayDialog(
+                    "Upload Failed",
+                    result.Message,
+                    "OK");
+            }
+
+            Repaint();
+        }
+
+        private static string CombineS3Key(string basePrefix, string relativePath)
+        {
+            return string.IsNullOrWhiteSpace(basePrefix)
+                ? relativePath.TrimStart('/')
+                : basePrefix.TrimEnd('/') + "/" + relativePath.TrimStart('/');
         }
 
         private string GetOutputDirectory()
         {
-            return Path.Combine(
-                _config.OutputFolder, _config.SubfolderName)
-                .Replace('\\', '/');
+            return CatalogBuildUtility.TryGetOutputDirectory(
+                _config,
+                out string outputDirectory,
+                out _)
+                ? outputDirectory
+                : null;
         }
 
         #endregion
@@ -1022,6 +1395,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             if (modified)
             {
                 InvalidateFilters();
+                _lastValidation = null;
                 EditorUtility.SetDirty(_config);
                 AssetDatabase.SaveAssets();
                 Repaint();
@@ -1032,143 +1406,117 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         #region Catalog Generation
 
-        private void GenerateCatalog()
+        private bool GenerateCatalog()
         {
-            if (_config.Entries.Count == 0)
+            if (!ValidateCatalog(true))
+            {
+                return false;
+            }
+
+            CatalogValidationResult validation = _lastValidation;
+            CatalogBuildState previousState = _config.LastGenerated;
+            bool hasManifestChanged = previousState == null
+                || !previousState.HasBuild
+                || !string.Equals(
+                    previousState.ManifestHash,
+                    validation.ManifestHash,
+                    StringComparison.Ordinal);
+            int generatedVersion = hasManifestChanged && previousState?.HasBuild == true
+                ? _config.Version + 1
+                : _config.Version;
+
+            try
+            {
+                Directory.CreateDirectory(validation.OutputDirectory);
+                int copied = CopyValidatedEntries(validation);
+                string catalogPath = Path.Combine(
+                    validation.OutputDirectory,
+                    validation.CatalogRelativePath);
+                string catalogJson = CatalogBuildUtility.BuildCatalogJson(
+                    generatedVersion,
+                    validation.ValidEntries);
+                File.WriteAllText(catalogPath, catalogJson, Encoding.UTF8);
+
+                CatalogBuildState generatedState
+                    = CatalogBuildUtility.CreateBuildState(
+                        validation,
+                        generatedVersion);
+                DeleteStaleLocalFiles(
+                    validation.OutputDirectory,
+                    previousState,
+                    generatedState);
+                ApplyGeneratedState(generatedState, validation);
+
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+                EditorUtility.DisplayDialog(
+                    "Catalog Generated",
+                    $"Version: {_config.Version}\n"
+                    + $"Files copied: {copied}/{validation.ValidEntries.Count}\n"
+                    + $"Catalog: {catalogPath}",
+                    "OK");
+                Repaint();
+                return true;
+            }
+            catch (Exception exception)
             {
                 EditorUtility.DisplayDialog(
-                    "No Files",
-                    "No files are staged. Drag files first.", "OK");
-                return;
+                    "Catalog Generation Failed",
+                    exception.Message,
+                    "OK");
+                return false;
             }
-
-            if (string.IsNullOrEmpty(_config.OutputFolder))
-            {
-                EditorUtility.DisplayDialog(
-                    "Invalid Path",
-                    "Output folder is not set.", "OK");
-                return;
-            }
-
-            string targetFolder = Path.Combine(
-                _config.OutputFolder, _config.SubfolderName)
-                .Replace('\\', '/');
-
-            // Detect changes and bump version
-            bool anyChange = false;
-            foreach (StagedCatalogEntry entry in _config.Entries)
-            {
-                string currentHash = ComputeHash(entry.SourceFilePath);
-                if (currentHash != entry.ContentHash)
-                {
-                    anyChange = true;
-                    entry.ContentHash = currentHash;
-                }
-            }
-
-            if (anyChange)
-            {
-                Undo.RecordObject(_config, "Bump Catalog Version");
-                _config.Version++;
-            }
-
-            // Ensure directories
-            if (!Directory.Exists(targetFolder))
-            {
-                Directory.CreateDirectory(targetFolder);
-            }
-
-            if (!Directory.Exists(_config.OutputFolder))
-            {
-                Directory.CreateDirectory(_config.OutputFolder);
-            }
-
-            // Copy files
-            int copied = 0;
-            foreach (StagedCatalogEntry entry in _config.Entries)
-            {
-                if (!File.Exists(entry.SourceFilePath))
-                {
-                    Debug.LogWarning(
-                        $"[Catalog] Source file missing: {entry.SourceFilePath}");
-                    continue;
-                }
-
-                try
-                {
-                    string destPath = Path.Combine(
-                        _config.OutputFolder, entry.RelativePath)
-                        .Replace('\\', '/');
-
-                    string destDir = Path.GetDirectoryName(destPath);
-                    if (!string.IsNullOrEmpty(destDir)
-                        && !Directory.Exists(destDir))
-                    {
-                        Directory.CreateDirectory(destDir);
-                    }
-
-                    File.Copy(entry.SourceFilePath, destPath, true);
-                    copied++;
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError(
-                        $"[Catalog] Failed to copy '{entry.SourceFilePath}': {ex.Message}");
-                }
-            }
-
-            // Generate catalog JSON
-            string catalogJson = BuildCatalogJson();
-            string catalogPath = Path.Combine(
-                _config.OutputFolder, _config.CatalogFileName)
-                .Replace('\\', '/');
-
-            File.WriteAllText(catalogPath, catalogJson, Encoding.UTF8);
-
-            EditorUtility.SetDirty(_config);
-            AssetDatabase.SaveAssets();
-            AssetDatabase.Refresh();
-
-            EditorUtility.DisplayDialog(
-                "Catalog Generated",
-                $"Version: {_config.Version}\n"
-                + $"Files copied: {copied}/{_config.Entries.Count}\n"
-                + $"Catalog: {catalogPath}",
-                "OK");
-
-            Repaint();
         }
 
-        private string BuildCatalogJson()
+        private int CopyValidatedEntries(CatalogValidationResult validation)
         {
-            StringBuilder sb = new StringBuilder();
-            sb.AppendLine("{");
-            sb.AppendLine($"  \"version\": {_config.Version},");
-            sb.AppendLine("  \"entries\": [");
-
-            for (int i = 0; i < _config.Entries.Count; i++)
+            int copied = 0;
+            foreach (ValidatedCatalogEntry entry in validation.ValidEntries)
             {
-                StagedCatalogEntry entry = _config.Entries[i];
-                string typeStr = entry.Type == DataType.Binary
-                    ? "binary" : "text";
-                string comma = i < _config.Entries.Count - 1
-                    ? "," : "";
-
-                sb.AppendLine("    {");
-                sb.AppendLine($"      \"id\": \"{EscapeJson(entry.Id)}\",");
-                sb.AppendLine($"      \"type\": \"{typeStr}\",");
-                sb.AppendLine(
-                    $"      \"relativePath\": \"{EscapeJson(entry.RelativePath)}\",");
-                sb.AppendLine(
-                    $"      \"contentHash\": \"{EscapeJson(entry.ContentHash)}\"");
-                sb.Append($"    }}{comma}");
-                sb.AppendLine();
+                string destinationPath = Path.Combine(
+                    validation.OutputDirectory,
+                    entry.RelativePath);
+                string destinationDirectory = Path.GetDirectoryName(destinationPath);
+                Directory.CreateDirectory(destinationDirectory);
+                File.Copy(entry.Source.SourceFilePath, destinationPath, true);
+                copied++;
             }
 
-            sb.AppendLine("  ]");
-            sb.AppendLine("}");
+            return copied;
+        }
 
-            return sb.ToString();
+        private void DeleteStaleLocalFiles(
+            string outputDirectory,
+            CatalogBuildState previousState,
+            CatalogBuildState currentState)
+        {
+            foreach (string relativePath in CatalogBuildUtility.GetStaleRelativePaths(
+                         previousState,
+                         currentState))
+            {
+                string stalePath = Path.Combine(outputDirectory, relativePath);
+                if (File.Exists(stalePath))
+                {
+                    File.Delete(stalePath);
+                }
+            }
+        }
+
+        private void ApplyGeneratedState(
+            CatalogBuildState generatedState,
+            CatalogValidationResult validation)
+        {
+            Undo.RecordObject(_config, "Generate Catalog");
+            _config.Version = generatedState.Version;
+            _config.LastGenerated = generatedState;
+            foreach (ValidatedCatalogEntry entry in validation.ValidEntries)
+            {
+                entry.Source.Id = entry.Id;
+                entry.Source.RelativePath = entry.RelativePath;
+                entry.Source.ContentHash = entry.ContentHash;
+            }
+
+            EditorUtility.SetDirty(_config);
         }
 
         #endregion
