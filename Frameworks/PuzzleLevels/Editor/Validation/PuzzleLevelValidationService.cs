@@ -59,22 +59,29 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
         {
             List<PuzzleLevelValidationDiagnostic> diagnostics
                 = CreatePreflightDiagnostics(request);
+            var steps = new List<PuzzleLevelValidationStep>
+            {
+                CreateStep("Framework preflight", diagnostics)
+            };
             if (HasErrors(diagnostics))
             {
                 return new PuzzleLevelValidationResult(
                     diagnostics,
                     request?.ContentHash,
-                    string.Empty);
+                    string.Empty,
+                    steps);
             }
 
             ValidatorSelection selection = SelectValidator(request);
             diagnostics.AddRange(selection.Diagnostics);
+            steps.Add(CreateStep("Validator selection", selection.Diagnostics));
             if (selection.Validator == null)
             {
                 return new PuzzleLevelValidationResult(
                     diagnostics,
                     request.ContentHash,
-                    string.Empty);
+                    string.Empty,
+                    steps);
             }
 
             string cacheKey = CreateValidationCacheKey(request, selection.Validator);
@@ -85,10 +92,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
             }
 
             diagnostics.AddRange(cacheValue.Diagnostics);
+            steps.AddRange(cacheValue.Steps);
             return new PuzzleLevelValidationResult(
                 diagnostics,
                 request.ContentHash,
-                selection.Validator.DisplayName);
+                selection.Validator.DisplayName,
+                steps);
         }
 
         public static bool TryDeserialize(
@@ -370,10 +379,28 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
         {
             try
             {
+                if (validator.Instance is IPuzzleLevelDetailedValidator detailed)
+                {
+                    PuzzleLevelValidationDetails details = detailed.ValidateDetailed(
+                        request
+                    );
+                    return new ValidationCacheValue(
+                        details?.Diagnostics
+                            ?? Array.Empty<PuzzleLevelValidationDiagnostic>(),
+                        details?.Steps ?? Array.Empty<PuzzleLevelValidationStep>()
+                    );
+                }
+
                 IReadOnlyList<PuzzleLevelValidationDiagnostic> validatorDiagnostics
                     = validator.Instance.Validate(request);
                 return new ValidationCacheValue(
-                    validatorDiagnostics ?? Array.Empty<PuzzleLevelValidationDiagnostic>());
+                    validatorDiagnostics
+                        ?? Array.Empty<PuzzleLevelValidationDiagnostic>(),
+                    new[]
+                    {
+                        CreateStep("Validator execution", validatorDiagnostics)
+                    }
+                );
             }
             catch (Exception exception)
             {
@@ -382,8 +409,47 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
                     new[] { new PuzzleLevelValidationDiagnostic(
                         "VALIDATOR_EXCEPTION",
                         PuzzleLevelValidationSeverity.Error,
-                        $"Validator '{validator.DisplayName}' failed while validating this entry.") });
+                        $"Validator '{validator.DisplayName}' failed while validating this entry.") },
+                    new[] { new PuzzleLevelValidationStep(
+                        "Validator execution",
+                        PuzzleLevelValidationStepStatus.Failed,
+                        new[] { exception.Message }
+                    ) }
+                );
             }
+        }
+
+        private static PuzzleLevelValidationStep CreateStep(
+            string name,
+            IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics
+        )
+        {
+            if (diagnostics == null || diagnostics.Count == 0)
+            {
+                return new PuzzleLevelValidationStep(
+                    name,
+                    PuzzleLevelValidationStepStatus.Success
+                );
+            }
+
+            var messages = new string[diagnostics.Count];
+            bool hasError = false;
+            bool hasWarning = false;
+            for (int index = 0; index < diagnostics.Count; index++)
+            {
+                PuzzleLevelValidationDiagnostic diagnostic = diagnostics[index];
+                messages[index] = $"[{diagnostic.Code}] {diagnostic.Message}";
+                hasError |= diagnostic.Severity == PuzzleLevelValidationSeverity.Error;
+                hasWarning |= diagnostic.Severity
+                    == PuzzleLevelValidationSeverity.Warning;
+            }
+
+            PuzzleLevelValidationStepStatus status = hasError
+                ? PuzzleLevelValidationStepStatus.Failed
+                : hasWarning
+                    ? PuzzleLevelValidationStepStatus.Warning
+                    : PuzzleLevelValidationStepStatus.Success;
+            return new PuzzleLevelValidationStep(name, status, messages);
         }
 
         private static string CreateValidationCacheKey(
@@ -465,11 +531,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
         private sealed class ValidationCacheValue
         {
             public IReadOnlyList<PuzzleLevelValidationDiagnostic> Diagnostics { get; }
+            public IReadOnlyList<PuzzleLevelValidationStep> Steps { get; }
 
             public ValidationCacheValue(
-                IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics)
+                IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics,
+                IReadOnlyList<PuzzleLevelValidationStep> steps
+            )
             {
                 Diagnostics = diagnostics;
+                Steps = steps;
             }
         }
 

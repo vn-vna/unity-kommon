@@ -12,6 +12,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
         Error
     }
 
+    public enum PuzzleLevelValidationStepStatus
+    {
+        Success,
+        Warning,
+        Failed
+    }
+
     public sealed class PuzzleLevelValidationDiagnostic
     {
         public string Code { get; }
@@ -26,6 +33,40 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
             Code = code;
             Severity = severity;
             Message = message;
+        }
+    }
+
+    public sealed class PuzzleLevelValidationStep
+    {
+        public string Name { get; }
+        public PuzzleLevelValidationStepStatus Status { get; }
+        public IReadOnlyList<string> Messages { get; }
+
+        public PuzzleLevelValidationStep(
+            string name,
+            PuzzleLevelValidationStepStatus status,
+            IReadOnlyList<string> messages = null
+        )
+        {
+            Name = name;
+            Status = status;
+            Messages = messages ?? Array.Empty<string>();
+        }
+    }
+
+    public sealed class PuzzleLevelValidationDetails
+    {
+        public IReadOnlyList<PuzzleLevelValidationDiagnostic> Diagnostics { get; }
+        public IReadOnlyList<PuzzleLevelValidationStep> Steps { get; }
+
+        public PuzzleLevelValidationDetails(
+            IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics,
+            IReadOnlyList<PuzzleLevelValidationStep> steps
+        )
+        {
+            Diagnostics = diagnostics
+                ?? Array.Empty<PuzzleLevelValidationDiagnostic>();
+            Steps = steps ?? Array.Empty<PuzzleLevelValidationStep>();
         }
     }
 
@@ -61,6 +102,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
     public sealed class PuzzleLevelValidationResult
     {
         public IReadOnlyList<PuzzleLevelValidationDiagnostic> Diagnostics { get; }
+        public IReadOnlyList<PuzzleLevelValidationStep> Steps { get; }
         public string ContentHash { get; }
         public string ValidatorName { get; }
 
@@ -70,9 +112,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
         public PuzzleLevelValidationResult(
             IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics,
             string contentHash,
-            string validatorName)
+            string validatorName,
+            IReadOnlyList<PuzzleLevelValidationStep> steps = null)
         {
             Diagnostics = diagnostics ?? Array.Empty<PuzzleLevelValidationDiagnostic>();
+            Steps = steps ?? Array.Empty<PuzzleLevelValidationStep>();
             ContentHash = contentHash;
             ValidatorName = validatorName;
         }
@@ -116,5 +160,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validati
             PuzzleLevelValidationRequest request,
             out PuzzleLevelDeserializationResult result,
             out string error);
+    }
+
+    public interface IPuzzleLevelDetailedValidator : IPuzzleLevelValidator
+    {
+        PuzzleLevelValidationDetails ValidateDetailed(
+            PuzzleLevelValidationRequest request
+        );
     }
 }

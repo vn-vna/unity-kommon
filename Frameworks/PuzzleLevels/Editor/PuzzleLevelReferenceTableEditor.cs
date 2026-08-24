@@ -22,6 +22,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private const float IdColumnWidth = 150f;
         private const float TypeColumnWidth = 76f;
         private const float ValidColumnWidth = 84f;
+        private const int MaximumExpandedDataLength = 262144;
+        private const float MaximumExpandedDataHeight = 260f;
 
         #endregion
 
@@ -46,6 +48,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private SerializedProperty _entriesProperty;
         private SerializedProperty _enableEntryAutoIdProperty;
         private SerializedProperty _entryAutoIdTemplateProperty;
+        private int _expandedEntryIndex = -1;
+        private Vector2 _expandedDataScrollPosition;
 
         #endregion
 
@@ -302,8 +306,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
             using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
             {
-                if (GUILayout.Button("C", EditorStyles.miniButton,
-                        GUILayout.Width(ContextColumnWidth)))
+                GUIContent editIcon = EditorGUIUtility.IconContent("d_editicon.sml");
+                editIcon.tooltip = "Edit level entry";
+                if (GUILayout.Button(
+                        editIcon,
+                        EditorStyles.miniButton,
+                        GUILayout.Width(ContextColumnWidth)
+                    ))
                 {
                     Rect buttonRect = GUILayoutUtility.GetLastRect();
                     OpenEntryContextMenu(buttonRect, index, levelId, asset);
@@ -320,6 +329,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                     GUILayout.Width(TypeColumnWidth));
                 DrawValidationStatus(validation, diagnostics);
             }
+
+            DrawExpandedEntryData(index, request);
         }
 
         private void DrawValidationStatus(
@@ -339,12 +350,27 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 : hasWarning
                     ? new Color(0.92f, 0.7f, 0.2f)
                     : new Color(0.35f, 0.8f, 0.4f);
-            EditorGUILayout.LabelField(
-                new GUIContent($"● {label}", CreateValidationTooltip(
-                    validation,
-                    diagnostics)),
+            GUIContent content = new GUIContent(
+                $"● {label}",
+                CreateValidationTooltip(validation, diagnostics)
+            );
+            Rect statusRect = GUILayoutUtility.GetRect(
+                content,
                 EditorStyles.miniBoldLabel,
-                GUILayout.Width(ValidColumnWidth));
+                GUILayout.Width(ValidColumnWidth)
+            );
+            EditorGUI.LabelField(statusRect, content, EditorStyles.miniBoldLabel);
+            EditorGUIUtility.AddCursorRect(statusRect, MouseCursor.Link);
+            if (Event.current.type == EventType.MouseDown
+                && Event.current.button == 0
+                && statusRect.Contains(Event.current.mousePosition))
+            {
+                CustomPopupDropdown.Show(
+                    statusRect,
+                    new PuzzleLevelValidationPopup(validation, diagnostics)
+                );
+                Event.current.Use();
+            }
             GUI.contentColor = previousColor;
         }
 
@@ -532,7 +558,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                     _entriesProperty.arraySize,
                     targetIndex => MoveEntry(index, targetIndex),
                     () => DeleteEntry(index, levelId, asset),
-                    () => ViewEntryData(buttonRect, index)));
+                    () => ToggleExpandedEntryData(index)));
         }
 
         private void MoveEntry(int sourceIndex, int oneBasedTargetIndex)
@@ -597,25 +623,81 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             Repaint();
         }
 
-        private void ViewEntryData(Rect buttonRect, int index)
+        private void ToggleExpandedEntryData(int index)
         {
-            serializedObject.Update();
-            if (index < 0 || index >= _entriesProperty.arraySize)
+            _expandedEntryIndex = _expandedEntryIndex == index ? -1 : index;
+            _expandedDataScrollPosition = Vector2.zero;
+            Repaint();
+        }
+
+        private void DrawExpandedEntryData(
+            int index,
+            PuzzleLevelValidationRequest request
+        )
+        {
+            if (_expandedEntryIndex != index)
             {
                 return;
             }
 
-            SerializedProperty entry = _entriesProperty.GetArrayElementAtIndex(index);
-            string levelId = entry.FindPropertyRelative("Id").stringValue;
-            TextAsset asset = entry.FindPropertyRelative("Asset")
-                .objectReferenceValue as TextAsset;
-            DataType dataType = (DataType)entry.FindPropertyRelative("DataType")
-                .intValue;
-            PuzzleLevelValidationRequest request
-                = PuzzleLevelValidationService.CreateRequest(levelId, asset, dataType);
-            CustomPopupDropdown.Show(
-                buttonRect,
-                new PuzzleLevelDeserializedDataPopup(request));
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "Level Data",
+                        EditorStyles.boldLabel
+                    );
+                    if (GUILayout.Button("Collapse", GUILayout.Width(72f)))
+                    {
+                        ToggleExpandedEntryData(index);
+                        return;
+                    }
+                }
+
+                if (!PuzzleLevelValidationService.TryDeserialize(
+                        request,
+                        out PuzzleLevelDeserializationResult result,
+                        out string error
+                    ))
+                {
+                    EditorGUILayout.HelpBox(error, MessageType.Warning);
+                    return;
+                }
+
+                string data = TruncateExpandedData(result.Text) ?? string.Empty;
+                GUIContent dataContent = new GUIContent(data);
+                float contentWidth = Mathf.Max(
+                    1f,
+                    EditorGUIUtility.currentViewWidth - 56f
+                );
+                float contentHeight = Mathf.Max(
+                    MaximumExpandedDataHeight,
+                    EditorStyles.textArea.CalcHeight(dataContent, contentWidth)
+                );
+                _expandedDataScrollPosition = EditorGUILayout.BeginScrollView(
+                    _expandedDataScrollPosition,
+                    GUILayout.Height(MaximumExpandedDataHeight)
+                );
+                EditorGUILayout.SelectableLabel(
+                    data,
+                    EditorStyles.textArea,
+                    GUILayout.MinHeight(contentHeight)
+                );
+                EditorGUILayout.EndScrollView();
+            }
+        }
+
+        private static string TruncateExpandedData(string value)
+        {
+            if (string.IsNullOrEmpty(value)
+                || value.Length <= MaximumExpandedDataLength)
+            {
+                return value;
+            }
+
+            return value.Substring(0, MaximumExpandedDataLength)
+                + "\n\n[Preview truncated]";
         }
 
         private void RefreshEntryIds()
@@ -688,7 +770,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             private readonly TextAsset _asset;
             private readonly Action<int> _moveEntry;
             private readonly Action _deleteEntry;
-            private readonly Action _viewDeserializedData;
+            private readonly Action _toggleExpandedData;
             private int _targetIndex;
             private readonly int _entryCount;
 
@@ -699,7 +781,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 int entryCount,
                 Action<int> moveEntry,
                 Action deleteEntry,
-                Action viewDeserializedData)
+                Action toggleExpandedData)
             {
                 _levelId = levelId;
                 _asset = asset;
@@ -707,7 +789,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 _entryCount = entryCount;
                 _moveEntry = moveEntry;
                 _deleteEntry = deleteEntry;
-                _viewDeserializedData = viewDeserializedData;
+                _toggleExpandedData = toggleExpandedData;
             }
 
             public override Vector2 GetWindowSize()
@@ -737,10 +819,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("View Deserialized Data"))
+                    if (GUILayout.Button("Show Level Data"))
                     {
                         editorWindow.Close();
-                        _viewDeserializedData?.Invoke();
+                        _toggleExpandedData?.Invoke();
                     }
 
                     if (GUILayout.Button("Delete", GUILayout.Width(64f)))
@@ -752,74 +834,205 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
             }
         }
 
-        private sealed class PuzzleLevelDeserializedDataPopup : PopupWindowContent
+        private sealed class PuzzleLevelValidationPopup : PopupWindowContent
         {
-            private const int MaximumPreviewLength = 262144;
+            #region Private Fields
 
-            private readonly PuzzleLevelValidationRequest _request;
-            private readonly string _displayName;
-            private readonly string _text;
-            private readonly string _error;
+            private readonly PuzzleLevelValidationResult _validation;
+            private readonly IReadOnlyList<PuzzleLevelValidationDiagnostic>
+                _diagnostics;
             private Vector2 _scrollPosition;
 
-            public PuzzleLevelDeserializedDataPopup(
-                PuzzleLevelValidationRequest request)
+            #endregion
+
+            #region Public Methods
+
+            public PuzzleLevelValidationPopup(
+                PuzzleLevelValidationResult validation,
+                IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics
+            )
             {
-                _request = request;
-                if (PuzzleLevelValidationService.TryDeserialize(
-                        request,
-                        out PuzzleLevelDeserializationResult result,
-                        out string error))
-                {
-                    _displayName = result.DisplayName;
-                    _text = TruncatePreview(result.Text);
-                }
-                else
-                {
-                    _error = error;
-                }
+                _validation = validation;
+                _diagnostics = diagnostics
+                    ?? Array.Empty<PuzzleLevelValidationDiagnostic>();
             }
 
             public override Vector2 GetWindowSize()
             {
-                return new Vector2(560f, 420f);
+                return new Vector2(640f, 520f);
             }
 
             public override void OnGUI(Rect rect)
             {
                 EditorGUILayout.LabelField(
-                    string.IsNullOrEmpty(_displayName)
-                        ? "Deserialized Data"
-                        : _displayName,
-                    EditorStyles.boldLabel);
+                    "Status",
+                    EditorStyles.boldLabel
+                );
+                DrawStatusSummary();
+                EditorGUILayout.Space(8f);
                 EditorGUILayout.LabelField(
-                    _request.SourceName,
-                    EditorStyles.miniLabel);
-
-                if (!string.IsNullOrEmpty(_error))
-                {
-                    EditorGUILayout.HelpBox(_error, MessageType.Warning);
-                    return;
-                }
-
-                _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-                EditorGUILayout.SelectableLabel(
-                    _text ?? string.Empty,
-                    EditorStyles.textArea,
-                    GUILayout.ExpandHeight(true));
+                    "Validation Steps",
+                    EditorStyles.boldLabel
+                );
+                _scrollPosition = EditorGUILayout.BeginScrollView(
+                    _scrollPosition
+                );
+                DrawValidationSteps();
                 EditorGUILayout.EndScrollView();
             }
 
-            private static string TruncatePreview(string value)
+            #endregion
+
+            #region Private Methods
+
+            private void DrawStatusSummary()
             {
-                if (string.IsNullOrEmpty(value) || value.Length <= MaximumPreviewLength)
+                bool hasError = HasSeverity(
+                    _diagnostics,
+                    PuzzleLevelValidationSeverity.Error
+                );
+                bool hasWarning = HasSeverity(
+                    _diagnostics,
+                    PuzzleLevelValidationSeverity.Warning
+                );
+                EditorGUILayout.LabelField(
+                    "Result",
+                    GetValidationLabel(hasError, hasWarning, _diagnostics)
+                );
+                EditorGUILayout.LabelField(
+                    "Validator",
+                    string.IsNullOrEmpty(_validation?.ValidatorName)
+                        ? "None"
+                        : _validation.ValidatorName,
+                    EditorStyles.wordWrappedLabel
+                );
+                EditorGUILayout.LabelField(
+                    "Hash",
+                    string.IsNullOrEmpty(_validation?.ContentHash)
+                        ? "Unavailable"
+                        : _validation.ContentHash,
+                    EditorStyles.wordWrappedLabel
+                );
+            }
+
+            private void DrawValidationSteps()
+            {
+                if (_validation == null || _validation.Steps.Count == 0)
                 {
-                    return value;
+                    EditorGUILayout.HelpBox(
+                        "No validation steps were reported.",
+                        MessageType.Info
+                    );
+                    return;
                 }
 
-                return value.Substring(0, MaximumPreviewLength)
-                    + "\n\n[Preview truncated]";
+                for (int index = 0; index < _validation.Steps.Count; index++)
+                {
+                    DrawStepCard(_validation.Steps[index], index + 1);
+                }
             }
+
+            private static void DrawStepCard(
+                PuzzleLevelValidationStep step,
+                int index
+            )
+            {
+                if (step.Status == PuzzleLevelValidationStepStatus.Success)
+                {
+                    DrawSuccessfulStep(step, index);
+                    return;
+                }
+
+                Color previousColor = GUI.contentColor;
+                GUI.contentColor = GetStepColor(step.Status);
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.LabelField(
+                        $"Step {index}: {GetStepStatusLabel(step.Status)}",
+                        EditorStyles.boldLabel
+                    );
+                    GUI.contentColor = previousColor;
+                    EditorGUILayout.LabelField(
+                        step.Name,
+                        EditorStyles.wordWrappedLabel
+                    );
+                    EditorGUILayout.LabelField(
+                        "More info",
+                        EditorStyles.miniBoldLabel
+                    );
+                    if (step.Messages.Count == 0)
+                    {
+                        EditorGUILayout.LabelField(
+                            "No additional information.",
+                            EditorStyles.wordWrappedMiniLabel
+                        );
+                    }
+                    else
+                    {
+                        for (int messageIndex = 0;
+                             messageIndex < step.Messages.Count;
+                             messageIndex++)
+                        {
+                            EditorGUILayout.LabelField(
+                                step.Messages[messageIndex],
+                                EditorStyles.wordWrappedMiniLabel
+                            );
+                        }
+                    }
+                }
+
+                GUI.contentColor = previousColor;
+                EditorGUILayout.Space(4f);
+            }
+
+            private static void DrawSuccessfulStep(
+                PuzzleLevelValidationStep step,
+                int index
+            )
+            {
+                Color previousColor = GUI.contentColor;
+                GUI.contentColor = GetStepColor(step.Status);
+                string details = step.Messages.Count > 0
+                    ? $" - {step.Messages[0]}"
+                    : string.Empty;
+                EditorGUILayout.LabelField(
+                    $"Step {index}: SUCCESS - {step.Name}{details}",
+                    EditorStyles.miniLabel
+                );
+                GUI.contentColor = previousColor;
+            }
+
+            private static Color GetStepColor(
+                PuzzleLevelValidationStepStatus status
+            )
+            {
+                switch (status)
+                {
+                    case PuzzleLevelValidationStepStatus.Failed:
+                        return new Color(0.88f, 0.3f, 0.3f);
+                    case PuzzleLevelValidationStepStatus.Warning:
+                        return new Color(0.92f, 0.7f, 0.2f);
+                    default:
+                        return new Color(0.35f, 0.8f, 0.4f);
+                }
+            }
+
+            private static string GetStepStatusLabel(
+                PuzzleLevelValidationStepStatus status
+            )
+            {
+                switch (status)
+                {
+                    case PuzzleLevelValidationStepStatus.Failed:
+                        return "FAILED";
+                    case PuzzleLevelValidationStepStatus.Warning:
+                        return "WARNING";
+                    default:
+                        return "SUCCESS";
+                }
+            }
+
+            #endregion
         }
 
         #endregion
