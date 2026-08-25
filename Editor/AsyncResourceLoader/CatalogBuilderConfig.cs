@@ -65,6 +65,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
     {
         public string ManifestHash;
         public int Version;
+        public string OutputFolder;
         public string CatalogRelativePath;
         public List<GeneratedCatalogEntry> Entries
             = new List<GeneratedCatalogEntry>();

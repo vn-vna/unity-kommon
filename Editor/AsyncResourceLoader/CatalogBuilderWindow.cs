@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Hapiga.Scheherazade.Common.Editor;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,16 +12,39 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 {
     public class CatalogBuilderWindow : EditorWindow
     {
-        private const float DropZoneHeight = 90f;
+        private const int DefaultPageSize = 20;
+        private const int MinimumPageSize = 5;
+        private const int MaximumPageSize = 500;
+        private const float DropZoneHeight = 54f;
+        private const float SelectionColumnWidth = 22f;
+        private const float TypeColumnWidth = 64f;
+        private const float StatusColumnWidth = 74f;
+        private static readonly string[] TabNames =
+        {
+            "Configuration",
+            "Entries",
+            "Upload"
+        };
+        private static readonly string[] SupportedDataTypeNames =
+        {
+            "Unknown",
+            "Text",
+            "Binary"
+        };
 
         private CatalogBuilderConfig _config;
-        private Vector2 _scrollPosition;
+        private Vector2 _windowScrollPosition;
+        [SerializeField]
+        private CatalogBuilderTab _activeTab;
         private bool _isDraggingOver;
         private List<CatalogBuilderConfig> _allConfigs;
         private int _selectedConfigIndex = -1;
-        private string _searchFilter = "";
+        private string _searchFilter = string.Empty;
         private int _pageIndex;
-        private int _pageSize = 20;
+        private int _pageSize = DefaultPageSize;
+        private bool _settingsFoldout = true;
+        private readonly HashSet<StagedCatalogEntry> _selectedEntries
+            = new HashSet<StagedCatalogEntry>();
 
         // Performance caches
         private readonly Dictionary<string, CachedHash> _hashCache
@@ -30,8 +54,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private int _lastEntriesCount;
 
         // Column widths
-        private float _colIdWidth = 100f;
-        private float _colPathWidth = 220f;
+        private float _colIdWidth = 130f;
+        private float _colPathWidth = 230f;
 
         // S3 upload state
         private bool _validationFoldout = true;
@@ -40,14 +64,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private bool _canCancelUpload;
         private bool _cancelUploadRequested;
         private float _uploadProgress;
-        private string _uploadStatusMessage = "";
+        private string _uploadStatusMessage = string.Empty;
         private CatalogValidationResult _lastValidation;
-
-        private struct CachedHash
-        {
-            public string Hash;
-            public long LastWriteTicks;
-        }
 
         #region Menu
 
@@ -56,7 +74,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         {
             CatalogBuilderWindow window = GetWindow<CatalogBuilderWindow>(
                 false, "Catalog Builder", true);
-            window.minSize = new Vector2(540, 440);
+            window.minSize = new Vector2(680f, 560f);
             window.Show();
         }
 
@@ -73,7 +91,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private void OnGUI()
         {
             DrawConfigSelector();
-            GUILayout.Space(6);
 
             if (_config == null)
             {
@@ -83,20 +100,62 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 return;
             }
 
+            PruneSelection();
+            _windowScrollPosition = EditorGUILayout.BeginScrollView(
+                _windowScrollPosition
+            );
             DrawHeader();
-            DrawOutputSettings();
-            GUILayout.Space(8);
-            DrawRuntimeTargetGuidance();
-            GUILayout.Space(8);
-            DrawValidationSummary();
-            GUILayout.Space(8);
-            DrawDropZone();
-            GUILayout.Space(8);
-            DrawStagedEntries();
-            GUILayout.Space(8);
-            DrawActions();
-            GUILayout.Space(8);
-            DrawS3Section();
+            DrawTabs();
+            DrawActiveTab();
+            EditorGUILayout.EndScrollView();
+        }
+
+        #endregion
+
+        #region Navigation
+
+        private void DrawTabs()
+        {
+            int currentTabIndex = Mathf.Clamp(
+                (int)_activeTab,
+                0,
+                TabNames.Length - 1
+            );
+            CatalogBuilderTab selectedTab = (CatalogBuilderTab)GUILayout.Toolbar(
+                currentTabIndex,
+                TabNames
+            );
+            if (selectedTab == _activeTab)
+            {
+                return;
+            }
+
+            _activeTab = selectedTab;
+            _windowScrollPosition = Vector2.zero;
+            _isDraggingOver = false;
+        }
+
+        private void DrawActiveTab()
+        {
+            EditorGUILayout.Space(6f);
+            switch (_activeTab)
+            {
+                case CatalogBuilderTab.Configuration:
+                    DrawCatalogSettings();
+                    DrawValidationSummary();
+                    break;
+
+                case CatalogBuilderTab.Entries:
+                    DrawDropZone();
+                    EditorGUILayout.Space(6f);
+                    DrawStagedEntries();
+                    break;
+
+                case CatalogBuilderTab.Upload:
+                    DrawActions();
+                    DrawS3Section();
+                    break;
+            }
         }
 
         #endregion
@@ -110,9 +169,13 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 RefreshConfigList();
             }
 
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                EditorGUILayout.LabelField("Config", GUILayout.Width(48));
+                EditorGUILayout.LabelField(
+                    "Catalog Config",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(92f)
+                );
 
                 using (new EditorGUI.ChangeCheckScope())
                 {
@@ -134,7 +197,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 }
 
                 if (GUILayout.Button("+", EditorStyles.miniButton,
-                        GUILayout.Width(26)))
+                        GUILayout.Width(24f)))
                 {
                     CreateNewConfig();
                 }
@@ -142,7 +205,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 using (new EditorGUI.DisabledGroupScope(_config == null))
                 {
                     if (GUILayout.Button("\u2715", EditorStyles.miniButton,
-                            GUILayout.Width(26)))
+                            GUILayout.Width(24f)))
                     {
                         DeleteSelectedConfig();
                     }
@@ -201,8 +264,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             _selectedConfigIndex = index;
             _config = _allConfigs[index];
             EnsureConfigInitialized();
-            _searchFilter = "";
+            _searchFilter = string.Empty;
             _pageIndex = 0;
+            _selectedEntries.Clear();
             _hashCache.Clear();
             InvalidateFilters();
             _lastValidation = null;
@@ -301,44 +365,138 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawHeader()
         {
-            GUILayout.Space(4);
-
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.LabelField(
-                    "Catalog Builder", EditorStyles.boldLabel);
+                    _config.name,
+                    EditorStyles.boldLabel
+                );
+
+                EditorGUILayout.LabelField(
+                    $"{_config.Entries.Count} staged",
+                    EditorStyles.centeredGreyMiniLabel,
+                    GUILayout.Width(74f)
+                );
 
                 GUILayout.FlexibleSpace();
+
+                DrawHeaderStatus();
 
                 using (new EditorGUI.ChangeCheckScope())
                 {
                     int newVersion = EditorGUILayout.IntField(
-                        "Version", _config.Version, GUILayout.Width(120));
+                        "Version",
+                        _config.Version,
+                        GUILayout.Width(112f)
+                    );
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(_config, "Change Catalog Version");
                         _config.Version = newVersion;
+                        _lastValidation = null;
                         EditorUtility.SetDirty(_config);
                         AssetDatabase.SaveAssets();
                     }
                 }
             }
+        }
 
-            GUILayout.Space(2);
+        private void DrawHeaderStatus()
+        {
+            Color previousColor = GUI.contentColor;
+            string label;
+            if (_lastValidation == null)
+            {
+                GUI.contentColor = Color.gray;
+                label = "● Not validated";
+            }
+            else if (!_lastValidation.IsValid)
+            {
+                GUI.contentColor = new Color(0.88f, 0.3f, 0.3f);
+                label = "● Invalid";
+            }
+            else if (IsCurrentValidationGenerated())
+            {
+                GUI.contentColor = new Color(0.35f, 0.8f, 0.4f);
+                label = "● Generated";
+            }
+            else
+            {
+                GUI.contentColor = new Color(0.92f, 0.7f, 0.2f);
+                label = "● Changes";
+            }
 
-            Rect dividerRect = EditorGUILayout.GetControlRect(false, 1f);
-            EditorGUI.DrawRect(dividerRect,
-                new Color(0.5f, 0.5f, 0.5f, 0.3f));
+            EditorGUILayout.LabelField(
+                label,
+                EditorStyles.miniBoldLabel,
+                GUILayout.Width(94f)
+            );
+            GUI.contentColor = previousColor;
+        }
+
+        private bool IsCurrentValidationGenerated()
+        {
+            CatalogBuildState generated = _config.LastGenerated;
+            return generated?.HasBuild == true
+                && generated.Version == _config.Version
+                && string.Equals(
+                    generated.ManifestHash,
+                    _lastValidation?.ManifestHash,
+                    StringComparison.Ordinal
+                )
+                && string.Equals(
+                    generated.CatalogRelativePath,
+                    NormalizeCatalogFileName(_config.CatalogFileName),
+                    StringComparison.Ordinal
+                )
+                && string.Equals(
+                    NormalizeOutputFolder(generated.OutputFolder),
+                    NormalizeOutputFolder(_config.OutputFolder),
+                    StringComparison.Ordinal
+                );
         }
 
         #endregion
 
         #region Output Settings
 
+        private void DrawCatalogSettings()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _settingsFoldout = EditorGUILayout.Foldout(
+                        _settingsFoldout,
+                        "Catalog Settings",
+                        true
+                    );
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button(
+                            "Ping Config",
+                            EditorStyles.miniButton,
+                            GUILayout.Width(76f)
+                        ))
+                    {
+                        EditorGUIUtility.PingObject(_config);
+                    }
+                }
+
+                if (!_settingsFoldout)
+                {
+                    return;
+                }
+
+                DrawOutputSettings();
+                EditorGUILayout.Space(4f);
+                DrawRuntimeTargetGuidance();
+            }
+        }
+
         private void DrawOutputSettings()
         {
             EditorGUILayout.LabelField(
-                "Output Settings", EditorStyles.miniBoldLabel);
+                "Output", EditorStyles.miniBoldLabel);
 
             using (new EditorGUI.ChangeCheckScope())
             {
@@ -397,6 +555,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawRuntimeTargetGuidance()
         {
+            EditorGUILayout.LabelField("Runtime", EditorStyles.miniBoldLabel);
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Runtime Provider", GUILayout.Width(105));
@@ -525,17 +684,31 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawValidationSummary()
         {
-            _validationFoldout = EditorGUILayout.Foldout(
-                _validationFoldout,
-                "Catalog Validation",
-                true);
-            if (!_validationFoldout)
-            {
-                return;
-            }
-
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    _validationFoldout = EditorGUILayout.Foldout(
+                        _validationFoldout,
+                        "Catalog Validation",
+                        true
+                    );
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button(
+                            "Validate",
+                            EditorStyles.miniButton,
+                            GUILayout.Width(68f)
+                        ))
+                    {
+                        ValidateCatalog(false);
+                    }
+                }
+
+                if (!_validationFoldout)
+                {
+                    return;
+                }
+
                 if (_lastValidation == null)
                 {
                     EditorGUILayout.LabelField(
@@ -544,10 +717,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 }
                 else if (_lastValidation.IsValid)
                 {
-                    string state = _config.LastGenerated?.ManifestHash
-                        == _lastValidation.ManifestHash
+                    string state = IsCurrentValidationGenerated()
                         ? "No manifest changes since the last generation."
-                        : "Manifest changes detected.";
+                        : "Catalog or destination changes detected.";
                     EditorGUILayout.HelpBox(
                         $"Valid: {_lastValidation.ValidEntries.Count} entries. {state}",
                         MessageType.Info);
@@ -559,21 +731,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                         MessageType.Error);
                 }
 
-                using (new EditorGUILayout.HorizontalScope())
+                if (_config.LastGenerated?.HasBuild == true)
                 {
-                    if (GUILayout.Button("Validate", GUILayout.Width(90)))
-                    {
-                        ValidateCatalog(true);
-                    }
-
-                    if (_config.LastGenerated?.HasBuild == true)
-                    {
-                        string hash = _config.LastGenerated.ManifestHash;
-                        EditorGUILayout.LabelField(
-                            $"Last build v{_config.LastGenerated.Version} · "
-                            + hash.Substring(0, Mathf.Min(12, hash.Length)),
-                            EditorStyles.miniLabel);
-                    }
+                    string hash = _config.LastGenerated.ManifestHash;
+                    EditorGUILayout.LabelField(
+                        $"Last build v{_config.LastGenerated.Version} · "
+                        + hash.Substring(0, Mathf.Min(12, hash.Length)),
+                        EditorStyles.miniLabel
+                    );
                 }
             }
         }
@@ -605,81 +770,82 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawDropZone()
         {
-            Rect dropArea = GUILayoutUtility.GetRect(0f, DropZoneHeight,
-                GUILayout.ExpandWidth(true));
+            Rect dropArea = GUILayoutUtility.GetRect(
+                GUIContent.none,
+                EditorStyles.helpBox,
+                GUILayout.Height(DropZoneHeight),
+                GUILayout.ExpandWidth(true)
+            );
+            HandleDropZoneEvent(dropArea);
 
-            Event evt = Event.current;
-            Color originalColor = GUI.color;
+            Color previousColor = GUI.backgroundColor;
+            GUI.backgroundColor = _isDraggingOver
+                ? new Color(0.45f, 0.85f, 0.5f)
+                : previousColor;
+            GUI.Box(dropArea, GUIContent.none, EditorStyles.helpBox);
+            GUI.backgroundColor = previousColor;
 
-            if (evt.type == EventType.DragUpdated
-                || evt.type == EventType.DragPerform)
-            {
-                if (dropArea.Contains(evt.mousePosition))
-                {
-                    DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
-                    _isDraggingOver = true;
+            GUI.Label(
+                dropArea,
+                _isDraggingOver
+                    ? "Release to stage compatible files"
+                    : "Drop .json, .bytes, or .bin files here to stage entries",
+                EditorStyles.centeredGreyMiniLabel
+            );
+        }
 
-                    if (evt.type == EventType.DragPerform)
-                    {
-                        DragAndDrop.AcceptDrag();
-                        StageFiles(DragAndDrop.paths);
-                        _isDraggingOver = false;
-                    }
-
-                    Event.current.Use();
-                }
-                else
-                {
-                    _isDraggingOver = false;
-                }
-            }
-            else if (evt.type == EventType.DragExited)
+        private void HandleDropZoneEvent(Rect dropArea)
+        {
+            Event currentEvent = Event.current;
+            if (currentEvent.type == EventType.DragExited)
             {
                 _isDraggingOver = false;
+                Repaint();
+                return;
             }
 
-            Color bgColor = _isDraggingOver
-                ? new Color(0.2f, 0.5f, 0.2f, 0.3f)
-                : new Color(0.3f, 0.3f, 0.3f, 0.2f);
-            Color borderColor = _isDraggingOver
-                ? new Color(0.3f, 0.7f, 0.3f, 0.8f)
-                : new Color(0.5f, 0.5f, 0.5f, 0.5f);
-
-            EditorGUI.DrawRect(dropArea, bgColor);
-
-            Handles.BeginGUI();
-            Handles.color = borderColor;
-            Handles.DrawLine(
-                new Vector2(dropArea.x, dropArea.y),
-                new Vector2(dropArea.x + dropArea.width, dropArea.y));
-            Handles.DrawLine(
-                new Vector2(dropArea.x, dropArea.y + dropArea.height),
-                new Vector2(dropArea.x + dropArea.width,
-                    dropArea.y + dropArea.height));
-            Handles.DrawLine(
-                new Vector2(dropArea.x, dropArea.y),
-                new Vector2(dropArea.x, dropArea.y + dropArea.height));
-            Handles.DrawLine(
-                new Vector2(dropArea.x + dropArea.width, dropArea.y),
-                new Vector2(dropArea.x + dropArea.width,
-                    dropArea.y + dropArea.height));
-            Handles.EndGUI();
-
-            string message = _isDraggingOver
-                ? "Release to stage files"
-                : "Drop level files here  (.json, .bytes, .bin)";
-
-            GUIStyle labelStyle = new GUIStyle(EditorStyles.label)
+            if (currentEvent.type != EventType.DragUpdated
+                && currentEvent.type != EventType.DragPerform)
             {
-                alignment = TextAnchor.MiddleCenter,
-                wordWrap = true,
-                fontSize = 12,
-                normal = { textColor = _isDraggingOver
-                    ? Color.white : Color.gray }
-            };
+                return;
+            }
 
-            GUI.Label(dropArea, message, labelStyle);
-            GUI.color = originalColor;
+            if (!dropArea.Contains(currentEvent.mousePosition))
+            {
+                _isDraggingOver = false;
+                return;
+            }
+
+            bool hasCompatibleFiles = HasCompatibleDraggedFiles();
+            DragAndDrop.visualMode = hasCompatibleFiles
+                ? DragAndDropVisualMode.Copy
+                : DragAndDropVisualMode.Rejected;
+            _isDraggingOver = hasCompatibleFiles;
+            if (currentEvent.type == EventType.DragPerform && hasCompatibleFiles)
+            {
+                DragAndDrop.AcceptDrag();
+                StageFiles(DragAndDrop.paths);
+                _isDraggingOver = false;
+                currentEvent.Use();
+                GUIUtility.ExitGUI();
+                return;
+            }
+
+            currentEvent.Use();
+        }
+
+        private static bool HasCompatibleDraggedFiles()
+        {
+            string[] paths = DragAndDrop.paths;
+            for (int index = 0; index < paths.Length; index++)
+            {
+                if (IsValidLevelFile(paths[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         #endregion
@@ -748,32 +914,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawStagedEntries()
         {
-            // --- Header: count + search + clear ---
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField(
-                    $"Staged ({_config.Entries.Count})",
-                    EditorStyles.miniBoldLabel, GUILayout.Width(100));
-
-                _searchFilter = EditorGUILayout.TextField(
-                    _searchFilter,
-                    EditorStyles.toolbarSearchField,
-                    GUILayout.ExpandWidth(true));
-
-                if (GUILayout.Button(
-                        "Clear All", EditorStyles.miniButton,
-                        GUILayout.Width(60)))
-                {
-                    _config.Entries.Clear();
-                    _searchFilter = "";
-                    _pageIndex = 0;
-            _hashCache.Clear();
-            _lastValidation = null;
-            InvalidateFilters();
-                    EditorUtility.SetDirty(_config);
-                    AssetDatabase.SaveAssets();
-                }
-            }
+            DrawEntriesSearchToolbar();
 
             if (_config.Entries.Count == 0)
             {
@@ -783,9 +924,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 return;
             }
 
-            // --- Get cached filtered list ---
             List<StagedCatalogEntry> filtered = GetFilteredEntries();
-
             if (filtered.Count == 0)
             {
                 EditorGUILayout.HelpBox(
@@ -794,98 +933,258 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 return;
             }
 
-            // --- Pagination bar ---
             int totalPages = Mathf.Max(
-                1, Mathf.CeilToInt((float)filtered.Count / _pageSize));
+                1,
+                Mathf.CeilToInt((float)filtered.Count / _pageSize)
+            );
             _pageIndex = Mathf.Clamp(_pageIndex, 0, totalPages - 1);
+            int startIndex = _pageIndex * _pageSize;
+            int endIndex = Mathf.Min(startIndex + _pageSize, filtered.Count);
+            DrawEntriesControlToolbar(
+                filtered,
+                totalPages
+            );
+            DrawStagedColumnHeaders(filtered, startIndex, endIndex);
 
-            using (new EditorGUILayout.HorizontalScope(
-                EditorStyles.toolbar))
+            for (int index = startIndex; index < endIndex; index++)
             {
-                using (new EditorGUI.DisabledGroupScope(_pageIndex <= 0))
+                DrawStagedEntry(filtered[index]);
+            }
+        }
+
+        private void DrawEntriesSearchToolbar()
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                EditorGUILayout.LabelField(
+                    $"Catalog Entries ({_config.Entries.Count})",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(132f)
+                );
+                string searchFilter = EditorGUILayout.TextField(
+                    _searchFilter,
+                    EditorStyles.toolbarSearchField
+                );
+                if (!string.Equals(
+                        searchFilter,
+                        _searchFilter,
+                        StringComparison.Ordinal
+                    ))
                 {
-                    if (GUILayout.Button("<", EditorStyles.toolbarButton,
-                            GUILayout.Width(26)))
+                    _searchFilter = searchFilter;
+                    _pageIndex = 0;
+                }
+
+                if (!string.IsNullOrEmpty(_searchFilter)
+                    && GUILayout.Button(
+                        "Clear",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(42f)
+                    ))
+                {
+                    _searchFilter = string.Empty;
+                    _pageIndex = 0;
+                }
+
+                if (GUILayout.Button(
+                        "Validate All",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(76f)
+                    ))
+                {
+                    ValidateCatalog(false);
+                }
+            }
+        }
+
+        private void DrawEntriesControlToolbar(
+            IReadOnlyList<StagedCatalogEntry> filteredEntries,
+            int totalPages)
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                using (new EditorGUI.DisabledGroupScope(_pageIndex == 0))
+                {
+                    if (GUILayout.Button(
+                            "<",
+                            EditorStyles.toolbarButton,
+                            GUILayout.Width(24f)
+                        ))
                     {
                         _pageIndex--;
                     }
                 }
 
                 using (new EditorGUI.DisabledGroupScope(
-                    _pageIndex >= totalPages - 1))
+                           _pageIndex >= totalPages - 1))
                 {
-                    if (GUILayout.Button(">", EditorStyles.toolbarButton,
-                            GUILayout.Width(26)))
+                    if (GUILayout.Button(
+                            ">",
+                            EditorStyles.toolbarButton,
+                            GUILayout.Width(24f)
+                        ))
                     {
                         _pageIndex++;
                     }
                 }
 
                 EditorGUILayout.LabelField(
-                    $"| Page {_pageIndex + 1} / {totalPages}",
+                    $"{_pageIndex + 1}/{totalPages}",
                     EditorStyles.centeredGreyMiniLabel,
-                    GUILayout.Width(110));
-
+                    GUILayout.Width(48f)
+                );
                 EditorGUILayout.LabelField(
-                    "| Page size",
+                    "Size",
                     EditorStyles.centeredGreyMiniLabel,
-                    GUILayout.Width(55));
+                    GUILayout.Width(28f)
+                );
+                _pageSize = Mathf.Clamp(
+                    EditorGUILayout.IntField(_pageSize, GUILayout.Width(36f)),
+                    MinimumPageSize,
+                    MaximumPageSize
+                );
 
-                _pageSize = EditorGUILayout.IntField(
-                    _pageSize, GUILayout.Width(40));
-                _pageSize = Mathf.Clamp(_pageSize, 5, 500);
+                if (GUILayout.Button(
+                        new GUIContent("All", "Select all filtered entries"),
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(28f)
+                    ))
+                {
+                    SelectEntries(filteredEntries);
+                }
 
+                using (new EditorGUI.DisabledGroupScope(
+                           _selectedEntries.Count == 0))
+                {
+                    if (GUILayout.Button(
+                            new GUIContent("None", "Clear entry selection"),
+                            EditorStyles.toolbarButton,
+                            GUILayout.Width(38f)
+                        ))
+                    {
+                        _selectedEntries.Clear();
+                    }
+                }
+
+                EditorGUILayout.LabelField(
+                    _selectedEntries.Count.ToString(),
+                    EditorStyles.centeredGreyMiniLabel,
+                    GUILayout.Width(24f)
+                );
                 GUILayout.FlexibleSpace();
+                DrawBatchEntryOperations();
             }
-
-            // --- Column header ---
-            using (new EditorGUILayout.HorizontalScope(
-                EditorStyles.toolbar))
-            {
-                EditorGUILayout.LabelField(
-                    "ID", EditorStyles.boldLabel,
-                    GUILayout.Width(_colIdWidth));
-                EditorGUILayout.LabelField(
-                    "Type", EditorStyles.boldLabel,
-                    GUILayout.Width(38));
-                EditorGUILayout.LabelField(
-                    "Relative Path", EditorStyles.boldLabel,
-                    GUILayout.Width(_colPathWidth));
-                EditorGUILayout.LabelField(
-                    "", EditorStyles.boldLabel, GUILayout.Width(20));
-                EditorGUILayout.LabelField(
-                    "Source", EditorStyles.boldLabel);
-                GUILayout.FlexibleSpace();
-                GUILayout.Label("", GUILayout.Width(22));
-            }
-
-            // --- Entries scroll ---
-            _scrollPosition = EditorGUILayout.BeginScrollView(
-                _scrollPosition);
-
-            int start = _pageIndex * _pageSize;
-            int end = Mathf.Min(start + _pageSize, filtered.Count);
-
-            for (int i = start; i < end; i++)
-            {
-                StagedCatalogEntry entry = filtered[i];
-                int realIndex = _config.Entries.IndexOf(entry);
-                DrawStagedEntry(entry, realIndex);
-            }
-
-            EditorGUILayout.EndScrollView();
         }
 
-        private void DrawStagedEntry(StagedCatalogEntry entry, int index)
+        private void DrawBatchEntryOperations()
         {
-            using (new EditorGUILayout.HorizontalScope(
-                EditorStyles.helpBox))
+            using (new EditorGUI.DisabledGroupScope(_selectedEntries.Count == 0))
             {
-                // Editable ID
+                if (GUILayout.Button(
+                        new GUIContent(
+                            "Refresh Hash",
+                            "Update stored hashes for selected source files"
+                        ),
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(76f)
+                    ))
+                {
+                    RefreshSelectedEntryHashes();
+                }
+
+                if (GUILayout.Button(
+                        new GUIContent("Delete", "Delete selected entries"),
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(46f)
+                    ))
+                {
+                    DeleteSelectedEntries();
+                }
+            }
+        }
+
+        private void DrawStagedColumnHeaders(
+            IReadOnlyList<StagedCatalogEntry> filteredEntries,
+            int startIndex,
+            int endIndex)
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                bool pageSelected = AreEntriesSelected(
+                    filteredEntries,
+                    startIndex,
+                    endIndex
+                );
+                bool selectPage = GUILayout.Toggle(
+                    pageSelected,
+                    new GUIContent("✓", "Select entries on this page"),
+                    EditorStyles.toolbarButton,
+                    GUILayout.Width(SelectionColumnWidth)
+                );
+                if (selectPage != pageSelected)
+                {
+                    SetPageSelection(
+                        filteredEntries,
+                        startIndex,
+                        endIndex,
+                        selectPage
+                    );
+                }
+
+                EditorGUILayout.LabelField(
+                    "ID",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(_colIdWidth)
+                );
+                EditorGUILayout.LabelField(
+                    "Type",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(TypeColumnWidth)
+                );
+                EditorGUILayout.LabelField(
+                    "Relative Path",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(_colPathWidth)
+                );
+                EditorGUILayout.LabelField(
+                    "Status",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(StatusColumnWidth)
+                );
+                EditorGUILayout.LabelField("Source", EditorStyles.miniBoldLabel);
+            }
+        }
+
+        private void DrawStagedEntry(StagedCatalogEntry entry)
+        {
+            Color previousBackgroundColor = GUI.backgroundColor;
+            if (_selectedEntries.Contains(entry))
+            {
+                GUI.backgroundColor = new Color(0.55f, 0.75f, 1f);
+            }
+
+            EditorGUILayout.HorizontalScope rowScope = new EditorGUILayout.HorizontalScope(
+                EditorStyles.helpBox
+            );
+            using (rowScope)
+            {
+                bool isSelected = _selectedEntries.Contains(entry);
+                bool selectEntry = GUILayout.Toggle(
+                    isSelected,
+                    GUIContent.none,
+                    GUILayout.Width(SelectionColumnWidth)
+                );
+                if (selectEntry != isSelected)
+                {
+                    SetEntrySelection(entry, selectEntry);
+                }
+
                 using (new EditorGUI.ChangeCheckScope())
                 {
                     string newId = EditorGUILayout.TextField(
-                        entry.Id, GUILayout.Width(_colIdWidth));
+                        entry.Id,
+                        GUILayout.Width(_colIdWidth)
+                    );
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(_config, "Change Catalog Entry ID");
@@ -896,20 +1195,23 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     }
                 }
 
-                // Type badge
-                string typeLabel = entry.Type == DataType.Binary
-                    ? "BIN" : "TXT";
-                Color typeColor = entry.Type == DataType.Binary
-                    ? new Color(0.8f, 0.3f, 0.8f)
-                    : new Color(0.3f, 0.7f, 0.3f);
-                Color prevContent = GUI.contentColor;
-                GUI.contentColor = typeColor;
-                EditorGUILayout.LabelField(
-                    typeLabel, EditorStyles.boldLabel,
-                    GUILayout.Width(38));
-                GUI.contentColor = prevContent;
+                using (new EditorGUI.ChangeCheckScope())
+                {
+                    int dataTypeIndex = Mathf.Clamp((int)entry.Type, 0, 2);
+                    int newDataTypeIndex = EditorGUILayout.Popup(
+                        dataTypeIndex,
+                        SupportedDataTypeNames,
+                        GUILayout.Width(TypeColumnWidth)
+                    );
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(_config, "Change Catalog Entry Type");
+                        entry.Type = (DataType)newDataTypeIndex;
+                        EditorUtility.SetDirty(_config);
+                        _lastValidation = null;
+                    }
+                }
 
-                // Editable relative path
                 using (new EditorGUI.ChangeCheckScope())
                 {
                     string newRelativePath = EditorGUILayout.TextField(
@@ -926,59 +1228,246 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     }
                 }
 
-                // Hash status icon
-                string currentHash = GetCachedHash(entry.SourceFilePath);
-                bool fileMissing = string.IsNullOrEmpty(currentHash);
+                DrawEntryStatus(entry);
 
-                Color statusColor;
-                string statusIcon;
-                string statusTooltip;
-
-                if (fileMissing)
-                {
-                    statusColor = Color.red;
-                    statusIcon = "\u2715";
-                    statusTooltip = "Source file missing";
-                }
-                else if (currentHash != entry.ContentHash)
-                {
-                    statusColor = new Color(0.9f, 0.7f, 0.1f);
-                    statusIcon = "\u2022";
-                    statusTooltip = "File changed since last bake";
-                }
-                else
-                {
-                    statusColor = new Color(0.4f, 0.8f, 0.4f);
-                    statusIcon = "\u2713";
-                    statusTooltip = "Up to date";
-                }
-
-                GUI.contentColor = statusColor;
-                EditorGUILayout.LabelField(
-                    new GUIContent(statusIcon, statusTooltip),
-                    EditorStyles.boldLabel, GUILayout.Width(20));
-                GUI.contentColor = prevContent;
-
-                // Source filename
                 string sourceName = Path.GetFileName(entry.SourceFilePath);
                 EditorGUILayout.LabelField(
                     new GUIContent(sourceName, entry.SourceFilePath),
-                    EditorStyles.miniLabel);
+                    EditorStyles.miniLabel
+                );
+            }
 
-                GUILayout.FlexibleSpace();
+            GUI.backgroundColor = previousBackgroundColor;
+            HandleEntryContextClick(rowScope.rect, entry);
+        }
 
-                // Delete button
-                if (GUILayout.Button("\u2715", EditorStyles.miniButton,
-                        GUILayout.Width(22)))
+        private void DrawEntryStatus(StagedCatalogEntry entry)
+        {
+            string currentHash = GetCachedHash(entry.SourceFilePath);
+            Color previousColor = GUI.contentColor;
+            GUIContent status;
+            if (string.IsNullOrEmpty(currentHash))
+            {
+                GUI.contentColor = new Color(0.88f, 0.3f, 0.3f);
+                status = new GUIContent("● Missing", "Source file is missing");
+            }
+            else if (!string.Equals(
+                         currentHash,
+                         entry.ContentHash,
+                         StringComparison.Ordinal
+                     ))
+            {
+                GUI.contentColor = new Color(0.92f, 0.7f, 0.2f);
+                status = new GUIContent(
+                    "● Changed",
+                    "Source file changed since its hash was staged"
+                );
+            }
+            else
+            {
+                GUI.contentColor = new Color(0.35f, 0.8f, 0.4f);
+                status = new GUIContent("● Ready", "Source file is up to date");
+            }
+
+            EditorGUILayout.LabelField(
+                status,
+                EditorStyles.miniBoldLabel,
+                GUILayout.Width(StatusColumnWidth)
+            );
+            GUI.contentColor = previousColor;
+        }
+
+        private void HandleEntryContextClick(
+            Rect rowRect,
+            StagedCatalogEntry entry)
+        {
+            Event currentEvent = Event.current;
+            if (currentEvent.type != EventType.ContextClick
+                || !rowRect.Contains(currentEvent.mousePosition))
+            {
+                return;
+            }
+
+            bool isSelected = _selectedEntries.Contains(entry);
+            CustomPopupDropdown.Show(
+                new Rect(currentEvent.mousePosition, Vector2.one),
+                new CatalogEntryPopup(
+                    entry,
+                    () => DeleteEntry(entry),
+                    () => RefreshEntryHash(entry),
+                    () => SetEntrySelection(entry, !isSelected)
+                )
+            );
+            currentEvent.Use();
+        }
+
+        private bool AreEntriesSelected(
+            IReadOnlyList<StagedCatalogEntry> entries,
+            int startIndex,
+            int endIndex)
+        {
+            if (startIndex >= endIndex)
+            {
+                return false;
+            }
+
+            for (int index = startIndex; index < endIndex; index++)
+            {
+                if (!_selectedEntries.Contains(entries[index]))
                 {
-                    _config.Entries.RemoveAt(index);
-                    _hashCache.Remove(entry.SourceFilePath);
-                    InvalidateFilters();
-                    _lastValidation = null;
-                    EditorUtility.SetDirty(_config);
-                    AssetDatabase.SaveAssets();
+                    return false;
                 }
             }
+
+            return true;
+        }
+
+        private void SetPageSelection(
+            IReadOnlyList<StagedCatalogEntry> entries,
+            int startIndex,
+            int endIndex,
+            bool isSelected)
+        {
+            for (int index = startIndex; index < endIndex; index++)
+            {
+                SetEntrySelection(entries[index], isSelected);
+            }
+        }
+
+        private void SelectEntries(IReadOnlyList<StagedCatalogEntry> entries)
+        {
+            for (int index = 0; index < entries.Count; index++)
+            {
+                _selectedEntries.Add(entries[index]);
+            }
+        }
+
+        private void SetEntrySelection(
+            StagedCatalogEntry entry,
+            bool isSelected)
+        {
+            if (isSelected)
+            {
+                _selectedEntries.Add(entry);
+                return;
+            }
+
+            _selectedEntries.Remove(entry);
+        }
+
+        private void PruneSelection()
+        {
+            if (_selectedEntries.Count == 0)
+            {
+                return;
+            }
+
+            HashSet<StagedCatalogEntry> currentEntries
+                = new HashSet<StagedCatalogEntry>(_config.Entries);
+            _selectedEntries.RemoveWhere(
+                entry => entry == null || !currentEntries.Contains(entry)
+            );
+        }
+
+        private void RefreshEntryHash(StagedCatalogEntry entry)
+        {
+            string hash = GetCachedHash(entry.SourceFilePath);
+            if (string.IsNullOrEmpty(hash))
+            {
+                EditorUtility.DisplayDialog(
+                    "Source File Missing",
+                    $"Unable to refresh the hash for '{entry.SourceFilePath}'.",
+                    "OK"
+                );
+                return;
+            }
+
+            Undo.RecordObject(_config, "Refresh Catalog Entry Hash");
+            entry.ContentHash = hash;
+            _lastValidation = null;
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            Repaint();
+        }
+
+        private void DeleteEntry(StagedCatalogEntry entry)
+        {
+            if (!EditorUtility.DisplayDialog(
+                    "Delete Catalog Entry",
+                    $"Remove '{entry.Id}' from this catalog?\n\n"
+                    + "The source file will not be deleted.",
+                    "Delete Entry",
+                    "Cancel"
+                ))
+            {
+                return;
+            }
+
+            Undo.RecordObject(_config, "Delete Catalog Entry");
+            _config.Entries.Remove(entry);
+            _selectedEntries.Remove(entry);
+            _hashCache.Remove(entry.SourceFilePath);
+            _lastValidation = null;
+            InvalidateFilters();
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            Repaint();
+            GUIUtility.ExitGUI();
+        }
+
+        private void RefreshSelectedEntryHashes()
+        {
+            if (_selectedEntries.Count == 0)
+            {
+                return;
+            }
+
+            Undo.RecordObject(_config, "Refresh Catalog Entry Hashes");
+            foreach (StagedCatalogEntry entry in _selectedEntries)
+            {
+                string hash = GetCachedHash(entry.SourceFilePath);
+                if (!string.IsNullOrEmpty(hash))
+                {
+                    entry.ContentHash = hash;
+                }
+            }
+
+            _lastValidation = null;
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            Repaint();
+        }
+
+        private void DeleteSelectedEntries()
+        {
+            if (_selectedEntries.Count == 0
+                || !EditorUtility.DisplayDialog(
+                    "Delete Catalog Entries",
+                    $"Remove {_selectedEntries.Count} selected entries?\n\n"
+                    + "Source files will not be deleted.",
+                    "Delete Entries",
+                    "Cancel"
+                ))
+            {
+                return;
+            }
+
+            Undo.RecordObject(_config, "Delete Catalog Entries");
+            foreach (StagedCatalogEntry entry in _selectedEntries)
+            {
+                _hashCache.Remove(entry.SourceFilePath);
+            }
+
+            _config.Entries.RemoveAll(_selectedEntries.Contains);
+
+            _selectedEntries.Clear();
+            _pageIndex = 0;
+            _lastValidation = null;
+            InvalidateFilters();
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            Repaint();
+            GUIUtility.ExitGUI();
         }
 
         private bool MatchesSearch(StagedCatalogEntry entry)
@@ -1021,39 +1510,42 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawActions()
         {
-            Rect divRect = EditorGUILayout.GetControlRect(false, 1f);
-            EditorGUI.DrawRect(divRect,
-                new Color(0.5f, 0.5f, 0.5f, 0.3f));
-            GUILayout.Space(4);
-
             bool noEntries = _config.Entries.Count == 0;
-
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUI.DisabledGroupScope(
-                    noEntries || _isUploading))
+                EditorGUILayout.LabelField(
+                    "Build & Delivery",
+                    EditorStyles.boldLabel
+                );
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Validate",
-                            GUILayout.Height(30)))
+                    using (new EditorGUI.DisabledGroupScope(
+                               noEntries || _isUploading))
                     {
-                        ValidateCatalog(true);
+                        if (GUILayout.Button("Validate", GUILayout.Height(30f)))
+                        {
+                            ValidateCatalog(true);
+                        }
+
+                        if (GUILayout.Button(
+                                "Generate Catalog",
+                                GUILayout.Height(30f)
+                            ))
+                        {
+                            GenerateCatalog();
+                        }
                     }
 
-                    if (GUILayout.Button("Generate Catalog",
-                            GUILayout.Height(30)))
+                    using (new EditorGUI.DisabledGroupScope(
+                               noEntries
+                               || _isUploading
+                               || !_config.S3.IsValid))
                     {
-                        GenerateCatalog();
-                    }
-                }
-
-                // Upload to S3
-                using (new EditorGUI.DisabledGroupScope(
-                    noEntries || _isUploading || !_config.S3.IsValid))
-                {
-                    if (GUILayout.Button("Upload to S3",
-                            GUILayout.Height(30)))
-                    {
-                        if (GenerateCatalog())
+                        if (GUILayout.Button(
+                                "Generate & Upload",
+                                GUILayout.Height(30f)
+                            )
+                            && GenerateCatalog())
                         {
                             UploadToS3();
                         }
@@ -1068,120 +1560,130 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawS3Section()
         {
-            _s3Foldout = EditorGUILayout.Foldout(
-                _s3Foldout, "S3 Upload Settings", true);
-
-            if (!_s3Foldout)
-            {
-                return;
-            }
-
-            EditorGUI.indentLevel++;
-
             S3UploadSettings s3 = _config.S3;
-
-            using (new EditorGUI.ChangeCheckScope())
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                s3.Enabled = EditorGUILayout.Toggle(
-                    "Enabled", s3.Enabled);
-
-                using (new EditorGUI.DisabledGroupScope(!s3.Enabled))
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    s3.Endpoint = EditorGUILayout.TextField(
-                        "Endpoint", s3.Endpoint);
-                    s3.Region = EditorGUILayout.TextField(
-                        "Region", s3.Region);
-                    s3.Bucket = EditorGUILayout.TextField(
-                        "Bucket", s3.Bucket);
-                    s3.UseEnvironmentCredentials = EditorGUILayout.Toggle(
-                        "Use Environment Credentials",
-                        s3.UseEnvironmentCredentials);
-                    s3.AccessKeyEnvironmentVariable = EditorGUILayout.TextField(
-                        "Access Key Variable",
-                        s3.AccessKeyEnvironmentVariable);
-                    s3.SecretKeyEnvironmentVariable = EditorGUILayout.TextField(
-                        "Secret Key Variable",
-                        s3.SecretKeyEnvironmentVariable);
-
-                    s3.BasePrefix = EditorGUILayout.TextField(
-                        "Base Prefix", s3.BasePrefix);
-
-                    s3.PublicRead = EditorGUILayout.Toggle(
-                        "Public Read (x-amz-acl)", s3.PublicRead);
+                    _s3Foldout = EditorGUILayout.Foldout(
+                        _s3Foldout,
+                        "S3 Upload Settings",
+                        true
+                    );
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.LabelField(
+                        s3.IsValid ? "Ready" : s3.Enabled ? "Incomplete" : "Disabled",
+                        EditorStyles.centeredGreyMiniLabel,
+                        GUILayout.Width(64f)
+                    );
                 }
 
-                if (EditorGUI.EndChangeCheck())
+                if (!_s3Foldout)
                 {
-                    EditorUtility.SetDirty(_config);
-                    AssetDatabase.SaveAssets();
+                    return;
                 }
-            }
 
-            GUILayout.Space(4);
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledGroupScope(
-                    !s3.IsValid || _isUploading))
+                using (new EditorGUI.ChangeCheckScope())
                 {
-                    if (GUILayout.Button("Test Connection",
-                            GUILayout.Width(120)))
+                    s3.Enabled = EditorGUILayout.Toggle(
+                        "Enabled", s3.Enabled);
+
+                    using (new EditorGUI.DisabledGroupScope(!s3.Enabled))
                     {
-                        TestS3Connection();
+                        s3.Endpoint = EditorGUILayout.TextField(
+                            "Endpoint", s3.Endpoint);
+                        s3.Region = EditorGUILayout.TextField(
+                            "Region", s3.Region);
+                        s3.Bucket = EditorGUILayout.TextField(
+                            "Bucket", s3.Bucket);
+                        s3.UseEnvironmentCredentials = EditorGUILayout.Toggle(
+                            "Use Environment Credentials",
+                            s3.UseEnvironmentCredentials);
+                        s3.AccessKeyEnvironmentVariable = EditorGUILayout.TextField(
+                            "Access Key Variable",
+                            s3.AccessKeyEnvironmentVariable);
+                        s3.SecretKeyEnvironmentVariable = EditorGUILayout.TextField(
+                            "Secret Key Variable",
+                            s3.SecretKeyEnvironmentVariable);
+
+                        s3.BasePrefix = EditorGUILayout.TextField(
+                            "Base Prefix", s3.BasePrefix);
+
+                        s3.PublicRead = EditorGUILayout.Toggle(
+                            "Public Read (x-amz-acl)", s3.PublicRead);
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        EditorUtility.SetDirty(_config);
+                        AssetDatabase.SaveAssets();
+                    }
+                }
+
+                GUILayout.Space(4);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    using (new EditorGUI.DisabledGroupScope(
+                               !s3.IsValid || _isUploading))
+                    {
+                        if (GUILayout.Button("Test Connection",
+                                GUILayout.Width(120)))
+                        {
+                            TestS3Connection();
+                        }
+                    }
+
+                    if (_isUploading)
+                    {
+                        GUILayout.Label(
+                            _uploadStatusMessage,
+                            EditorStyles.miniLabel);
+                        if (_canCancelUpload
+                            && GUILayout.Button("Cancel", GUILayout.Width(60)))
+                        {
+                            _cancelUploadRequested = true;
+                        }
                     }
                 }
 
                 if (_isUploading)
                 {
-                    GUILayout.Label(
-                        _uploadStatusMessage,
-                        EditorStyles.miniLabel);
-                    if (_canCancelUpload
-                        && GUILayout.Button("Cancel", GUILayout.Width(60)))
-                    {
-                        _cancelUploadRequested = true;
-                    }
+                    Rect progressRect = EditorGUILayout.GetControlRect(
+                        false, 18f);
+                    EditorGUI.ProgressBar(
+                        progressRect, _uploadProgress,
+                        _uploadStatusMessage);
+                }
+
+                if (!s3.Enabled)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Enable S3 upload and configure credentials "
+                        + "to upload the catalog to S3-compatible storage.",
+                        MessageType.Info);
+                }
+                else if (!s3.IsValid)
+                {
+                    EditorGUILayout.HelpBox(
+                        "All S3 fields are required. Ensure Endpoint, Region, "
+                        + "Bucket, and the configured credential environment "
+                        + "variables are available to the Unity Editor.",
+                        MessageType.Warning);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(
+                        s3.UseEnvironmentCredentials
+                            ? "Credentials are read from the Unity Editor process "
+                                + "environment and are not serialized in this asset."
+                            : "Legacy serialized credentials are enabled. Migrate "
+                                + "to environment variables before committing this asset.",
+                        s3.UseEnvironmentCredentials
+                            ? MessageType.Info
+                            : MessageType.Warning);
                 }
             }
-
-            if (_isUploading)
-            {
-                Rect progressRect = EditorGUILayout.GetControlRect(
-                    false, 18f);
-                EditorGUI.ProgressBar(
-                    progressRect, _uploadProgress,
-                    _uploadStatusMessage);
-            }
-
-            if (!s3.Enabled)
-            {
-                EditorGUILayout.HelpBox(
-                    "Enable S3 upload and configure credentials "
-                    + "to upload the catalog to S3-compatible storage.",
-                    MessageType.Info);
-            }
-            else if (!s3.IsValid)
-            {
-                EditorGUILayout.HelpBox(
-                    "All S3 fields are required. Ensure Endpoint, Region, "
-                    + "Bucket, and the configured credential environment "
-                    + "variables are available to the Unity Editor.",
-                    MessageType.Warning);
-            }
-            else
-            {
-                EditorGUILayout.HelpBox(
-                    s3.UseEnvironmentCredentials
-                        ? "Credentials are read from the Unity Editor process "
-                            + "environment and are not serialized in this asset."
-                        : "Legacy serialized credentials are enabled. Migrate "
-                            + "to environment variables before committing this asset.",
-                    s3.UseEnvironmentCredentials
-                        ? MessageType.Info
-                        : MessageType.Warning);
-            }
-
-            EditorGUI.indentLevel--;
         }
 
         private void TestS3Connection()
@@ -1440,7 +1942,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 CatalogBuildState generatedState
                     = CatalogBuildUtility.CreateBuildState(
                         validation,
-                        generatedVersion);
+                        generatedVersion
+                    );
+                generatedState.OutputFolder = NormalizeOutputFolder(
+                    _config.OutputFolder
+                );
                 DeleteStaleLocalFiles(
                     validation.OutputDirectory,
                     previousState,
@@ -1544,6 +2050,20 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 : DataType.Binary;
         }
 
+        private static string NormalizeOutputFolder(string outputFolder)
+        {
+            return string.IsNullOrWhiteSpace(outputFolder)
+                ? string.Empty
+                : outputFolder.Replace('\\', '/').Trim().TrimEnd('/');
+        }
+
+        private static string NormalizeCatalogFileName(string catalogFileName)
+        {
+            return string.IsNullOrWhiteSpace(catalogFileName)
+                ? string.Empty
+                : catalogFileName.Trim();
+        }
+
         private static string ComputeHash(string filePath)
         {
             if (!File.Exists(filePath))
@@ -1580,6 +2100,171 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 .Replace("\n", "\\n")
                 .Replace("\r", "\\r")
                 .Replace("\t", "\\t");
+        }
+
+        #endregion
+
+        #region Nested Types
+
+        private enum CatalogBuilderTab
+        {
+            Configuration,
+            Entries,
+            Upload
+        }
+
+        private struct CachedHash
+        {
+            public string Hash;
+            public long LastWriteTicks;
+        }
+
+        private sealed class CatalogEntryPopup : PopupWindowContent
+        {
+            private readonly StagedCatalogEntry _entry;
+            private readonly Action _deleteEntry;
+            private readonly Action _refreshHash;
+            private readonly Action _toggleSelection;
+
+            public CatalogEntryPopup(
+                StagedCatalogEntry entry,
+                Action deleteEntry,
+                Action refreshHash,
+                Action toggleSelection)
+            {
+                _entry = entry;
+                _deleteEntry = deleteEntry;
+                _refreshHash = refreshHash;
+                _toggleSelection = toggleSelection;
+            }
+
+            public override Vector2 GetWindowSize()
+            {
+                return new Vector2(440f, 292f);
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                EditorGUILayout.LabelField("Quick Tools", EditorStyles.boldLabel);
+                DrawQuickTools();
+                DrawSeparator();
+                DrawPreviewInformation();
+                DrawSeparator();
+                DrawOptionalTools();
+            }
+
+            private void DrawQuickTools()
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    DrawQuickToolButton(
+                        "d_TreeEditor.Trash",
+                        "Delete this catalog entry",
+                        _deleteEntry
+                    );
+                    DrawQuickToolButton(
+                        "d_Refresh",
+                        "Refresh the stored source hash",
+                        _refreshHash
+                    );
+                    DrawQuickToolButton(
+                        "d_FolderOpened Icon",
+                        "Reveal the source file",
+                        RevealSource
+                    );
+                    DrawQuickToolButton(
+                        "d_FilterSelectedOnly",
+                        "Select or deselect this catalog entry",
+                        _toggleSelection
+                    );
+                }
+            }
+
+            private void DrawPreviewInformation()
+            {
+                EditorGUILayout.LabelField(
+                    "Preview Information",
+                    EditorStyles.boldLabel
+                );
+                using (new EditorGUI.DisabledGroupScope(true))
+                {
+                    EditorGUILayout.TextField("ID", _entry.Id);
+                    EditorGUILayout.EnumPopup("Data Type", _entry.Type);
+                    EditorGUILayout.TextField("Relative Path", _entry.RelativePath);
+                    EditorGUILayout.TextField(
+                        "Source",
+                        Path.GetFileName(_entry.SourceFilePath)
+                    );
+                }
+
+                EditorGUILayout.LabelField(
+                    "Hash",
+                    string.IsNullOrEmpty(_entry.ContentHash)
+                        ? "Unavailable"
+                        : _entry.ContentHash,
+                    EditorStyles.wordWrappedMiniLabel
+                );
+            }
+
+            private void DrawOptionalTools()
+            {
+                EditorGUILayout.LabelField("Optional Tools", EditorStyles.boldLabel);
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Copy ID"))
+                    {
+                        EditorGUIUtility.systemCopyBuffer = _entry.Id;
+                    }
+
+                    if (GUILayout.Button("Copy Output Path"))
+                    {
+                        EditorGUIUtility.systemCopyBuffer = _entry.RelativePath;
+                    }
+
+                    if (GUILayout.Button("Copy Source Path"))
+                    {
+                        EditorGUIUtility.systemCopyBuffer = _entry.SourceFilePath;
+                    }
+                }
+            }
+
+            private void RevealSource()
+            {
+                if (!string.IsNullOrWhiteSpace(_entry.SourceFilePath))
+                {
+                    EditorUtility.RevealInFinder(_entry.SourceFilePath);
+                }
+            }
+
+            private void DrawQuickToolButton(
+                string iconName,
+                string tooltip,
+                Action action)
+            {
+                GUIContent icon = new GUIContent(
+                    EditorGUIUtility.IconContent(iconName)
+                );
+                icon.tooltip = tooltip;
+                if (GUILayout.Button(
+                        icon,
+                        EditorStyles.miniButton,
+                        GUILayout.Width(32f)
+                    ))
+                {
+                    editorWindow.Close();
+                    action?.Invoke();
+                }
+            }
+
+            private static void DrawSeparator()
+            {
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField(
+                    GUIContent.none,
+                    GUI.skin.horizontalSlider
+                );
+                EditorGUILayout.Space(4f);
+            }
         }
 
         #endregion

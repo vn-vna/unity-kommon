@@ -298,6 +298,14 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 result.Errors.Add($"Duplicate output path '{relativePath}'.");
             }
 
+            bool hasValidDataType = entry.Type == DataType.Text
+                || entry.Type == DataType.Binary;
+            if (!hasValidDataType)
+            {
+                result.Errors.Add(
+                    $"{label} has unsupported data type '{entry.Type}'.");
+            }
+
             if (string.IsNullOrWhiteSpace(entry.SourceFilePath)
                 || !File.Exists(entry.SourceFilePath))
             {
@@ -312,7 +320,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(id) || relativePath == null)
+            if (string.IsNullOrWhiteSpace(id)
+                || relativePath == null
+                || !hasValidDataType)
             {
                 return;
             }

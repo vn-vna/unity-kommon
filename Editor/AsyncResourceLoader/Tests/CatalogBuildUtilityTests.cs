@@ -59,6 +59,22 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
         }
 
         [Test]
+        public void Validate_RejectsUnknownDataType()
+        {
+            StagedCatalogEntry entry = CreateEntry(
+                "level_1",
+                "Levels/level_1.json"
+            );
+            entry.Type = DataType.Unknown;
+            _config.Entries.Add(entry);
+
+            CatalogValidationResult result = CatalogBuildUtility.Validate(_config);
+
+            Assert.That(result.IsValid, Is.False);
+            Assert.That(result.Errors, Has.Some.Contains("unsupported data type"));
+        }
+
+        [Test]
         public void GetStaleRelativePaths_IncludesRemovedEntriesAndOldCatalog()
         {
             CatalogBuildState previous = new CatalogBuildState
