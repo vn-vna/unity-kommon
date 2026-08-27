@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using UnityEditor;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
@@ -170,6 +172,38 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
         }
 
+        public static PuzzleLevelValidationResult ValidateLevel(
+            StagedCatalogEntry entry)
+        {
+            if (entry == null)
+            {
+                return CreateLevelValidationFailure(
+                    "ENTRY_MISSING",
+                    "Catalog entry is missing."
+                );
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.SourceFilePath)
+                || !File.Exists(entry.SourceFilePath))
+            {
+                return CreateLevelValidationFailure(
+                    "ENTRY_SOURCE_MISSING",
+                    "Level source file is missing."
+                );
+            }
+
+            string contentHash = ComputeFileHash(entry.SourceFilePath);
+            if (string.IsNullOrEmpty(contentHash))
+            {
+                return CreateLevelValidationFailure(
+                    "ENTRY_SOURCE_UNREADABLE",
+                    "Level source file cannot be hashed."
+                );
+            }
+
+            return ValidateLevel(entry, contentHash);
+        }
+
         public static string BuildCatalogJson(
             int version,
             IReadOnlyList<ValidatedCatalogEntry> entries)
@@ -327,12 +361,102 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 return;
             }
 
+            int errorCount = result.Errors.Count;
+            AppendLevelValidationDiagnostics(
+                ValidateLevel(entry, hash),
+                label,
+                id,
+                result
+            );
+            if (result.Errors.Count > errorCount)
+            {
+                return;
+            }
+
             result.ValidEntries.Add(new ValidatedCatalogEntry(
                 entry,
                 id,
                 entry.Type,
                 relativePath,
                 hash));
+        }
+
+        private static PuzzleLevelValidationResult ValidateLevel(
+            StagedCatalogEntry entry,
+            string contentHash)
+        {
+            byte[] content;
+            try
+            {
+                content = File.ReadAllBytes(entry.SourceFilePath);
+            }
+            catch (Exception exception)
+            {
+                return CreateLevelValidationFailure(
+                    "ENTRY_SOURCE_UNREADABLE",
+                    $"Level source file cannot be read: {exception.Message}"
+                );
+            }
+
+            string assetPath = entry.SourceFilePath.Replace('\\', '/');
+            TextAsset asset = assetPath.StartsWith(
+                    "Assets/",
+                    StringComparison.Ordinal
+                )
+                ? AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath)
+                : null;
+            var request = new PuzzleLevelValidationRequest(
+                entry.Id?.Trim(),
+                asset,
+                Path.GetFileName(entry.SourceFilePath),
+                entry.Type,
+                entry.Type,
+                contentHash,
+                content
+            );
+            return PuzzleLevelValidationService.Validate(request);
+        }
+
+        private static void AppendLevelValidationDiagnostics(
+            PuzzleLevelValidationResult validation,
+            string label,
+            string id,
+            CatalogValidationResult result)
+        {
+            for (int i = 0; i < validation.Diagnostics.Count; i++)
+            {
+                PuzzleLevelValidationDiagnostic diagnostic
+                    = validation.Diagnostics[i];
+                string message = $"{label} ('{id}') [{diagnostic.Code}] "
+                    + diagnostic.Message;
+                if (diagnostic.Severity == PuzzleLevelValidationSeverity.Error)
+                {
+                    result.Errors.Add(message);
+                }
+                else if (diagnostic.Severity
+                         == PuzzleLevelValidationSeverity.Warning)
+                {
+                    result.Warnings.Add(message);
+                }
+            }
+        }
+
+        private static PuzzleLevelValidationResult CreateLevelValidationFailure(
+            string code,
+            string message)
+        {
+            return new PuzzleLevelValidationResult(
+                new[]
+                {
+                    new PuzzleLevelValidationDiagnostic(
+                        code,
+                        PuzzleLevelValidationSeverity.Error,
+                        message
+                    )
+                },
+                string.Empty,
+                string.Empty
+            );
         }
 
         private static bool TryNormalizeFileName(
@@ -432,6 +556,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         public string CatalogRelativePath;
         public string ManifestHash;
         public List<string> Errors = new List<string>();
+        public List<string> Warnings = new List<string>();
         public List<ValidatedCatalogEntry> ValidEntries
             = new List<ValidatedCatalogEntry>();
 

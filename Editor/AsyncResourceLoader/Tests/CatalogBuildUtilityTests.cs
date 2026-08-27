@@ -33,8 +33,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
         [Test]
         public void Validate_RejectsDuplicateIdsAndPathTraversal()
         {
-            _config.Entries.Add(CreateEntry("level_1", "Levels/level_1.json"));
-            _config.Entries.Add(CreateEntry("level_1", "../outside.json"));
+            _config.Entries.Add(CreateEntry("catalog_1", "Levels/catalog_1.json"));
+            _config.Entries.Add(CreateEntry("catalog_1", "../outside.json"));
 
             CatalogValidationResult result = CatalogBuildUtility.Validate(_config);
 
@@ -46,8 +46,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
         [Test]
         public void Validate_CreatesStableManifestHashForReorderedEntries()
         {
-            _config.Entries.Add(CreateEntry("level_2", "Levels/level_2.json"));
-            _config.Entries.Add(CreateEntry("level_1", "Levels/level_1.json"));
+            _config.Entries.Add(CreateEntry("catalog_2", "Levels/catalog_2.json"));
+            _config.Entries.Add(CreateEntry("catalog_1", "Levels/catalog_1.json"));
 
             CatalogValidationResult first = CatalogBuildUtility.Validate(_config);
             _config.Entries.Reverse();
@@ -72,6 +72,21 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
 
             Assert.That(result.IsValid, Is.False);
             Assert.That(result.Errors, Has.Some.Contains("unsupported data type"));
+        }
+
+        [Test]
+        public void Validate_RejectsInvalidPuzzleLevelContent()
+        {
+            File.WriteAllText(_sourceFilePath, "not valid json");
+            _config.Entries.Add(CreateEntry("level_0000", "Levels/level_0000.json"));
+
+            CatalogValidationResult result = CatalogBuildUtility.Validate(_config);
+
+            Assert.That(result.IsValid, Is.False);
+            Assert.That(
+                result.Errors,
+                Has.Some.Contains("SANDSIM_LEVEL_DESERIALIZATION_FAILED")
+            );
         }
 
         [Test]

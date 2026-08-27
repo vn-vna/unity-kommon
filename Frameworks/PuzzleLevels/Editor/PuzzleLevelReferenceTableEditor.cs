@@ -49,6 +49,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private SerializedProperty _entriesProperty;
         private SerializedProperty _enableEntryAutoIdProperty;
         private SerializedProperty _entryAutoIdTemplateProperty;
+        private SerializedProperty _enableEntryAutoIdRegexProperty;
+        private SerializedProperty _entryAutoIdRegexPatternProperty;
         private int _focusedEntryIndex = -1;
         private int _batchMoveTargetIndex = 1;
         private readonly HashSet<int> _selectedEntryIndices = new HashSet<int>();
@@ -64,6 +66,10 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                 "_enableEntryAutoId");
             _entryAutoIdTemplateProperty = serializedObject.FindProperty(
                 "_entryAutoIdTemplate");
+            _enableEntryAutoIdRegexProperty = serializedObject.FindProperty(
+                "_enableEntryAutoIdRegex");
+            _entryAutoIdRegexPatternProperty = serializedObject.FindProperty(
+                "_entryAutoIdRegexPattern");
             Undo.undoRedoPerformed += HandleProjectStateChanged;
             EditorApplication.projectChanged += HandleProjectStateChanged;
         }
@@ -111,7 +117,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         private bool DrawAutoIdControls()
         {
             if (_enableEntryAutoIdProperty == null
-                || _entryAutoIdTemplateProperty == null)
+                || _entryAutoIdTemplateProperty == null
+                || _enableEntryAutoIdRegexProperty == null
+                || _entryAutoIdRegexPatternProperty == null)
             {
                 return false;
             }
@@ -135,6 +143,23 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
                         refreshRequested = GUILayout.Button(
                             "Refresh IDs",
                             GUILayout.Width(100f));
+                    }
+                }
+
+                using (new EditorGUI.DisabledGroupScope(
+                           !_enableEntryAutoIdProperty.boolValue))
+                {
+                    EditorGUILayout.PropertyField(
+                        _enableEntryAutoIdRegexProperty,
+                        new GUIContent("Enable Regex Matching")
+                    );
+                    using (new EditorGUI.DisabledGroupScope(
+                               !_enableEntryAutoIdRegexProperty.boolValue))
+                    {
+                        EditorGUILayout.PropertyField(
+                            _entryAutoIdRegexPatternProperty,
+                            new GUIContent("Regex Pattern")
+                        );
                     }
                 }
             }

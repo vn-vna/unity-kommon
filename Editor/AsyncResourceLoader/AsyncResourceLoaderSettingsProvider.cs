@@ -1547,7 +1547,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             if (_catalogConfig == null)
             {
                 EditorGUILayout.HelpBox(
-                    "CatalogBuilderConfig asset not found. Create one via the Catalog Builder window.",
+                    "CatalogBuilderConfig asset not found. Create one via Assets/Create/Scheherazade/Async Resource Loader/Catalog Builder Config.",
                     MessageType.Warning);
                 return;
             }
@@ -1610,9 +1610,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             GUILayout.Space(8);
 
-            if (GUILayout.Button("Open Catalog Builder Window", GUILayout.Height(30)))
+            if (GUILayout.Button("Select Catalog Builder Config", GUILayout.Height(30)))
             {
-                CatalogBuilderWindow.Open();
+                CatalogBuilderConfigEditor.Open();
             }
         }
 

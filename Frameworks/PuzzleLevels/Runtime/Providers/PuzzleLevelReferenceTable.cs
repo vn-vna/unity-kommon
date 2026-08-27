@@ -32,6 +32,12 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 
         [SerializeField]
         private string _entryAutoIdTemplate;
+
+        [SerializeField]
+        private bool _enableEntryAutoIdRegex;
+
+        [SerializeField]
+        private string _entryAutoIdRegexPattern;
 #endif
 
         private Dictionary<string, TextAsset> _lookup;
@@ -141,7 +147,14 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             if (entry.Asset == null) return;
 
             string fileName = entry.Asset.name;
-            string newId = FormatEntryId(_entryAutoIdTemplate, index, fileName, dateTime);
+            string newId = FormatEntryId(
+                _entryAutoIdTemplate,
+                index,
+                fileName,
+                dateTime,
+                _enableEntryAutoIdRegex,
+                _entryAutoIdRegexPattern
+            );
 
             if (entry.Id != newId)
             {
@@ -150,18 +163,39 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             }
         }
 
-        private static string FormatEntryId(string template, int index, string fileName, DateTime dateTime)
+        private static string FormatEntryId(
+            string template,
+            int index,
+            string fileName,
+            DateTime dateTime,
+            bool isRegexEnabled,
+            string regexPattern)
         {
             string evaluated = PlaceholderRegex.Replace(template, match =>
             {
                 string tag = match.Groups[1].Value.Trim();
-                return ResolvePlaceholder(tag, index, fileName, dateTime, match.Value);
+                return ResolvePlaceholder(
+                    tag,
+                    index,
+                    fileName,
+                    dateTime,
+                    isRegexEnabled,
+                    regexPattern,
+                    match.Value
+                );
             });
 
             return UnescapeBrackets(evaluated);
         }
 
-        private static string ResolvePlaceholder(string tag, int index, string fileName, DateTime dateTime, string defaultValue)
+        private static string ResolvePlaceholder(
+            string tag,
+            int index,
+            string fileName,
+            DateTime dateTime,
+            bool isRegexEnabled,
+            string regexPattern,
+            string defaultValue)
         {
             if (tag.StartsWith("index", StringComparison.OrdinalIgnoreCase))
             {
@@ -176,6 +210,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             if (tag.StartsWith("filename:", StringComparison.OrdinalIgnoreCase))
             {
                 return ResolveFilenameRegexTag(tag, fileName);
+            }
+
+            if (tag.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResolveConfiguredRegexTag(
+                    tag,
+                    fileName,
+                    isRegexEnabled,
+                    regexPattern,
+                    defaultValue
+                );
             }
 
             if (tag.StartsWith("datetime", StringComparison.OrdinalIgnoreCase))
@@ -226,22 +271,72 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
             string pattern = parts[1];
             string groupIdentifier = parts[2];
 
-            return ExtractRegexGroup(fileName, pattern, groupIdentifier);
+            return ExtractRegexGroup(
+                fileName,
+                pattern,
+                groupIdentifier,
+                string.Empty
+            );
         }
 
-        private static string ExtractRegexGroup(string input, string pattern, string groupIdentifier)
+        private static string ResolveConfiguredRegexTag(
+            string tag,
+            string fileName,
+            bool isRegexEnabled,
+            string regexPattern,
+            string defaultValue)
+        {
+            string groupDefinition = tag.Substring("regex:".Length);
+            int fallbackSeparatorIndex = groupDefinition.IndexOf('|');
+            string groupIdentifier = fallbackSeparatorIndex < 0
+                ? groupDefinition.Trim()
+                : groupDefinition.Substring(0, fallbackSeparatorIndex).Trim();
+            string emptyValueFallback = fallbackSeparatorIndex < 0
+                ? defaultValue
+                : groupDefinition.Substring(fallbackSeparatorIndex + 1);
+            if (!isRegexEnabled || string.IsNullOrWhiteSpace(regexPattern))
+            {
+                return emptyValueFallback;
+            }
+
+            return string.IsNullOrWhiteSpace(groupIdentifier)
+                ? emptyValueFallback
+                : ExtractRegexGroup(
+                    fileName,
+                    regexPattern,
+                    groupIdentifier,
+                    emptyValueFallback
+                );
+        }
+
+        private static string ExtractRegexGroup(
+            string input,
+            string pattern,
+            string groupIdentifier,
+            string fallback)
         {
             try
             {
                 Match match = Regex.Match(input, pattern);
-                if (!match.Success) return string.Empty;
+                if (!match.Success) return fallback;
 
                 if (int.TryParse(groupIdentifier, out int groupIdx))
                 {
-                    return groupIdx < match.Groups.Count ? match.Groups[groupIdx].Value : string.Empty;
+                    if (groupIdx >= match.Groups.Count)
+                    {
+                        return fallback;
+                    }
+
+                    string groupValue = match.Groups[groupIdx].Value;
+                    return string.IsNullOrEmpty(groupValue)
+                        ? fallback
+                        : groupValue;
                 }
 
-                return match.Groups[groupIdentifier].Success ? match.Groups[groupIdentifier].Value : string.Empty;
+                Group group = match.Groups[groupIdentifier];
+                return group.Success && !string.IsNullOrEmpty(group.Value)
+                    ? group.Value
+                    : fallback;
             }
             catch (Exception ex)
             {
@@ -249,7 +344,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
                     "Invalid regex for group '{0}': {1}",
                     groupIdentifier,
                     ex.Message);
-                return string.Empty;
+                return fallback;
             }
         }
 

@@ -15,6 +15,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         public string SubfolderName = "Levels";
         public string CatalogFileName = "catalog.json";
         public int Version = 1;
+        public bool EnableEntryAutoId;
+        public string EntryAutoIdTemplate = "level_{index:+1}";
+        public bool EnableEntryAutoIdRegex;
+        public string EntryAutoIdRegexPattern;
         public List<StagedCatalogEntry> Entries = new List<StagedCatalogEntry>();
         public CatalogBuildState LastGenerated = new CatalogBuildState();
         public CatalogBuildState LastUploaded = new CatalogBuildState();

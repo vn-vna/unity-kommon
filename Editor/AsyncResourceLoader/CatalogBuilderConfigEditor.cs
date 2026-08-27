@@ -3,14 +3,17 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
 using Com.Hapiga.Scheherazade.Common.Editor;
+using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
 using UnityEditor;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 {
-    public class CatalogBuilderWindow : EditorWindow
+    [CustomEditor(typeof(CatalogBuilderConfig))]
+    public class CatalogBuilderConfigEditor : UnityEditor.Editor
     {
         private const int DefaultPageSize = 20;
         private const int MinimumPageSize = 5;
@@ -18,7 +21,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private const float DropZoneHeight = 54f;
         private const float SelectionColumnWidth = 22f;
         private const float TypeColumnWidth = 64f;
-        private const float StatusColumnWidth = 74f;
+        private const float StatusColumnWidth = 84f;
+        private static readonly Regex EntryIdPlaceholderRegex = new Regex(
+            @"(?<!\{)\{([^{}]+)\}(?!\})",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly string[] TabNames =
         {
             "Configuration",
@@ -33,12 +39,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         };
 
         private CatalogBuilderConfig _config;
-        private Vector2 _windowScrollPosition;
         [SerializeField]
         private CatalogBuilderTab _activeTab;
         private bool _isDraggingOver;
-        private List<CatalogBuilderConfig> _allConfigs;
-        private int _selectedConfigIndex = -1;
         private string _searchFilter = string.Empty;
         private int _pageIndex;
         private int _pageSize = DefaultPageSize;
@@ -58,7 +61,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private float _colPathWidth = 230f;
 
         // S3 upload state
-        private bool _validationFoldout = true;
         private bool _s3Foldout;
         private bool _isUploading;
         private bool _canCancelUpload;
@@ -72,10 +74,26 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         [MenuItem("Dev Menu/Catalog/Builder")]
         public static void Open()
         {
-            CatalogBuilderWindow window = GetWindow<CatalogBuilderWindow>(
-                false, "Catalog Builder", true);
-            window.minSize = new Vector2(680f, 560f);
-            window.Show();
+            CatalogBuilderConfig config = Selection.activeObject
+                as CatalogBuilderConfig;
+            if (config == null)
+            {
+                config = FindFirstConfig();
+            }
+
+            if (config == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Catalog Builder Config Missing",
+                    "Create a Catalog Builder Config asset via Assets/Create/Scheherazade/"
+                    + "Async Resource Loader/Catalog Builder Config.",
+                    "OK"
+                );
+                return;
+            }
+
+            Selection.activeObject = config;
+            EditorGUIUtility.PingObject(config);
         }
 
         #endregion
@@ -84,30 +102,30 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void OnEnable()
         {
-            RefreshConfigList();
+            _config = target as CatalogBuilderConfig;
+            if (_config == null)
+            {
+                return;
+            }
+
+            EnsureConfigInitialized();
             InvalidateFilters();
         }
 
-        private void OnGUI()
+        public override void OnInspectorGUI()
         {
-            DrawConfigSelector();
-
             if (_config == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Select or create a Catalog Builder Config to get started.",
+                    "Catalog Builder Config is unavailable.",
                     MessageType.Info);
                 return;
             }
 
             PruneSelection();
-            _windowScrollPosition = EditorGUILayout.BeginScrollView(
-                _windowScrollPosition
-            );
             DrawHeader();
             DrawTabs();
             DrawActiveTab();
-            EditorGUILayout.EndScrollView();
         }
 
         #endregion
@@ -131,7 +149,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
 
             _activeTab = selectedTab;
-            _windowScrollPosition = Vector2.zero;
             _isDraggingOver = false;
         }
 
@@ -142,7 +159,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             {
                 case CatalogBuilderTab.Configuration:
                     DrawCatalogSettings();
-                    DrawValidationSummary();
                     break;
 
                 case CatalogBuilderTab.Entries:
@@ -159,118 +175,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         }
 
         #endregion
-
-        #region Config Selector
-
-        private void DrawConfigSelector()
-        {
-            if (_allConfigs == null)
-            {
-                RefreshConfigList();
-            }
-
-            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
-            {
-                EditorGUILayout.LabelField(
-                    "Catalog Config",
-                    EditorStyles.miniBoldLabel,
-                    GUILayout.Width(92f)
-                );
-
-                using (new EditorGUI.ChangeCheckScope())
-                {
-                    string[] names = new string[_allConfigs.Count];
-                    for (int i = 0; i < _allConfigs.Count; i++)
-                    {
-                        names[i] = _allConfigs[i].name;
-                    }
-
-                    _selectedConfigIndex = EditorGUILayout.Popup(
-                        _selectedConfigIndex,
-                        names,
-                        GUILayout.ExpandWidth(true));
-
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        SelectConfig(_selectedConfigIndex);
-                    }
-                }
-
-                if (GUILayout.Button("+", EditorStyles.miniButton,
-                        GUILayout.Width(24f)))
-                {
-                    CreateNewConfig();
-                }
-
-                using (new EditorGUI.DisabledGroupScope(_config == null))
-                {
-                    if (GUILayout.Button("\u2715", EditorStyles.miniButton,
-                            GUILayout.Width(24f)))
-                    {
-                        DeleteSelectedConfig();
-                    }
-                }
-            }
-        }
-
-        private void RefreshConfigList()
-        {
-            string[] guids = AssetDatabase.FindAssets("t:CatalogBuilderConfig");
-            _allConfigs = new List<CatalogBuilderConfig>();
-
-            foreach (string guid in guids)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                CatalogBuilderConfig cfg
-                    = AssetDatabase.LoadAssetAtPath<CatalogBuilderConfig>(path);
-                if (cfg != null)
-                {
-                    _allConfigs.Add(cfg);
-                }
-            }
-
-            _allConfigs.Sort((a, b)
-                => string.Compare(a.name, b.name, StringComparison.Ordinal));
-
-            int previousIndex = _config == null
-                ? -1
-                : _allConfigs.IndexOf(_config);
-            if (_allConfigs.Count > 0)
-            {
-                SelectConfig(previousIndex >= 0 ? previousIndex : 0);
-            }
-            else
-            {
-                _selectedConfigIndex = -1;
-                _config = null;
-            }
-        }
-
-        private void SelectConfig(int index)
-        {
-            if (index < 0 || index >= _allConfigs.Count)
-            {
-                _config = null;
-                return;
-            }
-
-            // Flush previous config before switching
-            if (_config != null)
-            {
-                EditorUtility.SetDirty(_config);
-                AssetDatabase.SaveAssets();
-            }
-
-            _selectedConfigIndex = index;
-            _config = _allConfigs[index];
-            EnsureConfigInitialized();
-            _searchFilter = string.Empty;
-            _pageIndex = 0;
-            _selectedEntries.Clear();
-            _hashCache.Clear();
-            InvalidateFilters();
-            _lastValidation = null;
-        }
 
         private void EnsureConfigInitialized()
         {
@@ -305,61 +209,32 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             }
         }
 
-        private void CreateNewConfig()
+        private static CatalogBuilderConfig FindFirstConfig()
         {
-            string savePath = EditorUtility.SaveFilePanelInProject(
-                "Create Catalog Config",
-                "CatalogBuilderConfig",
-                "asset",
-                "Choose where to save the new catalog config.");
-
-            if (string.IsNullOrEmpty(savePath))
+            string[] guids = AssetDatabase.FindAssets("t:CatalogBuilderConfig");
+            if (guids.Length == 0)
             {
-                return;
+                return null;
             }
 
-            string folder = Path.GetDirectoryName(savePath);
-            if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+            var configs = new List<CatalogBuilderConfig>();
+            foreach (string guid in guids)
             {
-                Directory.CreateDirectory(folder);
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                CatalogBuilderConfig config
+                    = AssetDatabase.LoadAssetAtPath<CatalogBuilderConfig>(path);
+                if (config != null)
+                {
+                    configs.Add(config);
+                }
             }
 
-            CatalogBuilderConfig newConfig
-                = CreateInstance<CatalogBuilderConfig>();
-            newConfig.name = Path.GetFileNameWithoutExtension(savePath);
-            AssetDatabase.CreateAsset(newConfig, savePath);
-            AssetDatabase.SaveAssets();
-
-            RefreshConfigList();
-
-            _selectedConfigIndex = _allConfigs.IndexOf(newConfig);
-            SelectConfig(_selectedConfigIndex);
+            configs.Sort((left, right) => string.Compare(
+                left.name,
+                right.name,
+                StringComparison.Ordinal));
+            return configs.Count == 0 ? null : configs[0];
         }
-
-        private void DeleteSelectedConfig()
-        {
-            if (_config == null)
-            {
-                return;
-            }
-
-            if (!EditorUtility.DisplayDialog(
-                    "Delete Config",
-                    $"Delete '{_config.name}' permanently?\n\n"
-                    + "This will delete the config asset but not the staged files.",
-                    "Delete", "Cancel"))
-            {
-                return;
-            }
-
-            string path = AssetDatabase.GetAssetPath(_config);
-            AssetDatabase.DeleteAsset(path);
-            AssetDatabase.SaveAssets();
-
-            RefreshConfigList();
-        }
-
-        #endregion
 
         #region Header
 
@@ -380,8 +255,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
                 GUILayout.FlexibleSpace();
 
-                DrawHeaderStatus();
-
                 using (new EditorGUI.ChangeCheckScope())
                 {
                     int newVersion = EditorGUILayout.IntField(
@@ -399,61 +272,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     }
                 }
             }
-        }
-
-        private void DrawHeaderStatus()
-        {
-            Color previousColor = GUI.contentColor;
-            string label;
-            if (_lastValidation == null)
-            {
-                GUI.contentColor = Color.gray;
-                label = "● Not validated";
-            }
-            else if (!_lastValidation.IsValid)
-            {
-                GUI.contentColor = new Color(0.88f, 0.3f, 0.3f);
-                label = "● Invalid";
-            }
-            else if (IsCurrentValidationGenerated())
-            {
-                GUI.contentColor = new Color(0.35f, 0.8f, 0.4f);
-                label = "● Generated";
-            }
-            else
-            {
-                GUI.contentColor = new Color(0.92f, 0.7f, 0.2f);
-                label = "● Changes";
-            }
-
-            EditorGUILayout.LabelField(
-                label,
-                EditorStyles.miniBoldLabel,
-                GUILayout.Width(94f)
-            );
-            GUI.contentColor = previousColor;
-        }
-
-        private bool IsCurrentValidationGenerated()
-        {
-            CatalogBuildState generated = _config.LastGenerated;
-            return generated?.HasBuild == true
-                && generated.Version == _config.Version
-                && string.Equals(
-                    generated.ManifestHash,
-                    _lastValidation?.ManifestHash,
-                    StringComparison.Ordinal
-                )
-                && string.Equals(
-                    generated.CatalogRelativePath,
-                    NormalizeCatalogFileName(_config.CatalogFileName),
-                    StringComparison.Ordinal
-                )
-                && string.Equals(
-                    NormalizeOutputFolder(generated.OutputFolder),
-                    NormalizeOutputFolder(_config.OutputFolder),
-                    StringComparison.Ordinal
-                );
         }
 
         #endregion
@@ -488,6 +306,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 }
 
                 DrawOutputSettings();
+                EditorGUILayout.Space(4f);
+                DrawEntryIdSettings();
                 EditorGUILayout.Space(4f);
                 DrawRuntimeTargetGuidance();
             }
@@ -547,6 +367,120 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     _lastValidation = null;
                 }
             }
+        }
+
+        private void DrawEntryIdSettings()
+        {
+            EditorGUILayout.LabelField("Entry IDs", EditorStyles.miniBoldLabel);
+            bool enableEntryAutoId = _config.EnableEntryAutoId;
+            bool enableEntryAutoIdRegex = _config.EnableEntryAutoIdRegex;
+            string entryAutoIdTemplate = _config.EntryAutoIdTemplate;
+            string entryAutoIdRegexPattern = _config.EntryAutoIdRegexPattern;
+
+            using (new EditorGUI.ChangeCheckScope())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(
+                        "Auto ID",
+                        GUILayout.Width(48f)
+                    );
+                    enableEntryAutoId = EditorGUILayout.Toggle(
+                        _config.EnableEntryAutoId,
+                        GUILayout.Width(18f)
+                    );
+                    using (new EditorGUI.DisabledGroupScope(
+                               !enableEntryAutoId))
+                    {
+                        EditorGUILayout.LabelField(
+                            "Template",
+                            GUILayout.Width(58f)
+                        );
+                        entryAutoIdTemplate = EditorGUILayout.TextField(
+                            _config.EntryAutoIdTemplate
+                        );
+                    }
+                }
+
+                using (new EditorGUI.DisabledGroupScope(!enableEntryAutoId))
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField(
+                            "Regex",
+                            GUILayout.Width(48f)
+                        );
+                        enableEntryAutoIdRegex = EditorGUILayout.Toggle(
+                            _config.EnableEntryAutoIdRegex,
+                            GUILayout.Width(18f)
+                        );
+                        using (new EditorGUI.DisabledGroupScope(
+                                   !enableEntryAutoIdRegex))
+                        {
+                            EditorGUILayout.LabelField(
+                                "Pattern",
+                                GUILayout.Width(58f)
+                            );
+                            entryAutoIdRegexPattern = EditorGUILayout.TextField(
+                                _config.EntryAutoIdRegexPattern
+                            );
+                        }
+                    }
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(_config, "Change Catalog Entry ID Settings");
+                    _config.EnableEntryAutoId = enableEntryAutoId;
+                    _config.EntryAutoIdTemplate = entryAutoIdTemplate;
+                    _config.EnableEntryAutoIdRegex = enableEntryAutoIdRegex;
+                    _config.EntryAutoIdRegexPattern = entryAutoIdRegexPattern;
+                    EditorUtility.SetDirty(_config);
+                    AssetDatabase.SaveAssets();
+                }
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+                using (new EditorGUI.DisabledGroupScope(
+                           !_config.EnableEntryAutoId
+                           || string.IsNullOrWhiteSpace(
+                               _config.EntryAutoIdTemplate)))
+                {
+                    if (GUILayout.Button("Refresh IDs", GUILayout.Width(88f)))
+                    {
+                        RefreshEntryIds();
+                    }
+                }
+            }
+        }
+
+        private void RefreshEntryIds()
+        {
+            Undo.RecordObject(_config, "Refresh Catalog Entry IDs");
+            for (int index = 0; index < _config.Entries.Count; index++)
+            {
+                StagedCatalogEntry entry = _config.Entries[index];
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                entry.Id = FormatEntryId(
+                    _config.EntryAutoIdTemplate,
+                    index,
+                    Path.GetFileNameWithoutExtension(entry.SourceFilePath),
+                    _config.EnableEntryAutoIdRegex,
+                    _config.EntryAutoIdRegexPattern
+                );
+            }
+
+            _lastValidation = null;
+            InvalidateFilters();
+            EditorUtility.SetDirty(_config);
+            AssetDatabase.SaveAssets();
+            Repaint();
         }
 
         #endregion
@@ -681,67 +615,6 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         #endregion
 
         #region Validation
-
-        private void DrawValidationSummary()
-        {
-            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-            {
-                using (new EditorGUILayout.HorizontalScope())
-                {
-                    _validationFoldout = EditorGUILayout.Foldout(
-                        _validationFoldout,
-                        "Catalog Validation",
-                        true
-                    );
-                    GUILayout.FlexibleSpace();
-                    if (GUILayout.Button(
-                            "Validate",
-                            EditorStyles.miniButton,
-                            GUILayout.Width(68f)
-                        ))
-                    {
-                        ValidateCatalog(false);
-                    }
-                }
-
-                if (!_validationFoldout)
-                {
-                    return;
-                }
-
-                if (_lastValidation == null)
-                {
-                    EditorGUILayout.LabelField(
-                        "Run validation before generating or uploading.",
-                        EditorStyles.miniLabel);
-                }
-                else if (_lastValidation.IsValid)
-                {
-                    string state = IsCurrentValidationGenerated()
-                        ? "No manifest changes since the last generation."
-                        : "Catalog or destination changes detected.";
-                    EditorGUILayout.HelpBox(
-                        $"Valid: {_lastValidation.ValidEntries.Count} entries. {state}",
-                        MessageType.Info);
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox(
-                        string.Join("\n", _lastValidation.Errors),
-                        MessageType.Error);
-                }
-
-                if (_config.LastGenerated?.HasBuild == true)
-                {
-                    string hash = _config.LastGenerated.ManifestHash;
-                    EditorGUILayout.LabelField(
-                        $"Last build v{_config.LastGenerated.Version} · "
-                        + hash.Substring(0, Mathf.Min(12, hash.Length)),
-                        EditorStyles.miniLabel
-                    );
-                }
-            }
-        }
 
         private bool ValidateCatalog(bool showDialog)
         {
@@ -1243,30 +1116,41 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawEntryStatus(StagedCatalogEntry entry)
         {
+            PuzzleLevelValidationResult validation
+                = CatalogBuildUtility.ValidateLevel(entry);
             string currentHash = GetCachedHash(entry.SourceFilePath);
+            bool hasError = HasSeverity(
+                validation.Diagnostics,
+                PuzzleLevelValidationSeverity.Error);
+            bool hasWarning = HasSeverity(
+                validation.Diagnostics,
+                PuzzleLevelValidationSeverity.Warning);
+            string tooltip = CreateValidationTooltip(validation);
+            bool sourceChanged = !string.IsNullOrEmpty(currentHash)
+                && !string.Equals(
+                    currentHash,
+                    entry.ContentHash,
+                    StringComparison.Ordinal);
+            if (sourceChanged)
+            {
+                tooltip += "\nSource file changed since its hash was staged.";
+            }
             Color previousColor = GUI.contentColor;
             GUIContent status;
-            if (string.IsNullOrEmpty(currentHash))
+            if (hasError)
             {
                 GUI.contentColor = new Color(0.88f, 0.3f, 0.3f);
-                status = new GUIContent("● Missing", "Source file is missing");
+                status = new GUIContent("● Invalid", tooltip);
             }
-            else if (!string.Equals(
-                         currentHash,
-                         entry.ContentHash,
-                         StringComparison.Ordinal
-                     ))
+            else if (hasWarning || sourceChanged)
             {
                 GUI.contentColor = new Color(0.92f, 0.7f, 0.2f);
-                status = new GUIContent(
-                    "● Changed",
-                    "Source file changed since its hash was staged"
-                );
+                status = new GUIContent("● Warning", tooltip);
             }
             else
             {
                 GUI.contentColor = new Color(0.35f, 0.8f, 0.4f);
-                status = new GUIContent("● Ready", "Source file is up to date");
+                status = new GUIContent("● Valid", tooltip);
             }
 
             EditorGUILayout.LabelField(
@@ -1275,6 +1159,44 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 GUILayout.Width(StatusColumnWidth)
             );
             GUI.contentColor = previousColor;
+        }
+
+        private static bool HasSeverity(
+            IReadOnlyList<PuzzleLevelValidationDiagnostic> diagnostics,
+            PuzzleLevelValidationSeverity severity)
+        {
+            for (int index = 0; index < diagnostics.Count; index++)
+            {
+                if (diagnostics[index].Severity == severity)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string CreateValidationTooltip(
+            PuzzleLevelValidationResult validation)
+        {
+            var tooltip = new StringBuilder();
+            if (!string.IsNullOrEmpty(validation.ValidatorName))
+            {
+                tooltip.Append("Validator: ");
+                tooltip.AppendLine(validation.ValidatorName);
+            }
+
+            for (int index = 0; index < validation.Diagnostics.Count; index++)
+            {
+                PuzzleLevelValidationDiagnostic diagnostic
+                    = validation.Diagnostics[index];
+                tooltip.Append('[');
+                tooltip.Append(diagnostic.Code);
+                tooltip.Append("] ");
+                tooltip.AppendLine(diagnostic.Message);
+            }
+
+            return tooltip.Length == 0 ? "Validated" : tooltip.ToString();
         }
 
         private void HandleEntryContextClick(
@@ -1874,13 +1796,21 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 }
 
                 string fileName = Path.GetFileName(filePath);
-                string id = ExtractId(filePath);
                 DataType type = DetectType(filePath);
                 string relativePath = $"{_config.SubfolderName}/{fileName}";
                 string hash = GetCachedHash(filePath);
 
                 _config.Entries.RemoveAll(
                     e => e.SourceFilePath == filePath);
+                string id = _config.EnableEntryAutoId
+                    ? FormatEntryId(
+                        _config.EntryAutoIdTemplate,
+                        _config.Entries.Count,
+                        Path.GetFileNameWithoutExtension(filePath),
+                        _config.EnableEntryAutoIdRegex,
+                        _config.EntryAutoIdRegexPattern
+                    )
+                    : ExtractId(filePath);
 
                 _config.Entries.Add(new StagedCatalogEntry
                 {
@@ -2040,6 +1970,121 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private static string ExtractId(string filePath)
         {
             return Path.GetFileNameWithoutExtension(filePath);
+        }
+
+        private static string FormatEntryId(
+            string template,
+            int index,
+            string fileName,
+            bool isRegexEnabled,
+            string regexPattern)
+        {
+            string evaluatedTemplate = string.IsNullOrWhiteSpace(template)
+                ? "{index}"
+                : template;
+            string result = EntryIdPlaceholderRegex.Replace(
+                evaluatedTemplate,
+                match => ResolveEntryIdTag(
+                    match.Groups[1].Value,
+                    index,
+                    fileName,
+                    isRegexEnabled,
+                    regexPattern,
+                    match.Value
+                )
+            );
+            return result.Replace("{{", "{").Replace("}}", "}");
+        }
+
+        private static string ResolveEntryIdTag(
+            string tag,
+            int index,
+            string fileName,
+            bool isRegexEnabled,
+            string regexPattern,
+            string fallback)
+        {
+            tag = tag.Trim();
+            if (tag.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResolveRegexGroup(
+                    fileName,
+                    tag.Substring("regex:".Length),
+                    isRegexEnabled,
+                    regexPattern,
+                    fallback
+                );
+            }
+
+            if (!tag.StartsWith("index", StringComparison.OrdinalIgnoreCase))
+            {
+                return fallback;
+            }
+
+            int separatorIndex = tag.IndexOf(':');
+            if (separatorIndex < 0)
+            {
+                return index.ToString();
+            }
+
+            string offsetText = tag.Substring(separatorIndex + 1).Trim()
+                .Replace("+", "");
+            return int.TryParse(offsetText, out int offset)
+                ? (index + offset).ToString()
+                : index.ToString();
+        }
+
+        private static string ResolveRegexGroup(
+            string fileName,
+            string groupDefinition,
+            bool isRegexEnabled,
+            string regexPattern,
+            string fallback)
+        {
+            int fallbackSeparatorIndex = groupDefinition.IndexOf('|');
+            string groupIdentifier = fallbackSeparatorIndex < 0
+                ? groupDefinition.Trim()
+                : groupDefinition.Substring(0, fallbackSeparatorIndex).Trim();
+            string emptyValueFallback = fallbackSeparatorIndex < 0
+                ? fallback
+                : groupDefinition.Substring(fallbackSeparatorIndex + 1);
+            if (!isRegexEnabled
+                || string.IsNullOrWhiteSpace(regexPattern)
+                || string.IsNullOrWhiteSpace(groupIdentifier))
+            {
+                return emptyValueFallback;
+            }
+
+            try
+            {
+                Match match = Regex.Match(fileName, regexPattern);
+                if (!match.Success)
+                {
+                    return emptyValueFallback;
+                }
+
+                if (int.TryParse(groupIdentifier, out int groupIndex))
+                {
+                    if (groupIndex >= match.Groups.Count)
+                    {
+                        return emptyValueFallback;
+                    }
+
+                    string groupValue = match.Groups[groupIndex].Value;
+                    return string.IsNullOrEmpty(groupValue)
+                        ? emptyValueFallback
+                        : groupValue;
+                }
+
+                Group group = match.Groups[groupIdentifier];
+                return group.Success && !string.IsNullOrEmpty(group.Value)
+                    ? group.Value
+                    : emptyValueFallback;
+            }
+            catch (ArgumentException)
+            {
+                return emptyValueFallback;
+            }
         }
 
         private static DataType DetectType(string filePath)
