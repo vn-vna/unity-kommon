@@ -22,6 +22,10 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         private const float SelectionColumnWidth = 22f;
         private const float TypeColumnWidth = 64f;
         private const float StatusColumnWidth = 84f;
+        private const float SourceColumnWidth = 180f;
+        private const float EntriesTableMinimumWidth = 720f;
+        private const float EntriesTableMaximumHeight = 420f;
+        private const float CompactToolbarWidth = 440f;
         private static readonly Regex EntryIdPlaceholderRegex = new Regex(
             @"(?<!\{)\{([^{}]+)\}(?!\})",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -52,6 +56,12 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         // Performance caches
         private readonly Dictionary<string, CachedHash> _hashCache
             = new Dictionary<string, CachedHash>();
+        private readonly Dictionary<StagedCatalogEntry, CachedValidation>
+            _validationCache = new Dictionary<StagedCatalogEntry, CachedValidation>();
+        private readonly Queue<StagedCatalogEntry> _validationQueue
+            = new Queue<StagedCatalogEntry>();
+        private readonly HashSet<StagedCatalogEntry> _queuedValidationEntries
+            = new HashSet<StagedCatalogEntry>();
         private List<StagedCatalogEntry> _filteredEntries;
         private string _lastSearchFilter;
         private int _lastEntriesCount;
@@ -59,6 +69,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         // Column widths
         private float _colIdWidth = 130f;
         private float _colPathWidth = 230f;
+        private Vector2 _entriesScrollPosition;
+        private bool _isValidationQueued;
 
         // S3 upload state
         private bool _s3Foldout;
@@ -110,6 +122,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             EnsureConfigInitialized();
             InvalidateFilters();
+            _hashCache.Clear();
+            ClearValidationCache();
         }
 
         public override void OnInspectorGUI()
@@ -478,6 +492,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             _lastValidation = null;
             InvalidateFilters();
+            ClearValidationCache();
             EditorUtility.SetDirty(_config);
             AssetDatabase.SaveAssets();
             Repaint();
@@ -785,6 +800,119 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             return hash;
         }
 
+        private bool TryGetCachedValidation(
+            StagedCatalogEntry entry,
+            out CachedValidation cachedValidation
+        )
+        {
+            if (entry == null)
+            {
+                cachedValidation = default;
+                return false;
+            }
+
+            long lastWriteTicks = GetLastWriteTicks(entry.SourceFilePath);
+            if (_validationCache.TryGetValue(
+                    entry,
+                    out cachedValidation
+                )
+                && cachedValidation.LastWriteTicks == lastWriteTicks
+                && cachedValidation.Type == entry.Type
+                && string.Equals(
+                    cachedValidation.Id,
+                    entry.Id,
+                    StringComparison.Ordinal
+                )
+                && string.Equals(
+                    cachedValidation.SourceFilePath,
+                    entry.SourceFilePath,
+                    StringComparison.Ordinal
+                ))
+            {
+                return true;
+            }
+
+            cachedValidation = default;
+            return false;
+        }
+
+        private void QueueValidation(StagedCatalogEntry entry)
+        {
+            if (entry == null || !_queuedValidationEntries.Add(entry))
+            {
+                return;
+            }
+
+            _validationQueue.Enqueue(entry);
+            if (_isValidationQueued)
+            {
+                return;
+            }
+
+            _isValidationQueued = true;
+            EditorApplication.delayCall += ProcessNextValidation;
+        }
+
+        private void ProcessNextValidation()
+        {
+            _isValidationQueued = false;
+            if (_config == null || _validationQueue.Count == 0)
+            {
+                return;
+            }
+
+            StagedCatalogEntry entry = _validationQueue.Dequeue();
+            _queuedValidationEntries.Remove(entry);
+            if (_config.Entries.Contains(entry))
+            {
+                CacheValidation(entry);
+            }
+
+            Repaint();
+            if (_validationQueue.Count == 0)
+            {
+                return;
+            }
+
+            _isValidationQueued = true;
+            EditorApplication.delayCall += ProcessNextValidation;
+        }
+
+        private void CacheValidation(StagedCatalogEntry entry)
+        {
+            string contentHash = GetCachedHash(entry.SourceFilePath);
+            long lastWriteTicks = GetLastWriteTicks(entry.SourceFilePath);
+            PuzzleLevelValidationResult validation = string.IsNullOrEmpty(contentHash)
+                ? CatalogBuildUtility.ValidateLevel(entry)
+                : CatalogBuildUtility.ValidateLevel(entry, contentHash);
+            _validationCache[entry] = new CachedValidation
+            {
+                Id = entry.Id,
+                Type = entry.Type,
+                SourceFilePath = entry.SourceFilePath,
+                LastWriteTicks = lastWriteTicks,
+                ContentHash = contentHash,
+                Result = validation
+            };
+        }
+
+        private void ClearValidationCache()
+        {
+            _validationCache.Clear();
+            _validationQueue.Clear();
+            _queuedValidationEntries.Clear();
+        }
+
+        private static long GetLastWriteTicks(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return 0;
+            }
+
+            return File.GetLastWriteTimeUtc(filePath).Ticks;
+        }
+
         private void DrawStagedEntries()
         {
             DrawEntriesSearchToolbar();
@@ -817,12 +945,26 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 filtered,
                 totalPages
             );
-            DrawStagedColumnHeaders(filtered, startIndex, endIndex);
-
-            for (int index = startIndex; index < endIndex; index++)
+            float tableHeight = Mathf.Min(
+                EntriesTableMaximumHeight,
+                (endIndex - startIndex + 2) * (EditorGUIUtility.singleLineHeight + 8f)
+            );
+            _entriesScrollPosition = EditorGUILayout.BeginScrollView(
+                _entriesScrollPosition,
+                GUILayout.Height(tableHeight)
+            );
+            using (new EditorGUILayout.VerticalScope(
+                       GUILayout.MinWidth(EntriesTableMinimumWidth)
+                   ))
             {
-                DrawStagedEntry(filtered[index]);
+                DrawStagedColumnHeaders(filtered, startIndex, endIndex);
+                for (int index = startIndex; index < endIndex; index++)
+                {
+                    DrawStagedEntry(filtered[index]);
+                }
             }
+
+            EditorGUILayout.EndScrollView();
         }
 
         private void DrawEntriesSearchToolbar()
@@ -874,79 +1016,118 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             IReadOnlyList<StagedCatalogEntry> filteredEntries,
             int totalPages)
         {
+            if (EditorGUIUtility.currentViewWidth < CompactToolbarWidth)
+            {
+                DrawPaginationToolbar(totalPages);
+                DrawSelectionToolbar(filteredEntries);
+                return;
+            }
+
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                using (new EditorGUI.DisabledGroupScope(_pageIndex == 0))
-                {
-                    if (GUILayout.Button(
-                            "<",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(24f)
-                        ))
-                    {
-                        _pageIndex--;
-                    }
-                }
+                DrawPaginationControls(totalPages);
+                GUILayout.FlexibleSpace();
+                DrawSelectionControls(filteredEntries);
+                DrawBatchEntryOperations();
+            }
+        }
 
-                using (new EditorGUI.DisabledGroupScope(
-                           _pageIndex >= totalPages - 1))
-                {
-                    if (GUILayout.Button(
-                            ">",
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(24f)
-                        ))
-                    {
-                        _pageIndex++;
-                    }
-                }
+        private void DrawPaginationToolbar(int totalPages)
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                DrawPaginationControls(totalPages);
+                GUILayout.FlexibleSpace();
+            }
+        }
 
-                EditorGUILayout.LabelField(
-                    $"{_pageIndex + 1}/{totalPages}",
-                    EditorStyles.centeredGreyMiniLabel,
-                    GUILayout.Width(48f)
-                );
-                EditorGUILayout.LabelField(
-                    "Size",
-                    EditorStyles.centeredGreyMiniLabel,
-                    GUILayout.Width(28f)
-                );
-                _pageSize = Mathf.Clamp(
-                    EditorGUILayout.IntField(_pageSize, GUILayout.Width(36f)),
-                    MinimumPageSize,
-                    MaximumPageSize
-                );
-
-                if (GUILayout.Button(
-                        new GUIContent("All", "Select all filtered entries"),
-                        EditorStyles.toolbarButton,
-                        GUILayout.Width(28f)
-                    ))
-                {
-                    SelectEntries(filteredEntries);
-                }
-
-                using (new EditorGUI.DisabledGroupScope(
-                           _selectedEntries.Count == 0))
-                {
-                    if (GUILayout.Button(
-                            new GUIContent("None", "Clear entry selection"),
-                            EditorStyles.toolbarButton,
-                            GUILayout.Width(38f)
-                        ))
-                    {
-                        _selectedEntries.Clear();
-                    }
-                }
-
-                EditorGUILayout.LabelField(
-                    _selectedEntries.Count.ToString(),
-                    EditorStyles.centeredGreyMiniLabel,
-                    GUILayout.Width(24f)
-                );
+        private void DrawSelectionToolbar(
+            IReadOnlyList<StagedCatalogEntry> filteredEntries
+        )
+        {
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
+            {
+                DrawSelectionControls(filteredEntries);
                 GUILayout.FlexibleSpace();
                 DrawBatchEntryOperations();
             }
+        }
+
+        private void DrawPaginationControls(int totalPages)
+        {
+            using (new EditorGUI.DisabledGroupScope(_pageIndex == 0))
+            {
+                if (GUILayout.Button(
+                        "<",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(24f)
+                    ))
+                {
+                    _pageIndex--;
+                }
+            }
+
+            using (new EditorGUI.DisabledGroupScope(
+                       _pageIndex >= totalPages - 1))
+            {
+                if (GUILayout.Button(
+                        ">",
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(24f)
+                    ))
+                {
+                    _pageIndex++;
+                }
+            }
+
+            EditorGUILayout.LabelField(
+                $"{_pageIndex + 1}/{totalPages}",
+                EditorStyles.centeredGreyMiniLabel,
+                GUILayout.Width(48f)
+            );
+            EditorGUILayout.LabelField(
+                "Size",
+                EditorStyles.centeredGreyMiniLabel,
+                GUILayout.Width(28f)
+            );
+            _pageSize = Mathf.Clamp(
+                EditorGUILayout.IntField(_pageSize, GUILayout.Width(36f)),
+                MinimumPageSize,
+                MaximumPageSize
+            );
+        }
+
+        private void DrawSelectionControls(
+            IReadOnlyList<StagedCatalogEntry> filteredEntries
+        )
+        {
+            if (GUILayout.Button(
+                    new GUIContent("All", "Select all filtered entries"),
+                    EditorStyles.toolbarButton,
+                    GUILayout.Width(28f)
+                ))
+            {
+                SelectEntries(filteredEntries);
+            }
+
+            using (new EditorGUI.DisabledGroupScope(
+                       _selectedEntries.Count == 0))
+            {
+                if (GUILayout.Button(
+                        new GUIContent("None", "Clear entry selection"),
+                        EditorStyles.toolbarButton,
+                        GUILayout.Width(38f)
+                    ))
+                {
+                    _selectedEntries.Clear();
+                }
+            }
+
+            EditorGUILayout.LabelField(
+                _selectedEntries.Count.ToString(),
+                EditorStyles.centeredGreyMiniLabel,
+                GUILayout.Width(24f)
+            );
         }
 
         private void DrawBatchEntryOperations()
@@ -1024,7 +1205,11 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                     EditorStyles.miniBoldLabel,
                     GUILayout.Width(StatusColumnWidth)
                 );
-                EditorGUILayout.LabelField("Source", EditorStyles.miniBoldLabel);
+                EditorGUILayout.LabelField(
+                    "Source",
+                    EditorStyles.miniBoldLabel,
+                    GUILayout.Width(SourceColumnWidth)
+                );
             }
         }
 
@@ -1106,7 +1291,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 string sourceName = Path.GetFileName(entry.SourceFilePath);
                 EditorGUILayout.LabelField(
                     new GUIContent(sourceName, entry.SourceFilePath),
-                    EditorStyles.miniLabel
+                    EditorStyles.miniLabel,
+                    GUILayout.Width(SourceColumnWidth)
                 );
             }
 
@@ -1116,9 +1302,17 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
         private void DrawEntryStatus(StagedCatalogEntry entry)
         {
-            PuzzleLevelValidationResult validation
-                = CatalogBuildUtility.ValidateLevel(entry);
-            string currentHash = GetCachedHash(entry.SourceFilePath);
+            if (!TryGetCachedValidation(
+                    entry,
+                    out CachedValidation cachedValidation
+                ))
+            {
+                QueueValidation(entry);
+                DrawPendingEntryStatus(entry);
+                return;
+            }
+
+            PuzzleLevelValidationResult validation = cachedValidation.Result;
             bool hasError = HasSeverity(
                 validation.Diagnostics,
                 PuzzleLevelValidationSeverity.Error);
@@ -1126,9 +1320,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 validation.Diagnostics,
                 PuzzleLevelValidationSeverity.Warning);
             string tooltip = CreateValidationTooltip(validation);
-            bool sourceChanged = !string.IsNullOrEmpty(currentHash)
+            bool sourceChanged = !string.IsNullOrEmpty(cachedValidation.ContentHash)
                 && !string.Equals(
-                    currentHash,
+                    cachedValidation.ContentHash,
                     entry.ContentHash,
                     StringComparison.Ordinal);
             if (sourceChanged)
@@ -1155,6 +1349,21 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             EditorGUILayout.LabelField(
                 status,
+                EditorStyles.miniBoldLabel,
+                GUILayout.Width(StatusColumnWidth)
+            );
+            GUI.contentColor = previousColor;
+        }
+
+        private static void DrawPendingEntryStatus(StagedCatalogEntry entry)
+        {
+            Color previousColor = GUI.contentColor;
+            GUI.contentColor = new Color(0.55f, 0.65f, 0.8f);
+            EditorGUILayout.LabelField(
+                new GUIContent(
+                    "● Checking",
+                    $"Validating '{Path.GetFileName(entry.SourceFilePath)}'."
+                ),
                 EditorStyles.miniBoldLabel,
                 GUILayout.Width(StatusColumnWidth)
             );
@@ -1329,6 +1538,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             _config.Entries.Remove(entry);
             _selectedEntries.Remove(entry);
             _hashCache.Remove(entry.SourceFilePath);
+            _validationCache.Remove(entry);
+            _queuedValidationEntries.Remove(entry);
             _lastValidation = null;
             InvalidateFilters();
             EditorUtility.SetDirty(_config);
@@ -1378,6 +1589,8 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             foreach (StagedCatalogEntry entry in _selectedEntries)
             {
                 _hashCache.Remove(entry.SourceFilePath);
+                _validationCache.Remove(entry);
+                _queuedValidationEntries.Remove(entry);
             }
 
             _config.Entries.RemoveAll(_selectedEntries.Contains);
@@ -1827,6 +2040,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             if (modified)
             {
                 InvalidateFilters();
+                ClearValidationCache();
                 _lastValidation = null;
                 EditorUtility.SetDirty(_config);
                 AssetDatabase.SaveAssets();
@@ -2162,6 +2376,16 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
         {
             public string Hash;
             public long LastWriteTicks;
+        }
+
+        private struct CachedValidation
+        {
+            public string Id;
+            public DataType Type;
+            public string SourceFilePath;
+            public long LastWriteTicks;
+            public string ContentHash;
+            public PuzzleLevelValidationResult Result;
         }
 
         private sealed class CatalogEntryPopup : PopupWindowContent

@@ -381,7 +381,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 hash));
         }
 
-        private static PuzzleLevelValidationResult ValidateLevel(
+        internal static PuzzleLevelValidationResult ValidateLevel(
             StagedCatalogEntry entry,
             string contentHash)
         {
