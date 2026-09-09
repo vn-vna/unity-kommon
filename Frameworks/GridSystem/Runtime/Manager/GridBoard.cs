@@ -279,31 +279,28 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             Vector2 planePosition = _coordinates.Flatten(point);
             PointerPlanePosition = planePosition;
             GridCell cell = _map.AccessCell(_coordinates.WorldToCell(point));
-            if (cell == null)
-            {
-                // Pointer left the board while the button is still held. Do NOT
-                // release the drag: keep the press alive so the object keeps
-                // drifting (GridDrifter clamps motion inside the grid) and can be
-                // pulled back in. Only a real release / UI / pause ends the drag.
-                if (_isPointerDown)
-                {
-                    _drifter.UpdateDrifting(planePosition);
-                    _snappingAdapter.UpdateSnapping();
-                }
+            // Providers without press assistance retain their original behavior
+            // when a held pointer first enters from outside the board.
+            if (!_isPointerDown && cell == null && _pointer is not IGridPointerSelectionProvider)
                 return;
-            }
-
             if (!_isPointerDown)
             {
+                if (_pointer is IGridPointerSelectionProvider selectionProvider)
+                {
+                    cell = selectionProvider.ResolvePressCell(this, point, cell);
+                }
+                // Latch even a miss, so holding an empty press cannot acquire a
+                // different block later. Assistance runs exactly once per press.
                 _isPointerDown = true;
                 _downCell = cell;
-                MouseDownOnCell?.Invoke(cell);
+                if (cell != null) MouseDownOnCell?.Invoke(cell);
             }
-            else
+            else if (cell != null)
             {
                 MouseDragOnCell?.Invoke(cell);
             }
 
+            // Keep a held drag alive outside the board, using the real pointer.
             _drifter.UpdateDrifting(planePosition);
             _snappingAdapter.UpdateSnapping();
         }
@@ -491,7 +488,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         {
             if (!_isPointerDown) return;
             _isPointerDown = false;
-            MouseUpOnCell?.Invoke(_downCell);
+            if (_downCell != null) MouseUpOnCell?.Invoke(_downCell);
             _downCell = null;
             _drifter.ReleaseAllDrifters();
         }

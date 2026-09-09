@@ -70,10 +70,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 _drifter.MovementAbility.HasFlag(DirectionFlag.North) ? 1 : 0
             );
 
-            // Resolve a diagonal into a single cardinal step. The ability clamp above
-            // already dropped blocked axes; when BOTH cardinals are free we pick the
-            // axis that is actually traversable, preferring the axis the visual drift
-            // is moving along. Never commit a 2-cell diagonal snap.
+            // Keep a diagonal when both orthogonal intermediates are traversable;
+            // otherwise resolve through the free cardinal axis. MoveOccupants still
+            // validates the destination footprint before committing anything.
             if ((predictedDirection.ToDirectionFlag() & DirectionFlag.Diagonal) != 0)
             {
                 predictedDirection = ResolveDiagonalAxis(predictedDirection);
@@ -146,9 +145,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
             if (!_map.MoveOccupants(_occupantScratch, _currentPositionCell, _predictedCell)) return;
 
+            _drifter.NotifyGridDisplacement();
+
             // Logical snap only: the HookedCell follows the drag (keeps movement
             // clamping correct), but the VISUAL stays at the pointer position while
-            // dragging. The box visibly locks to the cell on release
+            // dragging. The box settles visually onto the cell on release
             // (GridDrifter.ReleaseAllDrifters -> RecenterDriftersOnHookedCells).
             _currentPositionCell = _predictedCell;
             SnappedCellChanged?.Invoke();      // game hooks haptics/audio here (drop-car played HapticPattern)

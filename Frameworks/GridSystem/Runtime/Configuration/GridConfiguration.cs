@@ -18,6 +18,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridCoord BorderSize => _borderSize;
         public float DrifterSpeedLimit => _drifterSpeedLimit;
         public float NudgeAmount => _nudgeAmount;
+        public bool DisableNudgingAfterDisplacement => _disableNudgingAfterDisplacement;
+        public float DrifterAxisHysteresis => _drifterAxisHysteresis;
+        public float ReleaseSnapDuration => _releaseSnapDuration;
 
         public IGridCellFactoryProvider CellFactory => _cellFactoryProvider as IGridCellFactoryProvider;
         public IGridCoordinateProvider CoordinateProvider => _coordinateProvider as IGridCoordinateProvider;
@@ -71,6 +74,17 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 #endif
         [SerializeField]
         private float _nudgeAmount = 0.05f;
+
+        [Tooltip("After the first successful grid-cell move, disable blocked-direction nudges until the pointer is released. A new grab restores nudging.")]
+        [SerializeField] private bool _disableNudgingAfterDisplacement;
+
+        [Tooltip("Pointer travel in grid-plane world units needed to change the preferred axis near a cell center. Zero uses legacy axis selection.")]
+        [Min(0f)]
+        [SerializeField] private float _drifterAxisHysteresis = 0.075f;
+
+        [Tooltip("Visual settling time after release, in seconds. Gameplay occupancy snaps immediately. Zero disables the animation.")]
+        [Min(0f)]
+        [SerializeField] private float _releaseSnapDuration = 0.12f;
 
         [SerializeField]
         private ScriptableObject _cellFactoryProvider;

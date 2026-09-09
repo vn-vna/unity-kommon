@@ -48,6 +48,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         private DirectionFlag _movementAbility;
         private DirectionFlag _movementDirection;
         private bool _drifting;
+        private bool _hasDisplaced;
 
         #endregion
 
@@ -85,10 +86,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _driftMaster = drifter;
             _drifting = true;
             _drifters.Clear();
+            _hasDisplaced = false;
+            (drifter as IGridReleasePresentation)?.PrepareForDrift();
             _drifters.Add(drifter, new DrifterInformation
             {
                 Drifter = drifter,
                 MovementAbility = DirectionFlag.All,
+                IntentPointerAnchor = _board.PointerPlanePosition,
                 RelativeMousePosition = _board.PointerPlanePosition
                     - _board.Coordinates.Flatten(drifter.ControlledPosition)
             });
@@ -115,6 +119,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             _driftMaster = null;
             _hoveringCell = null;
             _drifting = false;
+            _hasDisplaced = false;
             DrifterRemoved?.Invoke();
             DriftingFinished?.Invoke();
         }
@@ -167,13 +172,16 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
             if (_drifters.Count == 0)
             {
+                _hasDisplaced = false;
                 DriftingStarted?.Invoke();
             }
 
+            (drifter as IGridReleasePresentation)?.PrepareForDrift();
             _drifters.Add(drifter, new DrifterInformation
             {
                 Drifter = drifter,
                 MovementAbility = DirectionFlag.All,
+                IntentPointerAnchor = _board.PointerPlanePosition,
                 RelativeMousePosition = _board.PointerPlanePosition
                     - _board.Coordinates.Flatten(drifter.ControlledPosition)
             });
@@ -207,6 +215,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             }
 
             _drifting = false;
+            _hasDisplaced = false;
             _driftMaster = null;
             _hoveringCell = null;
             DriftingFinished?.Invoke();
@@ -216,9 +225,13 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
 
         #region Private Methods
 
+        // Only successful occupancy commits count; visual nudges and rejected
+        // placement attempts must not consume the initial blocked-move feedback.
+        internal void NotifyGridDisplacement() => _hasDisplaced = true;
+
         /// <summary>
-        /// Locks the drifter visuals onto their hooked cells so a released entity
-        /// never floats between cells (grid-snap feel).
+        /// Commits the final gameplay position before release callbacks. Optional
+        /// presentation support can ease the visible pose onto that position.
         /// </summary>
         private void RecenterDriftersOnHookedCells()
         {
@@ -229,8 +242,11 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             {
                 if (drifter.Occupant?.HookedCell != null)
                 {
+                    Vector3 previousPosition = drifter.ControlledPosition;
                     drifter.ControlledPosition =
                         coordinates.CellToWorld(drifter.Occupant.HookedCell.GridPosition);
+                    (drifter as IGridReleasePresentation)?.AnimateRelease(
+                        previousPosition, _config.ReleaseSnapDuration);
                 }
             }
         }
@@ -277,6 +293,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             IDrifter drifter, DrifterInformation data, Vector2 pointer
         )
         {
+            float hysteresis = Mathf.Max(0f, _config.DrifterAxisHysteresis);
+            data.UpdatePointerIntent(pointer, hysteresis);
             Vector2 desired = pointer - data.RelativeMousePosition;
             Vector2 current = _board.Coordinates.Flatten(drifter.ControlledPosition);
             Vector2 hook = _board.Coordinates.Flatten(
@@ -289,13 +307,15 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 desired = current + (desired - current).normalized * _config.DrifterSpeedLimit;
             }
 
+            float nudge = _config.DisableNudgingAfterDisplacement && _hasDisplaced
+                ? 0f : _config.NudgeAmount;
             desired.x = ClampAxis(
                 desired.x, DirectionFlag.West, DirectionFlag.East,
-                hook.x, _config.NudgeAmount
+                hook.x, nudge
             );
             desired.y = ClampAxis(
                 desired.y, DirectionFlag.South, DirectionFlag.North,
-                hook.y, _config.NudgeAmount
+                hook.y, nudge
             );
 
             _movementDirection = (desired - hook).ToDirectionFlag();
@@ -304,7 +324,21 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 // Diagonal is blocked (CheckObjectMovement excludes diagonals whose
                 // orthogonal intermediates are not clear) -> corner through the free
                 // cardinal axis. Free diagonals keep the diagonal bit and slide freely.
-                if (Mathf.Abs(desired.x - hook.x) > Mathf.Abs(desired.y - hook.y))
+                float horizontalDistance = Mathf.Abs(desired.x - hook.x);
+                float verticalDistance = Mathf.Abs(desired.y - hook.y);
+                bool preferHorizontal = horizontalDistance > verticalDistance;
+                // Cell-relative distances approach zero at every center crossing.
+                // Keep meaningful pointer intent in this small band, so residual
+                // off-axis input cannot briefly become a blocked-direction nudge.
+                // Large cornering moves and free diagonals keep their existing rules.
+                if (hysteresis > 0f
+                    && (_movementAbility & DirectionFlag.Diagonal) != DirectionFlag.Diagonal
+                    && Mathf.Max(horizontalDistance, verticalDistance) <= hysteresis
+                    && data.PreferredAxis != DirectionFlag.None)
+                {
+                    preferHorizontal = data.PreferredAxis == DirectionFlag.Horizontal;
+                }
+                if (preferHorizontal)
                 {
                     desired.y = hook.y;
                     _movementDirection = _movementDirection & DirectionFlag.Horizontal;
