@@ -130,8 +130,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration
             RefreshView();
         }
 
-        private void OnEnable()
+        protected override void OnEnable()
         {
+            base.OnEnable();
             EnsureCanvas();
             ApplyCanvasSettings();
             ApplyPanelState();

@@ -51,19 +51,21 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
         {
             get
             {
+                if (_instance != null)
+                {
+                    return _instance;
+                }
+
+                SingletonScriptableConfigAttribute config = Config;
+
+                if (config != null)
+                {
+                    _instance = LoadByConfig(config);
+                }
+
                 if (_instance == null)
                 {
-                    SingletonScriptableConfigAttribute config = Config;
-
-                    if (config != null)
-                    {
-                        _instance = LoadByConfig(config);
-                    }
-
-                    if (_instance == null)
-                    {
-                        _instance = LoadFallback();
-                    }
+                    _instance = LoadFallback();
                 }
 
                 return _instance;

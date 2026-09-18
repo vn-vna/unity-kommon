@@ -1,11 +1,18 @@
 using System;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.UserInterface
 {
     internal static class UIHelperClass
     {
         public static IUIManager CurrentManager { get; private set; }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetManager()
+        {
+            CurrentManager = null;
+        }
 
         internal static void RegisterManager<T>(this UIManagerBase<T> manager)
             where T : UIManagerBase<T>

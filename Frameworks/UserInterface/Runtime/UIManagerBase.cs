@@ -63,6 +63,11 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         {
             base.Awake();
 
+            if (Instance != this)
+            {
+                return;
+            }
+
             _panelMapping = new MappedList<Type, UIPanelBase>(panelPrefabs, (p) => p.GetType());
             _panelInstances = new Dictionary<Type, UIPanelInstanceInfo>();
             _autoDisposeQueue = new Queue<UIPanelBase>();
@@ -88,7 +93,11 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         protected override void OnDestroy()
         {
-            this.UnregisterManager();
+            if (Instance == this)
+            {
+                this.UnregisterManager();
+            }
+
             base.OnDestroy();
         }
 
@@ -144,29 +153,31 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         private void ScanUnunsedPanelInstance(UIPanelInstanceInfo panelInstanceInfo)
         {
-            if (panelInstanceInfo.AutoDisposeTimer.HasValue)
-            {
-                CalculatePanelDisposalTimer(panelInstanceInfo);
-                return;
-            }
-
-            if (panelInstanceInfo.Panel.AutoDisposeOnHide)
-            {
-                panelInstanceInfo.AutoDisposeTimer = panelInstanceInfo.Panel.AutoDisposeDelay;
-            }
-        }
-
-        private void CalculatePanelDisposalTimer(UIPanelInstanceInfo panelInstanceInfo)
-        {
-            if (!panelInstanceInfo.Panel.IsVisible)
+            UIPanelBase panel = panelInstanceInfo.Panel;
+            if (!panel.AutoDisposeOnHide || !panel.HasBeenShown || panel.IsVisible)
             {
                 panelInstanceInfo.AutoDisposeTimer = null;
                 return;
             }
 
+            if (!panelInstanceInfo.AutoDisposeTimer.HasValue)
+            {
+                panelInstanceInfo.AutoDisposeTimer = Mathf.Max(
+                    0f,
+                    panel.AutoDisposeDelay
+                );
+                return;
+            }
+
+            CalculatePanelDisposalTimer(panelInstanceInfo);
+        }
+
+        private void CalculatePanelDisposalTimer(UIPanelInstanceInfo panelInstanceInfo)
+        {
             panelInstanceInfo.AutoDisposeTimer -= Time.unscaledDeltaTime;
             if (panelInstanceInfo.AutoDisposeTimer <= 0f)
             {
+                panelInstanceInfo.AutoDisposeTimer = null;
                 _autoDisposeQueue.Enqueue(panelInstanceInfo.Panel);
             }
         }

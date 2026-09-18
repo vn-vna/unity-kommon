@@ -39,6 +39,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         public bool AutoDisposeOnHide => autoDisposeOnHide;
         public float AutoDisposeDelay => autoDisposeDelay;
         public bool IsPanelReady => _isReady;
+        internal bool HasBeenShown { get; private set; }
         #endregion
 
         #region Serialized Fields
@@ -94,8 +95,8 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #endregion
 
         #region CTor
-        //  Prevent direct instantiation or inheritance outside of this assembly
-        internal UIPanelBase() { }
+        // Unity owns construction, but application assemblies may derive panels.
+        protected UIPanelBase() { }
         #endregion
 
         #region Unity Methods
@@ -129,7 +130,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
             if (callback != null)
             {
-                ShowStarted += callback;
+                ShowCompleted += callback;
             }
 
             ((IUIAnimatedElement)background).PreShowCallback?.Invoke();
@@ -182,7 +183,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
             if (callback != null)
             {
-                HideStarted += callback;
+                HideCompleted += callback;
             }
 
             ((IUIAnimatedElement)background).PreHideCallback?.Invoke();
@@ -230,6 +231,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         {
             Canvas.ForceUpdateCanvases();
             IsVisible = true;
+            HasBeenShown = true;
             ShowStarted?.Invoke();
         }
 
@@ -239,7 +241,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
             if (callback != null)
             {
-                ShowStarted -= callback;
+                ShowCompleted -= callback;
             }
 
             _animationTween = null;
@@ -257,7 +259,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             IsVisible = false;
             if (callback != null)
             {
-                HideStarted -= callback;
+                HideCompleted -= callback;
             }
             _animationTween = null;
         }

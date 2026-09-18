@@ -96,6 +96,15 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
 
         public static T GetReference<T>() where T : class
         {
+#if UNITY_EDITOR
+            // This cache is static and therefore lost during an assembly reload.
+            // Rebuild it on demand so global references recover with their owners.
+            if (_registrationProperties == null)
+            {
+                InitializeHolder();
+            }
+#endif
+
             if (_registrationProperties == null)
             {
                 QuickLog.Error<GlobalReferenceHelper>(
@@ -174,22 +183,40 @@ namespace Com.Hapiga.Scheherazade.Common.Singleton
         private static T _instance;
         private PropertyInfo _registrationHolderProperty;
 
+        protected virtual void OnEnable()
+        {
+#if UNITY_EDITOR
+            // Unity clears static fields when it reloads assemblies after a script
+            // change, but the existing scene objects are retained. Awake is not
+            // invoked for those retained objects, whereas OnEnable is, so restore
+            // the static reference here as well.
+            if (_instance == null)
+            {
+                InitializeSingletonBehaviour();
+            }
+#endif
+        }
+
         protected virtual void Awake()
         {
             if (_instance == null)
             {
                 InitializeSingletonBehaviour();
+                return;
             }
-            else
-            {
-                QuickLog.Warning<SingletonBehavior<T>>(
-                    "An instance of singleton {0} already exists. Destroying duplicate on {1}.",
-                    typeof(T).Name,
-                    gameObject.scene.name
-                );
 
-                Destroy(gameObject);
+            if (_instance == this)
+            {
+                return;
             }
+
+            QuickLog.Warning<SingletonBehavior<T>>(
+                "An instance of singleton {0} already exists. Destroying duplicate on {1}.",
+                typeof(T).Name,
+                gameObject.scene.name
+            );
+
+            Destroy(gameObject);
         }
 
         private void InitializeSingletonBehaviour()
