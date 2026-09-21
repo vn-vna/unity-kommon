@@ -2,8 +2,7 @@
     "name": "Com.Hapiga.Scheherazade.UserInterface",
     "rootNamespace": "Com.Hapiga.Scheherazade.Common.UserInterface",
     "references": [
-        "Com.Hapiga.Scheherazade.Common",
-        "DOTween.Modules"
+        "Com.Hapiga.Scheherazade.Common"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

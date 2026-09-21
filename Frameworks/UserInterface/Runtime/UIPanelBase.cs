@@ -1,6 +1,6 @@
 using System;
 using System.Reflection;
-using DG.Tweening;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -33,7 +33,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         public UIPanelContentBase PanelContent => content;
         public bool IsVisible { get; private set; }
         internal IUIManager UIManager { get; set; }
-        public bool IsBusy => _animationTween != null;
+        public bool IsBusy => _animation != null;
         public UIPanelBackgroundBase Background => background;
         public UIPanelContentBase Content => content;
         public bool AutoDisposeOnHide => autoDisposeOnHide;
@@ -90,8 +90,9 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         #endregion
 
         #region Private Fields
-        private Sequence _animationTween;
+        private PanelAnimation _animation;
         private bool _isReady = false;
+        private int _animationRequestVersion;
         #endregion
 
         #region CTor
@@ -114,119 +115,255 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         private void OnDestroy()
         {
-            DOTween.Kill(this);
+            _animationRequestVersion++;
+            CancelCurrentAnimation();
         }
         #endregion
 
         #region Public Methods
         public virtual void Show(bool immediate = false, Action callback = null)
         {
+            int requestVersion = ++_animationRequestVersion;
             if (!Canvas.enabled) Canvas.enabled = true;
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
-            _animationTween?.Kill(complete: true);
+            CompleteCurrentAnimation();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             gameObject.SetActive(true);
-            PreShowPanel?.Invoke();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
-            if (callback != null)
-            {
-                ShowCompleted += callback;
-            }
+            PreShowPanel?.Invoke();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             ((IUIAnimatedElement)background).PreShowCallback?.Invoke();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
+
             ((IUIAnimatedElement)content).PreShowCallback?.Invoke();
-
-            Tween backgroundShowAnimation = immediate
-                ? DOTween.Sequence()
-                    .AppendCallback(() =>
-                    {
-                        background.RectTransform.anchoredPosition = Vector2.zero;
-                        background.RectTransform.localScale = Vector3.one;
-                        background.RectTransform.localRotation = Quaternion.identity;
-                        background.RectTransform.localPosition = Vector3.zero;
-                    })
-                : ((IUIAnimatedElement)background).ShowAnimation;
-
-            Tween contentShowAnimation = immediate
-                ? DOTween.Sequence()
-                    .AppendCallback(() =>
-                    {
-                        content.RectTransform.anchoredPosition = Vector2.zero;
-                        content.RectTransform.localScale = Vector3.one;
-                        content.RectTransform.localRotation = Quaternion.identity;
-                        content.RectTransform.localPosition = Vector3.zero;
-                    })
-                : ((IUIAnimatedElement)content).ShowAnimation;
-
-
-            _animationTween = DOTween.Sequence()
-                .SetId(this)
-                .OnStart(HandleShowStarted)
-                .AppendInterval(showAnimationDelay)
-                .Append(backgroundShowAnimation)
-                .Join(contentShowAnimation)
-                .OnComplete(() => HandleShowEnded(callback));
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             if (immediate)
             {
-                _animationTween.Complete(true);
+                ResetAnimatedElementTransforms();
+                HandleShowStarted();
+                if (!TryContinueAnimationRequest(requestVersion, callback)) return;
+
+                HandleShowEnded(callback);
+                return;
             }
+
+            StartAnimation(
+                ((IUIAnimatedElement)background).ShowAnimation,
+                ((IUIAnimatedElement)content).ShowAnimation,
+                showAnimationDelay,
+                HandleShowStarted,
+                () => HandleShowEnded(callback),
+                requestVersion
+            );
         }
 
         public virtual void Hide(bool immediate = false, Action callback = null)
         {
-            _animationTween?.Kill(complete: true);
+            int requestVersion = ++_animationRequestVersion;
+            CompleteCurrentAnimation();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             gameObject.SetActive(true);
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             PreHidePanel?.Invoke();
-
-            if (callback != null)
-            {
-                HideCompleted += callback;
-            }
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             ((IUIAnimatedElement)background).PreHideCallback?.Invoke();
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
+
             ((IUIAnimatedElement)content).PreHideCallback?.Invoke();
-
-            Tween backgroundHideAnimation = immediate
-                ? DOTween.Sequence()
-                    .AppendCallback(() =>
-                    {
-                        background.RectTransform.anchoredPosition = Vector2.zero;
-                        background.RectTransform.localScale = Vector3.one;
-                        background.RectTransform.localRotation = Quaternion.identity;
-                        background.RectTransform.localPosition = Vector3.zero;
-                    })
-                : ((IUIAnimatedElement)background).HideAnimation;
-
-            Tween contentHideAnimation = immediate
-                ? DOTween.Sequence()
-                    .AppendCallback(() =>
-                    {
-                        content.RectTransform.anchoredPosition = Vector2.zero;
-                        content.RectTransform.localScale = Vector3.one;
-                        content.RectTransform.localRotation = Quaternion.identity;
-                        content.RectTransform.localPosition = Vector3.zero;
-                    })
-                : ((IUIAnimatedElement)content).HideAnimation;
-
-            _animationTween = DOTween.Sequence()
-                .SetId(this)
-                .OnStart(HandleHideStarted)
-                .AppendInterval(hideAnimationDelay)
-                .Append(backgroundHideAnimation)
-                .Join(contentHideAnimation)
-                .OnComplete(() => HandleHideEnded(callback));
+            if (!TryContinueAnimationRequest(requestVersion, callback)) return;
 
             if (immediate)
             {
-                _animationTween.Complete(true);
+                ResetAnimatedElementTransforms();
+                HandleHideStarted();
+                if (!TryContinueAnimationRequest(requestVersion, callback)) return;
+
+                HandleHideEnded(callback);
+                return;
             }
+
+            StartAnimation(
+                ((IUIAnimatedElement)background).HideAnimation,
+                ((IUIAnimatedElement)content).HideAnimation,
+                hideAnimationDelay,
+                HandleHideStarted,
+                () => HandleHideEnded(callback),
+                requestVersion
+            );
         }
         #endregion
 
         #region Private Methods
+        private void StartAnimation(
+            AnimationHandle backgroundAnimation,
+            AnimationHandle contentAnimation,
+            float delay,
+            Action started,
+            Action completed,
+            int requestVersion
+        )
+        {
+            backgroundAnimation ??= AnimationHandle.CreateCompleted();
+            contentAnimation ??= AnimationHandle.CreateCompleted();
+
+            var animation = new PanelAnimation(
+                backgroundAnimation,
+                contentAnimation,
+                completed
+            );
+            _animation = animation;
+
+            try
+            {
+                started?.Invoke();
+                if (
+                    !IsCurrentAnimationRequest(requestVersion)
+                    || !ReferenceEquals(_animation, animation)
+                )
+                {
+                    if (ReferenceEquals(_animation, animation))
+                    {
+                        CancelAnimation(animation);
+                    }
+                    return;
+                }
+
+                _ = RunAnimationAsync(animation, delay);
+            }
+            catch
+            {
+                if (ReferenceEquals(_animation, animation))
+                {
+                    CancelAnimation(animation);
+                }
+                throw;
+            }
+        }
+
+        private async Awaitable RunAnimationAsync(
+            PanelAnimation animation,
+            float delay
+        )
+        {
+            try
+            {
+                if (delay > 0f)
+                {
+                    await Awaitable.WaitForSecondsAsync(
+                        delay,
+                        animation.CancellationToken
+                    );
+                }
+
+                animation.Play();
+                await animation.Background;
+                await animation.Content;
+                CompleteAnimation(animation);
+            }
+            catch (OperationCanceledException)
+            {
+                if (!animation.IsCompleting)
+                {
+                    CancelAnimation(animation);
+                }
+            }
+            catch (Exception exception)
+            {
+                CancelAnimation(animation);
+                Debug.LogException(exception, this);
+            }
+        }
+
+        private bool TryContinueAnimationRequest(
+            int requestVersion,
+            Action callback
+        )
+        {
+            if (IsCurrentAnimationRequest(requestVersion))
+            {
+                return true;
+            }
+
+            callback?.Invoke();
+            return false;
+        }
+
+        private bool IsCurrentAnimationRequest(int requestVersion)
+        {
+            return _animationRequestVersion == requestVersion;
+        }
+
+        private void CompleteCurrentAnimation()
+        {
+            PanelAnimation animation = _animation;
+            if (animation == null)
+            {
+                return;
+            }
+
+            animation.Complete();
+            CompleteAnimation(animation);
+        }
+
+        private void CancelCurrentAnimation()
+        {
+            PanelAnimation animation = _animation;
+            if (animation == null)
+            {
+                return;
+            }
+
+            _animation = null;
+            animation.Cancel();
+            animation.Dispose();
+        }
+
+        private void CompleteAnimation(PanelAnimation animation)
+        {
+            if (!ReferenceEquals(_animation, animation))
+            {
+                return;
+            }
+
+            _animation = null;
+            animation.Dispose();
+            animation.InvokeCompletion();
+        }
+
+        private void CancelAnimation(PanelAnimation animation)
+        {
+            if (!ReferenceEquals(_animation, animation))
+            {
+                return;
+            }
+
+            _animation = null;
+            animation.Cancel();
+            animation.Dispose();
+        }
+
+        private void ResetAnimatedElementTransforms()
+        {
+            ResetAnimatedElementTransform(background.RectTransform);
+            ResetAnimatedElementTransform(content.RectTransform);
+        }
+
+        private static void ResetAnimatedElementTransform(RectTransform target)
+        {
+            target.anchoredPosition = Vector2.zero;
+            target.localScale = Vector3.one;
+            target.localRotation = Quaternion.identity;
+            target.localPosition = Vector3.zero;
+        }
+
         protected virtual void HandleShowStarted()
         {
             Canvas.ForceUpdateCanvases();
@@ -238,13 +375,7 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         protected virtual void HandleShowEnded(Action callback)
         {
             ShowCompleted?.Invoke();
-
-            if (callback != null)
-            {
-                ShowCompleted -= callback;
-            }
-
-            _animationTween = null;
+            callback?.Invoke();
         }
 
         protected virtual void HandleHideStarted()
@@ -254,14 +385,10 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
 
         protected virtual void HandleHideEnded(Action callback)
         {
-            HideCompleted?.Invoke();
-            gameObject.SetActive(false);
             IsVisible = false;
-            if (callback != null)
-            {
-                HideCompleted -= callback;
-            }
-            _animationTween = null;
+            gameObject.SetActive(false);
+            HideCompleted?.Invoke();
+            callback?.Invoke();
         }
 
         public void ResetTransform()
@@ -273,6 +400,83 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
             RectTransform.offsetMax = Vector2.zero;
             RectTransform.pivot = new Vector2(0.5f, 0.5f);
         }
+        #endregion
+
+        #region Nested Types
+
+        private sealed class PanelAnimation : IDisposable
+        {
+            private readonly CancellationTokenSource _cancellationTokenSource = new();
+            private readonly Action _completion;
+            private bool _isStopping;
+            private bool _isDisposed;
+
+            public AnimationHandle Background { get; }
+            public AnimationHandle Content { get; }
+            public CancellationToken CancellationToken => _cancellationTokenSource.Token;
+            public bool IsCompleting { get; private set; }
+
+            public PanelAnimation(
+                AnimationHandle background,
+                AnimationHandle content,
+                Action completion
+            )
+            {
+                Background = background;
+                Content = content;
+                _completion = completion;
+            }
+
+            public void Play()
+            {
+                Background.Play();
+                Content.Play();
+            }
+
+            public void Complete()
+            {
+                if (_isStopping || _isDisposed)
+                {
+                    return;
+                }
+
+                _isStopping = true;
+                IsCompleting = true;
+                _cancellationTokenSource.Cancel();
+                Background.Complete();
+                Content.Complete();
+            }
+
+            public void Cancel()
+            {
+                if (_isStopping || _isDisposed)
+                {
+                    return;
+                }
+
+                _isStopping = true;
+                _cancellationTokenSource.Cancel();
+                Background.Cancel();
+                Content.Cancel();
+            }
+
+            public void InvokeCompletion()
+            {
+                _completion?.Invoke();
+            }
+
+            public void Dispose()
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+
+                _isDisposed = true;
+                _cancellationTokenSource.Dispose();
+            }
+        }
+
         #endregion
     }
 
