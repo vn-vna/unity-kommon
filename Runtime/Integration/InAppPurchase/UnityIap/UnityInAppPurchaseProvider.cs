@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using Com.Hapiga.Scheherazade.Common.Logging;
 using Com.Hapiga.Scheherazade.Common.Threading;
 using UnityEngine;
@@ -27,9 +28,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         fileName = "UnityInAppPurchaseProvider",
         menuName = "Scheherazade/In-App Purchase Providers/Unity IAP"
     )]
-    public class UnityInAppPurchaseProvider :
+    public partial class UnityInAppPurchaseProvider :
         ScriptableObject,
-        IInAppPurchaseProvider
+        IInAppPurchaseProvider,
+        ITransactionProcessingIapProvider,
+        IInAppPurchaseRetryPump,
+        IInAppPurchaseProviderDiagnostics,
+        IDisposable
     {
         public Action<IInAppPurchaseProduct> PurchaseInitiated { get; set; }
         public Action<IInAppPurchaseProduct> PurchaseSucceeded { get; set; }
@@ -42,7 +47,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public bool IsInitialized { get; private set; }
         public byte[] GooglePlayTangleData { get; set; }
         public byte[] AppleTangleData { get; set; }
-        public bool HasRestorableProducts => _pendingRestorations.Count > 0;
+        public bool HasRestorableProducts => IsTransactionProcessingEnabled
+            ? _processingSession != null && _processingSession.HasRestorableProducts
+            : _pendingRestorations.Count > 0;
 
         [SerializeField]
         private int maxProductFetchRetries = 3;
@@ -63,6 +70,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void Initialize()
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                InitializeProcessingSession();
+                return;
+            }
 #if !PLATFORM_SKIP_IAP_VALIDATION && !UNITY_EDITOR && UNITY_ANDROID
             IEnumerable<byte[]> googlePlayTangleDataPresents = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(assembly => assembly.GetTypes())
@@ -173,6 +185,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void CleanUp()
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                EndProcessingSession();
+                return;
+            }
             IsInitialized = false;
             if (_storeController == null) return;
 
@@ -612,6 +629,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public InAppPurchaseProductPrice? GetProductPrice(string productId)
         {
+            if (IsTransactionProcessingEnabled) return _processingSession?.GetProductPrice(productId);
             Product product = _storeController.GetProductById(productId);
             if (product == null) return null;
 
@@ -626,6 +644,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void BuyProduct(string productId)
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                if (_processingSession != null) _processingSession.BuyProduct(productId);
+                else NotifyProcessingFailure(productId, PurchaseStatus.Failed, "The store has not initialized.");
+                return;
+            }
             PurchaseInitiated?.Invoke(
                 Manager.ProductDatabase
                     .Products
@@ -636,6 +660,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void RestorePurchases()
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                if (_processingSession != null) _processingSession.RestorePurchases();
+                else NotifyProcessingListeners(AllProductsRestored, false);
+                return;
+            }
             bool hadRestorableProducts = HasRestorableProducts;
 
             while (_pendingRestorations.Count > 0)

@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
@@ -10,9 +11,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         fileName = "PseudoInAppPurchaseProvider",
         menuName = "Scheherazade/In-App Purchase Providers/Pseudo Provider"
     )]
-    public class PseudoInAppPurchaseProvider :
+    public partial class PseudoInAppPurchaseProvider :
         ScriptableObject,
-        IInAppPurchaseProvider
+        IInAppPurchaseProvider,
+        ITransactionProcessingIapProvider,
+        IInAppPurchaseRetryPump,
+        IInAppPurchaseProviderDiagnostics,
+        IDisposable
     {
         public Action<IInAppPurchaseProduct> PurchaseInitiated { get; set; }
         public Action<IInAppPurchaseProduct> PurchaseSucceeded { get; set; }
@@ -27,6 +32,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void BuyProduct(string productId)
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                BuyProductWithProcessing(productId);
+                return;
+            }
+
             BuyProductInternal(productId);
         }
 
@@ -40,8 +51,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 return;
             }
 
+            int processingGeneration = _processingGeneration;
             DelayedCall(() =>
             {
+                // Legacy cleanup still permits this callback; opting into a new
+                // processing lifetime must not publish an unverified old success.
+                if (processingGeneration != _processingGeneration) return;
                 QuickLog.Info<PseudoInAppPurchaseProvider>(
                     $"Product {productId} purchased successfully."
                 );
@@ -59,15 +74,26 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         }
 
         public InAppPurchaseProductPrice? GetProductPrice(string productId)
-            => new InAppPurchaseProductPrice
+        {
+            if (IsTransactionProcessingEnabled && (!IsInitialized || Manager?.ProductDatabase?.Products?.Any(
+                    product => product != null && product.ProductId == productId
+                ) != true)) return null;
+            return new InAppPurchaseProductPrice
             {
                 Amount = (decimal)0.69,
                 IsoCurrencyCode = "USD",
                 LocalizedPrice = "$0.69"
             };
+        }
 
         public void Initialize()
         {
+            if (IsTransactionProcessingEnabled)
+            {
+                InitializeProcessing();
+                return;
+            }
+
             IsInitialized = true;
             QuickLog.Warning<PseudoInAppPurchaseProvider>(
                 "Pseudo In-App Purchase Provider is applied - All purchases will be simulated as successful."
@@ -76,6 +102,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         public void CleanUp()
         {
+            if (IsTransactionProcessingEnabled) CleanUpProcessing();
             IsInitialized = false;
         }
 

@@ -1,5 +1,3 @@
-using System;
-
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 {
     public interface IAdsServiceProvider
@@ -9,6 +7,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         bool IsInterstitialAvailable { get; }
         bool IsRewardedAvailable { get; }
         bool IsBannerAvailable { get; }
+        AdsBannerState BannerState { get; }
         bool IsOpenAppAdAvailable { get; }
         string DeviceAdvertisingId { get; }
 
@@ -16,11 +15,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         void CleanUp();
 
         void LoadAds();
-        void ShowBanner();
-        void HideBanner();
-
-        bool ShowInterstitialAds(Action<bool> callback, string placement);
-        bool ShowRewardAds(Action<bool> callback, string placement);
-        bool ShowAppOpenAds(Action<bool> callback, string placement);
+        AdsInvocationHandler ShowBanner();
+        AdsInvocationHandler HideBanner();
+        AdsInvocationHandler ShowInterstitialAds(string placement);
+        AdsInvocationHandler ShowRewardAds(string placement);
+        AdsInvocationHandler ShowAppOpenAds(string placement);
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Collections;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
@@ -9,6 +8,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         AdsManagerStatus Status { get; }
 
         bool IsBannerAvailable { get; }
+        AdsBannerState BannerState { get; }
         bool IsInterstitialAdsAvailable { get; }
         bool IsRewardAdsAvailable { get; }
         bool IsAppOpenAdsAvailable { get; }
@@ -17,10 +17,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         IEnumerator InitializeCoroutine(float timeOut = float.MaxValue);
         void Shutdown();
 
-        void ShowBanner();
-        void HideBanner();
-        void ShowInterstitialAds(Action<bool> callback, string placement, bool force = false);
-        void ShowRewardAds(Action<bool> callback, string placement);
-        void ShowAppOpenAds(Action<bool> callback, string placement);
+        AdsInvocationHandler ShowBanner();
+        AdsInvocationHandler HideBanner();
+        AdsInvocationHandler ShowInterstitialAds(string placement, bool force = false);
+        AdsInvocationHandler ShowRewardAds(string placement);
+        AdsInvocationHandler ShowAppOpenAds(string placement);
     }
 }

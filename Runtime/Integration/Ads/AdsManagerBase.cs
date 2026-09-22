@@ -28,9 +28,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         IIntegrationModule
         where T : ScriptableObject
     {
-        #region Interfaces & Properties
+        #region Constants
+        private const float DefaultInitializationTimeout = 30f;
+        #endregion
+
+        #region Properties
         public string DeviceAdvertisingId => _provider != null ? _provider.DeviceAdvertisingId : string.Empty;
         public bool IsBannerAvailable => _provider != null && _provider.IsBannerAvailable;
+        public AdsBannerState BannerState => _provider?.BannerState ??
+            AdsBannerState.Unavailable("No Ads provider is registered.");
         public bool IsInterstitialAdsAvailable => _provider != null && _provider.IsInterstitialAvailable;
         public bool IsRewardAdsAvailable => _provider != null && _provider.IsRewardedAvailable;
         public bool IsAppOpenAdsAvailable => _provider != null && _provider.IsOpenAppAdAvailable;
@@ -38,14 +44,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public int InterstitialAdCount { get; private set; }
         public int RewardAdCount { get; private set; }
         public int AppOpenAdCount { get; private set; }
-        public float ShowInterstitialAdsInterval { get; set; } = 120.0f;
-        public bool IsIntersitialAdsWillShow => 
-            _intervalTrackingMode switch
-            {
-                IntervalTrackingMode.DeltaTime => _interstitialTimer >= ShowInterstitialAdsInterval,
-                IntervalTrackingMode.TimePoint => _isInterstitialReadyCached,
-                _ => throw new ArgumentException()
-            };
+        public float ShowInterstitialAdsInterval { get; set; } = 120f;
+        public bool IsIntersitialAdsWillShow => _intervalTrackingMode switch
+        {
+            IntervalTrackingMode.DeltaTime => _interstitialTimer >= ShowInterstitialAdsInterval,
+            IntervalTrackingMode.TimePoint => _isInterstitialReadyCached,
+            _ => throw new ArgumentException()
+        };
         #endregion
 
         #region Serialized Fields
@@ -60,7 +65,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private IntervalTrackingMode _intervalTrackingMode = IntervalTrackingMode.DeltaTime;
 
         [SerializeField]
-        private float _timePointCheckInterval = 1.0f;
+        private float _timePointCheckInterval = 1f;
 
         [SerializeField]
         private bool _verboseDebugging;
@@ -69,239 +74,325 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         #region Private Fields
         private IAdsServiceProvider _provider;
         private float _interstitialTimer;
-        private DateTime _lastAdShowTimePoint = DateTime.MinValue;
+        private DateTime _lastAdShowTimePoint;
         private float _checkIntervalAccumulator;
         private bool _isInterstitialReadyCached;
+        private bool _initializationRequested;
+        private bool _shuttingDown;
+        private int _lifecycleGeneration;
         #endregion
 
-        #region Lifecycle & Unity Methods
+        #region Unity Callbacks
         protected override void OnEnable()
         {
             base.OnEnable();
             Integration.RegisterManager(this);
         }
 
-        public virtual void Reset()
+        protected override void OnDisable()
         {
-            Status = AdsManagerStatus.Uninitialized;
-            _lastAdShowTimePoint = DateTime.MinValue;
-            _checkIntervalAccumulator = 0.0f;
-            _isInterstitialReadyCached = false;
-
-            OverrideConfiguration();
-            ResetProvider();
-        }
-
-        public void Tick(float deltaTime)
-        {
-            if (_provider == null) return;
-            _provider.LoadAds();
-            ResolveInterstitialAdInterval(deltaTime);
+            Shutdown();
+            base.OnDisable();
         }
         #endregion
 
         #region Public Methods
-        public void Initialize(float timeOut = float.MaxValue)
+        public virtual void Reset()
         {
+            Shutdown();
+            InterstitialAdCount = 0;
+            RewardAdCount = 0;
+            AppOpenAdCount = 0;
+            _interstitialTimer = 0f;
+            _lastAdShowTimePoint = ChronoDirector.UtcNow;
+            _checkIntervalAccumulator = 0f;
+            _isInterstitialReadyCached = false;
+            OverrideConfiguration();
+            ResetProvider();
+        }
+
+        public virtual void Tick(float deltaTime)
+        {
+            if (_provider == null) return;
+            try { _provider.LoadAds(); }
+            catch (Exception exception)
+            {
+                QuickLog.Error<AdsManagerBase<T>>("Ads provider LoadAds failed: {0}", exception.Message);
+            }
+            ReconcileLateInitialization();
+            ResolveInterstitialAdInterval(SanitizeDelta(deltaTime));
+        }
+
+        public virtual void Initialize(float timeOut = float.MaxValue)
+        {
+            if (_shuttingDown || Status == AdsManagerStatus.Ready) return;
             Dispatcher.DispatchCoroutine(InitializeCoroutine(timeOut));
         }
 
-        public IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
+        public virtual IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
         {
-            Status = AdsManagerStatus.Initializing;
-
+            if (_shuttingDown || Status == AdsManagerStatus.Ready) yield break;
             if (_provider == null)
             {
-                QuickLog.Error<AdsManagerBase<T>>(
-                    "No provider registered. Cannot initialize AdsManager."
-                );
+                QuickLog.Error<AdsManagerBase<T>>("No provider registered. Cannot initialize AdsManager.");
                 Status = AdsManagerStatus.Uninitialized;
                 yield break;
             }
 
-            _provider.Initialize();
-            float timer = 0.0f;
-
-            while (timer < timeOut && !(_provider != null && _provider.IsInitialized))
+            int generation = _lifecycleGeneration;
+            Status = AdsManagerStatus.Initializing;
+            if (!_initializationRequested)
             {
-                timer += Time.deltaTime;
+                _initializationRequested = true;
+                try { _provider.Initialize(); }
+                catch (Exception exception)
+                {
+                    QuickLog.Error<AdsManagerBase<T>>("Ads provider initialization failed: {0}", exception.Message);
+                    _initializationRequested = false;
+                    Status = AdsManagerStatus.Uninitialized;
+                    yield break;
+                }
+            }
+
+            float timeout = NormalizeTimeout(timeOut);
+            float elapsed = 0f;
+            while (generation == _lifecycleGeneration && _provider != null &&
+                   !_provider.IsInitialized && elapsed < timeout)
+            {
+                elapsed += Time.unscaledDeltaTime;
                 yield return null;
             }
 
+            if (generation != _lifecycleGeneration || _shuttingDown) yield break;
             if (_provider != null && _provider.IsInitialized)
             {
                 Status = AdsManagerStatus.Ready;
-                if (_verboseDebugging)
-                {
-                    QuickLog.Debug<AdsManagerBase<T>>("Initialize: ready");
-                }
+                LogDebug("Initialize: ready");
             }
             else
             {
                 Status = AdsManagerStatus.Uninitialized;
-                if (_verboseDebugging)
-                {
-                    QuickLog.Debug<AdsManagerBase<T>>("Initialize: failed or timed out");
-                }
+                LogDebug("Initialize: timed out; late provider readiness remains observed by Tick");
             }
         }
 
-        public void Shutdown()
+        public virtual void Shutdown()
         {
-            if (_verboseDebugging)
+            if (_shuttingDown) return;
+            _shuttingDown = true;
+            ++_lifecycleGeneration;
+            _initializationRequested = false;
+            try
             {
-                QuickLog.Debug<AdsManagerBase<T>>("Shutdown");
+                LogDebug("Shutdown");
+                if (_provider != null) _provider.CleanUp();
             }
-
-            if (_provider != null && _provider.IsInitialized)
+            catch (Exception exception)
             {
-                _provider.CleanUp();
+                QuickLog.Error<AdsManagerBase<T>>("Ads provider cleanup failed: {0}", exception.Message);
             }
-
-            Status = AdsManagerStatus.Uninitialized;
+            finally
+            {
+                Status = AdsManagerStatus.Uninitialized;
+                _shuttingDown = false;
+            }
         }
 
         public void RegisterProvider(IAdsServiceProvider provider)
         {
-            if (_provider != null)
+            if (ReferenceEquals(_provider, provider))
             {
-                QuickLog.Warning<AdsManagerBase<T>>(
-                    "AdsManager already has a provider registered. " +
-                    "Overriding the existing one."
-                );
-            }
-            _provider = provider;
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "RegisterProvider: {0}", provider?.GetType().Name);
-            }
-        }
-
-        public virtual void ShowBanner()
-        {
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>("ShowBanner");
-            }
-
-            if (_provider != null)
-            {
-                _provider.ShowBanner();
-            }
-            else
-            {
-                QuickLog.Warning<AdsManagerBase<T>>(
-                    "No provider registered."
-                );
-            }
-        }
-
-        public virtual void HideBanner()
-        {
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>("HideBanner");
-            }
-
-            if (_provider != null)
-            {
-                _provider.HideBanner();
-            }
-            else
-            {
-                QuickLog.Warning<AdsManagerBase<T>>(
-                    "No provider registered."
-                );
-            }
-        }
-
-        public virtual void ShowInterstitialAds(Action<bool> callback, string placement, bool force = false)
-        {
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "ShowInterstitialAds: placement={0}, force={1}, ready={2}", placement, force, IsIntersitialAdsWillShow);
-            }
-
-            if (!IsIntersitialAdsWillShow && !force)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "Interstitial ad request ignored. Interval not met. {0:F1} / {1}s",
-                    GetInterstitialProgressFormatted(), ShowInterstitialAdsInterval);
-                callback?.Invoke(false);
+                if (provider != null) provider.AdsManager = this;
                 return;
             }
 
-            if (_provider != null)
+            IAdsServiceProvider previous = _provider;
+            _provider = null;
+            if (previous != null)
             {
-                _provider.ShowInterstitialAds(DebugCallback(callback, placement, "Interstitial"), placement);
-                ResetIntersitialInterval();
-                ++InterstitialAdCount;
+                try { previous.CleanUp(); }
+                catch (Exception exception)
+                {
+                    QuickLog.Error<AdsManagerBase<T>>("Previous Ads provider cleanup failed: {0}", exception.Message);
+                }
+                finally { previous.AdsManager = null; }
             }
-            else
-            {
-                QuickLog.Warning<AdsManagerBase<T>>(
-                    "No provider registered."
-                );
-            }
+
+            _provider = provider;
+            _initializationRequested = false;
+            Status = AdsManagerStatus.Uninitialized;
+            if (_provider != null) _provider.AdsManager = this;
+            LogDebug("RegisterProvider: {0}", provider?.GetType().Name ?? "null");
         }
 
-        public virtual void ShowRewardAds(Action<bool> callback, string placement)
+        public virtual AdsInvocationHandler ShowBanner()
         {
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "ShowRewardAds: placement={0}", placement);
-            }
-
-            if (_provider != null)
-            {
-                _provider.ShowRewardAds(DebugCallback(callback, placement, "Reward"), placement);
-                ResetIntersitialInterval();
-                ++RewardAdCount;
-            }
-            else
-            {
-                QuickLog.Warning<AdsManagerBase<T>>(
-                    "No provider registered."
-                );
-            }
+            LogDebug("ShowBanner");
+            return InvokeProvider(AdsType.Banner, string.Empty, provider => provider.ShowBanner());
         }
 
-        public virtual void ShowAppOpenAds(Action<bool> callback, string placement)
+        public virtual AdsInvocationHandler HideBanner()
         {
-            if (_verboseDebugging)
+            LogDebug("HideBanner");
+            return InvokeProvider(AdsType.Banner, string.Empty, provider => provider.HideBanner());
+        }
+
+        public virtual AdsInvocationHandler ShowInterstitialAds(string placement, bool force = false)
+        {
+            LogDebug(
+                "ShowInterstitialAds: placement={0}, force={1}, ready={2}",
+                placement,
+                force,
+                IsIntersitialAdsWillShow
+            );
+            if (_provider == null) return MissingProvider(AdsType.Interstitial, placement);
+            if (!IsIntersitialAdsWillShow && !force)
             {
                 QuickLog.Debug<AdsManagerBase<T>>(
-                    "ShowAppOpenAds: placement={0}", placement);
+                    "Interstitial ad skipped. Interval not met. {0:F1} / {1}s",
+                    GetInterstitialProgressFormatted(),
+                    ShowInterstitialAdsInterval
+                );
+                return AdsInvocationHandler.Skipped(
+                    AdsType.Interstitial,
+                    placement,
+                    "Interstitial interval has not elapsed."
+                );
             }
 
-            if (_provider != null)
-            {
-                _provider.ShowAppOpenAds(DebugCallback(callback, placement, "AppOpen"), placement);
-                ++AppOpenAdCount;
-            }
-            else
-            {
-                QuickLog.Warning<AdsManagerBase<T>>("No provider registered.");
-            }
+            AdsInvocationHandler handler = InvokeProvider(
+                AdsType.Interstitial,
+                placement,
+                provider => provider.ShowInterstitialAds(placement)
+            );
+            ObserveShowing(handler, AdsType.Interstitial);
+            return handler;
+        }
+
+        public virtual AdsInvocationHandler ShowRewardAds(string placement)
+        {
+            LogDebug("ShowRewardAds: placement={0}", placement);
+            AdsInvocationHandler handler = InvokeProvider(
+                AdsType.Rewarded,
+                placement,
+                provider => provider.ShowRewardAds(placement)
+            );
+            ObserveShowing(handler, AdsType.Rewarded);
+            return handler;
+        }
+
+        public virtual AdsInvocationHandler ShowAppOpenAds(string placement)
+        {
+            LogDebug("ShowAppOpenAds: placement={0}", placement);
+            AdsInvocationHandler handler = InvokeProvider(
+                AdsType.OpenApp,
+                placement,
+                provider => provider.ShowAppOpenAds(placement)
+            );
+            ObserveShowing(handler, AdsType.OpenApp);
+            return handler;
         }
         #endregion
 
         #region Private Methods
+        private AdsInvocationHandler InvokeProvider(
+            AdsType type,
+            string placement,
+            Func<IAdsServiceProvider, AdsInvocationHandler> invoke
+        )
+        {
+            if (_shuttingDown)
+                return AdsInvocationHandler.Failed(type, placement, "Ads manager is shutting down.");
+            if (_provider == null) return MissingProvider(type, placement);
+            try
+            {
+                AdsInvocationHandler handler = invoke(_provider);
+                if (handler == null)
+                    return AdsInvocationHandler.Failed(type, placement, "Ads provider returned no invocation handler.");
+                if (handler.AdType != type)
+                    return AdsInvocationHandler.Failed(type, placement, "Ads provider returned a handler for the wrong ad type.");
+                ObserveDebug(handler);
+                return handler;
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<AdsManagerBase<T>>(
+                    "Ads provider invocation failed for {0} placement '{1}': {2}",
+                    type,
+                    placement,
+                    exception.Message
+                );
+                return AdsInvocationHandler.Failed(type, placement, exception.Message);
+            }
+        }
+
+        private AdsInvocationHandler MissingProvider(AdsType type, string placement)
+        {
+            QuickLog.Warning<AdsManagerBase<T>>("No provider registered.");
+            return AdsInvocationHandler.Failed(type, placement, "No Ads provider is registered.");
+        }
+
+        private void ObserveShowing(AdsInvocationHandler handler, AdsType type)
+        {
+            if (handler == null) return;
+            bool counted = false;
+            IDisposable subscription = null;
+            subscription = handler.Observe(current =>
+            {
+                if (!counted && (current.Status == AdsInvocationStatus.Showing || current.WasDisplayed))
+                {
+                    counted = true;
+                    switch (type)
+                    {
+                        case AdsType.Interstitial:
+                            ++InterstitialAdCount;
+                            ResetIntersitialInterval();
+                            break;
+                        case AdsType.Rewarded:
+                            ++RewardAdCount;
+                            ResetIntersitialInterval();
+                            break;
+                        case AdsType.OpenApp:
+                            ++AppOpenAdCount;
+                            break;
+                    }
+                }
+                if (current.IsTerminal) subscription?.Dispose();
+            });
+            if (handler.IsTerminal) subscription.Dispose();
+        }
+
+        private void ObserveDebug(AdsInvocationHandler handler)
+        {
+            if (!_verboseDebugging || handler == null) return;
+            IDisposable subscription = null;
+            subscription = handler.Observe(current =>
+            {
+                QuickLog.Debug<AdsManagerBase<T>>(
+                    "{0} status={1}, placement={2}, displayed={3}, closed={4}, reward={5}, reason={6}",
+                    current.AdType,
+                    current.Status,
+                    current.Placement,
+                    current.WasDisplayed,
+                    current.WasClosed,
+                    current.RewardEarned,
+                    current.Reason
+                );
+                if (current.IsTerminal) subscription?.Dispose();
+            });
+            if (handler.IsTerminal) subscription.Dispose();
+        }
+
         private void ResetProvider()
         {
             if (adServiceProvider == null) return;
-
             if (adServiceProvider is not IAdsServiceProvider provider)
             {
                 QuickLog.Error<AdsManagerBase<T>>(
-                    "Assigned ad service provider does not implement IAdsServiceProvider interface."
+                    "Assigned ad service provider does not implement IAdsServiceProvider."
                 );
                 return;
             }
-
             RegisterProvider(provider);
         }
 
@@ -311,23 +402,16 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             ShowInterstitialAdsInterval = overrideConfig.ShowInterstitialAdsInterval;
         }
 
-        private Action<bool> DebugCallback(Action<bool> callback, string placement, string adType)
+        private void ReconcileLateInitialization()
         {
-            if (!_verboseDebugging) return callback;
-            return (success) =>
-            {
-                QuickLog.Debug<AdsManagerBase<T>>("{0} result: success={1}, placement={2}", adType, success, placement);
-                callback?.Invoke(success);
-            };
+            if (!_initializationRequested || _provider == null || !_provider.IsInitialized) return;
+            if (Status != AdsManagerStatus.Ready) LogDebug("Initialize: provider became ready after wait ended");
+            Status = AdsManagerStatus.Ready;
         }
 
         private float GetInterstitialProgressFormatted()
         {
-            if (_intervalTrackingMode == IntervalTrackingMode.DeltaTime)
-            {
-                return _interstitialTimer;
-            }
-
+            if (_intervalTrackingMode == IntervalTrackingMode.DeltaTime) return _interstitialTimer;
             return (float)(ChronoDirector.UtcNow - _lastAdShowTimePoint).TotalSeconds;
         }
 
@@ -335,12 +419,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             if (_intervalTrackingMode == IntervalTrackingMode.DeltaTime)
             {
-                _interstitialTimer = 0.0f;
+                _interstitialTimer = 0f;
                 return;
             }
-
             _lastAdShowTimePoint = ChronoDirector.UtcNow;
-            _checkIntervalAccumulator = 0.0f;
+            _checkIntervalAccumulator = 0f;
             _isInterstitialReadyCached = false;
         }
 
@@ -349,46 +432,42 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             switch (_intervalTrackingMode)
             {
                 case IntervalTrackingMode.DeltaTime:
-                    ResolveInterstitialAdIntervalDeltatime(deltaTime);
+                    _interstitialTimer = Mathf.Min(_interstitialTimer + deltaTime, ShowInterstitialAdsInterval);
+                    LogDebug(
+                        "Tick(DeltaTime): dt={0:F3}s, timer={1:F1}s/{2}s",
+                        deltaTime,
+                        _interstitialTimer,
+                        ShowInterstitialAdsInterval
+                    );
                     break;
-
                 case IntervalTrackingMode.TimePoint:
-                    ResolveInterstitialAdIntervalTimepoint(deltaTime);
+                    _checkIntervalAccumulator += deltaTime;
+                    if (_checkIntervalAccumulator < _timePointCheckInterval) return;
+                    _checkIntervalAccumulator -= _timePointCheckInterval;
+                    _isInterstitialReadyCached =
+                        (ChronoDirector.UtcNow - _lastAdShowTimePoint).TotalSeconds >= ShowInterstitialAdsInterval;
+                    LogDebug(
+                        "Tick(TimePoint): elapsed={0:F1}s/{1}s, ready={2}",
+                        GetInterstitialProgressFormatted(),
+                        ShowInterstitialAdsInterval,
+                        _isInterstitialReadyCached
+                    );
                     break;
             }
-
         }
 
-        private void ResolveInterstitialAdIntervalDeltatime(float deltaTime)
+        private void LogDebug(string message, params object[] parameters)
         {
-            _interstitialTimer = Mathf.Min(_interstitialTimer + deltaTime, ShowInterstitialAdsInterval);
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "Tick(DeltaTime): dt={0:F3}s, timer={1:F1}s/{2}s",
-                    deltaTime, _interstitialTimer, ShowInterstitialAdsInterval
-                );
-            }
+            if (_verboseDebugging) QuickLog.Debug<AdsManagerBase<T>>(message, parameters);
         }
 
-        private void ResolveInterstitialAdIntervalTimepoint(float deltaTime)
-        {
-            _checkIntervalAccumulator += deltaTime;
-            if (_checkIntervalAccumulator < _timePointCheckInterval) return;
+        private static float NormalizeTimeout(float timeout) =>
+            float.IsNaN(timeout) || float.IsInfinity(timeout) || timeout <= 0f || timeout == float.MaxValue
+                ? DefaultInitializationTimeout
+                : timeout;
 
-            _checkIntervalAccumulator -= _timePointCheckInterval;
-            _isInterstitialReadyCached = (ChronoDirector.UtcNow - _lastAdShowTimePoint).TotalSeconds >= ShowInterstitialAdsInterval;
-
-            if (_verboseDebugging)
-            {
-                QuickLog.Debug<AdsManagerBase<T>>(
-                    "Tick(TimePoint): check, elapsed={0:F1}s/{1}s, ready={2}",
-                    (Func<object>)(() => GetInterstitialProgressFormatted()),
-                    ShowInterstitialAdsInterval, _isInterstitialReadyCached
-                );
-            }
-        }
+        private static float SanitizeDelta(float deltaTime) =>
+            float.IsNaN(deltaTime) || float.IsInfinity(deltaTime) ? 0f : Mathf.Max(0f, deltaTime);
         #endregion
-
     }
 }

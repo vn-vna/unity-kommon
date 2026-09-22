@@ -99,7 +99,7 @@ namespace Com.Hapiga.Scheherazade.Common
             }
 
             string placement = ctx.GetParam("placement", DefaultPlacement);
-            IntegrationGlobal.AdsManager.ShowInterstitialAds(null, placement, true);
+            IntegrationGlobal.AdsManager.ShowInterstitialAds(placement, true);
         }
 
         private static void HandleAdsReward(DirectCmdContext ctx)
@@ -114,7 +114,7 @@ namespace Com.Hapiga.Scheherazade.Common
             }
 
             string placement = ctx.GetParam("placement", DefaultPlacement);
-            IntegrationGlobal.AdsManager.ShowRewardAds(null, placement);
+            IntegrationGlobal.AdsManager.ShowRewardAds(placement);
         }
 
         private static void HandleAdsAppOpen(DirectCmdContext ctx)
@@ -129,7 +129,7 @@ namespace Com.Hapiga.Scheherazade.Common
             }
 
             string placement = ctx.GetParam("placement", DefaultPlacement);
-            IntegrationGlobal.AdsManager.ShowAppOpenAds(null, placement);
+            IntegrationGlobal.AdsManager.ShowAppOpenAds(placement);
         }
         #endregion
 

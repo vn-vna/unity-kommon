@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,57 +8,35 @@ using UnityEngine;
 
 namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 {
-    /// <summary>
-    /// Static facade over the registered <see cref="IAdsManager"/>.
-    /// Exposes query, fire-and-forget, coroutine and async APIs.
-    /// </summary>
+    /// <summary>Static facade over the registered <see cref="IAdsManager"/>.</summary>
     public class Ads
     {
-        #region Queries
-
+        #region Properties
         public static IAdsManager Manager => Integration.AdsManager;
-
         public static bool IsAvailable => Manager != null;
-
         public static AdsManagerStatus Status =>
             Manager != null ? Manager.Status : AdsManagerStatus.Uninitialized;
-
         public static bool IsReady => Status == AdsManagerStatus.Ready;
-
         public static bool IsBannerAvailable => Manager != null && Manager.IsBannerAvailable;
-
+        public static AdsBannerState BannerState => Manager?.BannerState ??
+            AdsBannerState.Unavailable("Ads manager is not registered.");
+        public static Vector2 BannerSize => BannerState.Size;
         public static bool IsInterstitialAvailable => Manager != null && Manager.IsInterstitialAdsAvailable;
-
         public static bool IsRewardedAvailable => Manager != null && Manager.IsRewardAdsAvailable;
-
         public static bool IsAppOpenAvailable => Manager != null && Manager.IsAppOpenAdsAvailable;
-
         #endregion
 
         #region Initialization
-
         public static void Initialize(float timeOut = float.MaxValue)
         {
-            if (!TryGetManager(out IAdsManager manager))
-            {
-                return;
-            }
-
-            manager.Initialize(timeOut);
+            if (TryGetManager(out IAdsManager manager)) manager.Initialize(timeOut);
         }
 
         public static IEnumerator InitializeCoroutine(float timeOut = float.MaxValue)
         {
-            if (!TryGetManager(out IAdsManager manager))
-            {
-                yield break;
-            }
-
+            if (!TryGetManager(out IAdsManager manager)) yield break;
             IEnumerator steps = manager.InitializeCoroutine(timeOut);
-            while (steps.MoveNext())
-            {
-                yield return steps.Current;
-            }
+            while (steps.MoveNext()) yield return steps.Current;
         }
 
         public static Task InitializeAsync(float timeOut = float.MaxValue, CancellationToken ct = default)
@@ -66,44 +44,34 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             RequireManager();
             return CoroutineTaskBridge.RunAsync(InitializeCoroutine(timeOut));
         }
-
         #endregion
 
-        #region Banner (fire-and-forget)
-
-        public static void ShowBanner()
+        #region Banner
+        public static AdsInvocationHandler ShowBanner()
         {
             if (!TryGetManager(out IAdsManager manager))
-            {
-                return;
-            }
-
-            manager.ShowBanner();
+                return MissingManager(AdsType.Banner, string.Empty);
+            return InvokeSafely(AdsType.Banner, string.Empty, manager.ShowBanner);
         }
 
-        public static void HideBanner()
+        public static AdsInvocationHandler HideBanner()
         {
             if (!TryGetManager(out IAdsManager manager))
-            {
-                return;
-            }
-
-            manager.HideBanner();
+                return MissingManager(AdsType.Banner, string.Empty);
+            return InvokeSafely(AdsType.Banner, string.Empty, manager.HideBanner);
         }
-
         #endregion
 
         #region Interstitial
-
-        public static void ShowInterstitial(Action<bool> onResult, string placement, bool force = false)
+        public static AdsInvocationHandler ShowInterstitial(string placement, bool force = false)
         {
             if (!TryGetManager(out IAdsManager manager))
-            {
-                onResult?.Invoke(false);
-                return;
-            }
-
-            Dispatcher.DispatchCoroutine(ShowInterstitialCoroutineImpl(manager, placement, force, onResult));
+                return MissingManager(AdsType.Interstitial, placement);
+            return InvokeSafely(
+                AdsType.Interstitial,
+                placement,
+                () => manager.ShowInterstitialAds(placement, force)
+            );
         }
 
         public static IEnumerator ShowInterstitialCoroutine(
@@ -117,12 +85,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 onResult?.Invoke(false);
                 yield break;
             }
-
-            IEnumerator steps = ShowInterstitialCoroutineImpl(manager, placement, force, onResult);
-            while (steps.MoveNext())
-            {
-                yield return steps.Current;
-            }
+            IEnumerator steps = ObserveInvocationCoroutine(
+                () => manager.ShowInterstitialAds(placement, force),
+                IsSuccessful,
+                AdsType.Interstitial,
+                placement,
+                onResult
+            );
+            while (steps.MoveNext()) yield return steps.Current;
         }
 
         public static Task<bool> ShowInterstitialAsync(
@@ -134,25 +104,31 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             IAdsManager manager = RequireManager();
             return CoroutineTaskBridge.RunWithCallbackAsync<bool>(
-                onResult => ShowInterstitialCoroutineImpl(manager, placement, force, onResult, timeoutSeconds),
-                timeoutSeconds,
+                onResult => ObserveInvocationCoroutine(
+                    () => manager.ShowInterstitialAds(placement, force),
+                    IsSuccessful,
+                    AdsType.Interstitial,
+                    placement,
+                    onResult,
+                    timeoutSeconds,
+                    () => ct.IsCancellationRequested
+                ),
+                0f, // The observing coroutine owns timeout so it always unsubscribes.
                 ct
             );
         }
-
         #endregion
 
         #region Rewarded
-
-        public static void ShowRewarded(Action<bool> onResult, string placement)
+        public static AdsInvocationHandler ShowRewarded(string placement)
         {
             if (!TryGetManager(out IAdsManager manager))
-            {
-                onResult?.Invoke(false);
-                return;
-            }
-
-            Dispatcher.DispatchCoroutine(ShowRewardedCoroutineImpl(manager, placement, onResult));
+                return MissingManager(AdsType.Rewarded, placement);
+            return InvokeSafely(
+                AdsType.Rewarded,
+                placement,
+                () => manager.ShowRewardAds(placement)
+            );
         }
 
         public static IEnumerator ShowRewardedCoroutine(Action<bool> onResult, string placement)
@@ -162,12 +138,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 onResult?.Invoke(false);
                 yield break;
             }
-
-            IEnumerator steps = ShowRewardedCoroutineImpl(manager, placement, onResult);
-            while (steps.MoveNext())
-            {
-                yield return steps.Current;
-            }
+            IEnumerator steps = ObserveInvocationCoroutine(
+                () => manager.ShowRewardAds(placement),
+                IsRewardSuccessful,
+                AdsType.Rewarded,
+                placement,
+                onResult
+            );
+            while (steps.MoveNext()) yield return steps.Current;
         }
 
         public static Task<bool> ShowRewardedAsync(
@@ -178,25 +156,31 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             IAdsManager manager = RequireManager();
             return CoroutineTaskBridge.RunWithCallbackAsync<bool>(
-                onResult => ShowRewardedCoroutineImpl(manager, placement, onResult, timeoutSeconds),
-                timeoutSeconds,
+                onResult => ObserveInvocationCoroutine(
+                    () => manager.ShowRewardAds(placement),
+                    IsRewardSuccessful,
+                    AdsType.Rewarded,
+                    placement,
+                    onResult,
+                    timeoutSeconds,
+                    () => ct.IsCancellationRequested
+                ),
+                0f, // The observing coroutine owns timeout so it always unsubscribes.
                 ct
             );
         }
-
         #endregion
 
         #region App Open
-
-        public static void ShowAppOpen(Action<bool> onResult, string placement)
+        public static AdsInvocationHandler ShowAppOpen(string placement)
         {
             if (!TryGetManager(out IAdsManager manager))
-            {
-                onResult?.Invoke(false);
-                return;
-            }
-
-            Dispatcher.DispatchCoroutine(ShowAppOpenCoroutineImpl(manager, placement, onResult));
+                return MissingManager(AdsType.OpenApp, placement);
+            return InvokeSafely(
+                AdsType.OpenApp,
+                placement,
+                () => manager.ShowAppOpenAds(placement)
+            );
         }
 
         public static IEnumerator ShowAppOpenCoroutine(Action<bool> onResult, string placement)
@@ -206,12 +190,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 onResult?.Invoke(false);
                 yield break;
             }
-
-            IEnumerator steps = ShowAppOpenCoroutineImpl(manager, placement, onResult);
-            while (steps.MoveNext())
-            {
-                yield return steps.Current;
-            }
+            IEnumerator steps = ObserveInvocationCoroutine(
+                () => manager.ShowAppOpenAds(placement),
+                IsSuccessful,
+                AdsType.OpenApp,
+                placement,
+                onResult
+            );
+            while (steps.MoveNext()) yield return steps.Current;
         }
 
         public static Task<bool> ShowAppOpenAsync(
@@ -222,143 +208,99 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             IAdsManager manager = RequireManager();
             return CoroutineTaskBridge.RunWithCallbackAsync<bool>(
-                onResult => ShowAppOpenCoroutineImpl(manager, placement, onResult, timeoutSeconds),
-                timeoutSeconds,
+                onResult => ObserveInvocationCoroutine(
+                    () => manager.ShowAppOpenAds(placement),
+                    IsSuccessful,
+                    AdsType.OpenApp,
+                    placement,
+                    onResult,
+                    timeoutSeconds,
+                    () => ct.IsCancellationRequested
+                ),
+                0f, // The observing coroutine owns timeout so it always unsubscribes.
                 ct
             );
         }
-
         #endregion
 
         #region Private Methods
-
-        private static IEnumerator ShowInterstitialCoroutineImpl(
-            IAdsManager manager,
+        private static IEnumerator ObserveInvocationCoroutine(
+            Func<AdsInvocationHandler> invoke,
+            Func<AdsInvocationHandler, bool> successPredicate,
+            AdsType type,
             string placement,
-            bool force,
             Action<bool> onResult,
-            float timeoutSeconds = 30f
+            float timeoutSeconds = 30f,
+            Func<bool> isCancelled = null
         )
         {
+            AdsInvocationHandler handler = InvokeSafely(type, placement, invoke);
             bool completed = false;
             bool success = false;
-            float deadline = Time.time + timeoutSeconds;
+            IDisposable subscription = handler.Observe(current =>
+            {
+                if (!current.IsTerminal) return;
+                success = successPredicate(current);
+                completed = true;
+            });
 
+            float elapsed = 0f;
             try
             {
-                manager.ShowInterstitialAds(
-                    result =>
-                    {
-                        success = result;
-                        completed = true;
-                    },
+                while (!completed && elapsed < timeoutSeconds && !(isCancelled?.Invoke() ?? false))
+                {
+                    elapsed += Time.unscaledDeltaTime;
+                    yield return null;
+                }
+            }
+            finally { subscription.Dispose(); }
+
+            if (!completed && !(isCancelled?.Invoke() ?? false))
+            {
+                QuickLog.Warning<Ads>(
+                    "{0} ad timed out for placement '{1}'.",
+                    type,
+                    placement
+                );
+            }
+            onResult?.Invoke(completed && success);
+        }
+
+        private static AdsInvocationHandler InvokeSafely(
+            AdsType type,
+            string placement,
+            Func<AdsInvocationHandler> invoke
+        )
+        {
+            try
+            {
+                AdsInvocationHandler handler = invoke();
+                return handler ?? AdsInvocationHandler.Failed(
+                    type,
                     placement,
-                    force
+                    "Ads manager returned no invocation handler."
                 );
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                QuickLog.Log("Show interstitial failed for placement '{0}': {1}", "Ads", LogLevel.Error, new object[] { placement, ex });
-                onResult?.Invoke(false);
-                yield break;
-            }
-
-            while (!completed && Time.time < deadline)
-            {
-                yield return null;
-            }
-
-            if (!completed)
-            {
-                QuickLog.Log("Show interstitial timed out for placement '{0}'.", "Ads", LogLevel.Warning, new object[] { placement });
-            }
-
-            onResult?.Invoke(success);
-        }
-
-        private static IEnumerator ShowRewardedCoroutineImpl(
-            IAdsManager manager,
-            string placement,
-            Action<bool> onResult,
-            float timeoutSeconds = 30f
-        )
-        {
-            bool completed = false;
-            bool success = false;
-            float deadline = Time.time + timeoutSeconds;
-
-            try
-            {
-                manager.ShowRewardAds(
-                    result =>
-                    {
-                        success = result;
-                        completed = true;
-                    },
-                    placement
+                QuickLog.Error<Ads>(
+                    "{0} ad invocation failed for placement '{1}': {2}",
+                    type,
+                    placement,
+                    exception.Message
                 );
+                return AdsInvocationHandler.Failed(type, placement, exception.Message);
             }
-            catch (Exception ex)
-            {
-                QuickLog.Log("Show rewarded failed for placement '{0}': {1}", "Ads", LogLevel.Error, new object[] { placement, ex });
-                onResult?.Invoke(false);
-                yield break;
-            }
-
-            while (!completed && Time.time < deadline)
-            {
-                yield return null;
-            }
-
-            if (!completed)
-            {
-                QuickLog.Log("Show rewarded timed out for placement '{0}'.", "Ads", LogLevel.Warning, new object[] { placement });
-            }
-
-            onResult?.Invoke(success);
         }
 
-        private static IEnumerator ShowAppOpenCoroutineImpl(
-            IAdsManager manager,
-            string placement,
-            Action<bool> onResult,
-            float timeoutSeconds = 30f
-        )
-        {
-            bool completed = false;
-            bool success = false;
-            float deadline = Time.time + timeoutSeconds;
+        private static bool IsSuccessful(AdsInvocationHandler handler) =>
+            handler.Status == AdsInvocationStatus.Succeeded;
 
-            try
-            {
-                manager.ShowAppOpenAds(
-                    result =>
-                    {
-                        success = result;
-                        completed = true;
-                    },
-                    placement
-                );
-            }
-            catch (Exception ex)
-            {
-                QuickLog.Log("Show app open failed for placement '{0}': {1}", "Ads", LogLevel.Error, new object[] { placement, ex });
-                onResult?.Invoke(false);
-                yield break;
-            }
+        private static bool IsRewardSuccessful(AdsInvocationHandler handler) =>
+            handler.Status == AdsInvocationStatus.Succeeded && handler.RewardEarned;
 
-            while (!completed && Time.time < deadline)
-            {
-                yield return null;
-            }
-
-            if (!completed)
-            {
-                QuickLog.Log("Show app open timed out for placement '{0}'.", "Ads", LogLevel.Warning, new object[] { placement });
-            }
-
-            onResult?.Invoke(success);
-        }
+        private static AdsInvocationHandler MissingManager(AdsType type, string placement) =>
+            AdsInvocationHandler.Failed(type, placement, "Ads manager is not registered.");
 
         private static bool TryGetManager(out IAdsManager manager)
         {
@@ -369,7 +311,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                     "Ads manager is not registered. Ensure the module is enabled in the IntegrationCentre."
                 );
             }
-
             return manager != null;
         }
 
@@ -377,13 +318,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             IAdsManager manager = Integration.RequireManager<IAdsManager>();
             if (manager.Status != AdsManagerStatus.Ready)
-            {
                 throw new IntegrationNotInitializedException(nameof(Ads));
-            }
-
             return manager;
         }
-
         #endregion
     }
 }

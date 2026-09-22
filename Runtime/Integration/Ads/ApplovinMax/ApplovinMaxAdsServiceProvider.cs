@@ -15,13 +15,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         fileName = "ApplovinMaxAdsServiceProvider",
         menuName = "Scheherazade/Ads Service Providers/Applovin Max"
     )]
-    public class ApplovinMaxAdsServiceProvider :
+    public partial class ApplovinMaxAdsServiceProvider :
         ScriptableObject,
         IAdsServiceProvider
     {
         #region Interfaces & Properties
 
-        public string DeviceAdvertisingId => PlayerPrefs.GetString("advertising_id", string.Empty);
+        // Do not expose an identifier before an explicit consent-safe policy exists.
+        public string DeviceAdvertisingId => string.Empty;
 
         public IAdsManager AdsManager { get; set; }
         public bool IsInitialized { get; private set; }
@@ -30,7 +31,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             get
             {
-                if (!IsInitialized) return false;
+                if (!IsInitialized || _fullscreenChannelQuarantined ||
+                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -42,7 +44,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             get
             {
-                if (!IsInitialized) return false;
+                if (!IsInitialized || _fullscreenChannelQuarantined ||
+                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.Rewarded, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -54,7 +57,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             get
             {
-                if (!IsInitialized) return false;
+                if (!IsInitialized || _fullscreenChannelQuarantined ||
+                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.OpenApp, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -63,6 +67,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         }
 
         public bool IsBannerAvailable { get; private set; }
+        public AdsBannerState BannerState { get; private set; } =
+            AdsBannerState.Unavailable("Banner has not loaded.");
         public bool IsTestAds => isTestAds;
         public ApplovinMaxAdsEnabledAds EnabledAds => enabledAds;
         public BannerAdsPosition BannerAdPosition => bannerAdsDisplayPosition;
@@ -117,6 +123,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         [SerializeField]
         private ApplovinMaxAdsTrackingEventConfig[] trackingEvents;
+
+        [SerializeField]
+        private bool allowSdkInEditor;
+
+        [SerializeField, Min(1)]
+        private float showStartTimeoutSeconds = 15;
+
+        [SerializeField, Min(1)]
+        private float requestTimeoutSeconds = 300;
+
+        [SerializeField, Min(1)]
+        private float rewardCallbackTimeoutSeconds = 10;
+
+        [SerializeField]
+        private string[] testDeviceAdvertisingIdentifiers = Array.Empty<string>();
 
         [SerializeField]
         private RetryStrategyConfig openAppRetryConfig = new()
@@ -191,12 +212,10 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #region Private Fields
 
-        private bool _interstitialFulfilled;
-        private bool _rewardFulfilled;
-        private Action<bool> _interstitialCallback;
-        private Action<bool> _rewardedCallback;
+        private bool _subscribed;
         private bool _bannerAutoRefreshing;
         private bool _isBannerCreated;
+        private bool _bannerVisibleRequested;
 
         private RetryHandle _openAppHandle;
         private RetryHandle _interstitialHandle;
@@ -206,6 +225,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private int _interstitialLoadGen;
         private int _rewardedLoadGen;
         private int _bannerLoadGen;
+        private static bool _fullscreenChannelQuarantined;
+        private FullscreenInvocation _activeFullscreen;
 
         #endregion
 
@@ -214,264 +235,189 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public void Initialize()
         {
             CleanUp();
+#if UNITY_EDITOR
+            if (!allowSdkInEditor)
+            {
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                    "AppLovin MAX is disabled in the Editor for this provider."
+                );
+                return;
+            }
+#endif
+            SubscribeCallbacks();
+            try
+            {
+                string[] identifiers = (testDeviceAdvertisingIdentifiers ?? Array.Empty<string>())
+                    .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
+                    .Select(identifier => identifier.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                MaxSdk.SetTestDeviceAdvertisingIdentifiers(identifiers);
 
-            MaxSdkCallbacks.OnSdkInitializedEvent += HandleMaxSdkInitializedEvents;
-
-            MaxSdkCallbacks.AppOpen.OnAdLoadedEvent += HandleAppOpenAdLoaded;
-            MaxSdkCallbacks.AppOpen.OnAdLoadFailedEvent += HandleAppOpenAdFailedToLoad;
-            MaxSdkCallbacks.AppOpen.OnAdRevenuePaidEvent += HandleAppOpenAdRevenuePaid;
-            MaxSdkCallbacks.AppOpen.OnAdClickedEvent += HandleAppOpenAdClicked;
-            MaxSdkCallbacks.AppOpen.OnAdDisplayedEvent += HandleAppOpenAdDisplayed;
-            MaxSdkCallbacks.AppOpen.OnAdDisplayFailedEvent += HandleAppOpenAdDisplayFailed;
-            MaxSdkCallbacks.AppOpen.OnAdHiddenEvent += HandleAppOpenAdHidden;
-
-            MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += HandleInterstitialAdLoaded;
-            MaxSdkCallbacks.Interstitial.OnAdLoadFailedEvent += HandleInterstitialAdFailedToLoad;
-            MaxSdkCallbacks.Interstitial.OnAdRevenuePaidEvent += HandleInterstitialAdRevenuePaid;
-            MaxSdkCallbacks.Interstitial.OnAdClickedEvent += HandleInterstitialAdClicked;
-            MaxSdkCallbacks.Interstitial.OnAdDisplayedEvent += HandleInterstitialAdDisplayed;
-            MaxSdkCallbacks.Interstitial.OnAdDisplayFailedEvent += HandleInterstitialAdDisplayFailed;
-            MaxSdkCallbacks.Interstitial.OnAdHiddenEvent += HandleInterstitialAdHidden;
-
-            MaxSdkCallbacks.Rewarded.OnAdLoadedEvent += HandleRewardedAdLoaded;
-            MaxSdkCallbacks.Rewarded.OnAdLoadFailedEvent += HandleRewardedAdFailedToLoad;
-            MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent += HandleRewardedAdRevenuePaid;
-            MaxSdkCallbacks.Rewarded.OnAdClickedEvent += HandleRewardedAdClicked;
-            MaxSdkCallbacks.Rewarded.OnAdDisplayedEvent += HandleRewardedAdDisplayed;
-            MaxSdkCallbacks.Rewarded.OnAdDisplayFailedEvent += HandleRewardedAdDisplayFailed;
-            MaxSdkCallbacks.Rewarded.OnAdHiddenEvent += HandleRewardedAdHidden;
-            MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent += HandleRewardedAdReceivedReward;
-
-            MaxSdkCallbacks.Banner.OnAdLoadedEvent += HandleBannerAdLoaded;
-            MaxSdkCallbacks.Banner.OnAdLoadFailedEvent += HandleBannerAdFailedToLoad;
-            MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent += HandleBannerAdRevenuePaid;
-
-            MaxSdk.InitializeSdk();
+                if (MaxSdk.IsInitialized())
+                    HandleMaxSdkInitializedEvents(MaxSdk.GetSdkConfiguration());
+                else
+                    MaxSdk.InitializeSdk();
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<ApplovinMaxAdsServiceProvider>(
+                    "Failed to initialize AppLovin MAX: {0}",
+                    exception.Message
+                );
+                CleanUp();
+            }
         }
 
         public void CleanUp()
         {
-            _interstitialFulfilled = false;
-            _rewardFulfilled = false;
-            _interstitialCallback = null;
-            _rewardedCallback = null;
-            _bannerAutoRefreshing = false;
+            // Mark unavailable before terminal observers can reenter the provider.
+            IsInitialized = false;
             IsBannerAvailable = false;
+            _bannerVisibleRequested = false;
+            BannerState = AdsBannerState.Unavailable("Ads provider was cleaned up.");
+            TerminateActiveInvocationForCleanup();
+            _bannerAutoRefreshing = false;
 
             _openAppHandle?.Cancel();
             _interstitialHandle?.Cancel();
             _rewardedHandle?.Cancel();
             _bannerHandle?.Cancel();
+            _openAppHandle = null;
+            _interstitialHandle = null;
+            _rewardedHandle = null;
+            _bannerHandle = null;
 
-            MaxSdkCallbacks.OnSdkInitializedEvent -= HandleMaxSdkInitializedEvents;
-
-            MaxSdkCallbacks.AppOpen.OnAdLoadedEvent -= HandleAppOpenAdLoaded;
-            MaxSdkCallbacks.AppOpen.OnAdLoadFailedEvent -= HandleAppOpenAdFailedToLoad;
-            MaxSdkCallbacks.AppOpen.OnAdRevenuePaidEvent -= HandleAppOpenAdRevenuePaid;
-            MaxSdkCallbacks.AppOpen.OnAdClickedEvent -= HandleAppOpenAdClicked;
-            MaxSdkCallbacks.AppOpen.OnAdDisplayedEvent -= HandleAppOpenAdDisplayed;
-            MaxSdkCallbacks.AppOpen.OnAdDisplayFailedEvent -= HandleAppOpenAdDisplayFailed;
-            MaxSdkCallbacks.AppOpen.OnAdHiddenEvent -= HandleAppOpenAdHidden;
-
-            MaxSdkCallbacks.Interstitial.OnAdLoadedEvent -= HandleInterstitialAdLoaded;
-            MaxSdkCallbacks.Interstitial.OnAdLoadFailedEvent -= HandleInterstitialAdFailedToLoad;
-            MaxSdkCallbacks.Interstitial.OnAdRevenuePaidEvent -= HandleInterstitialAdRevenuePaid;
-            MaxSdkCallbacks.Interstitial.OnAdClickedEvent -= HandleInterstitialAdClicked;
-            MaxSdkCallbacks.Interstitial.OnAdDisplayedEvent -= HandleInterstitialAdDisplayed;
-            MaxSdkCallbacks.Interstitial.OnAdDisplayFailedEvent -= HandleInterstitialAdDisplayFailed;
-            MaxSdkCallbacks.Interstitial.OnAdHiddenEvent -= HandleInterstitialAdHidden;
-
-            MaxSdkCallbacks.Rewarded.OnAdLoadedEvent -= HandleRewardedAdLoaded;
-            MaxSdkCallbacks.Rewarded.OnAdLoadFailedEvent -= HandleRewardedAdFailedToLoad;
-            MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent -= HandleRewardedAdRevenuePaid;
-            MaxSdkCallbacks.Rewarded.OnAdClickedEvent -= HandleRewardedAdClicked;
-            MaxSdkCallbacks.Rewarded.OnAdDisplayedEvent -= HandleRewardedAdDisplayed;
-            MaxSdkCallbacks.Rewarded.OnAdDisplayFailedEvent -= HandleRewardedAdDisplayFailed;
-            MaxSdkCallbacks.Rewarded.OnAdHiddenEvent -= HandleRewardedAdHidden;
-            MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent -= HandleRewardedAdReceivedReward;
-
-            MaxSdkCallbacks.Banner.OnAdLoadedEvent -= HandleBannerAdLoaded;
-            MaxSdkCallbacks.Banner.OnAdLoadFailedEvent -= HandleBannerAdFailedToLoad;
-            MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent -= HandleBannerAdRevenuePaid;
-
-            if (!IsInitialized)
-            {
-                return;
-            }
-
-            IsInitialized = false;
+            UnsubscribeCallbacks();
         }
 
         public void LoadAds()
         {
+            AdvanceFullscreenInvocation(Time.unscaledDeltaTime);
         }
 
-        public bool ShowAppOpenAds(Action<bool> callback, string placement)
+        public AdsInvocationHandler ShowAppOpenAds(string placement)
         {
-            return false;
+            if (!IsInitialized || !IsOpenAppAdAvailable)
+                return AdsInvocationHandler.Failed(AdsType.OpenApp, placement, "App-open ads are not available.");
+            if (!UnitIdsMapping.TryGetValue(AdsType.OpenApp, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
+                return AdsInvocationHandler.Failed(AdsType.OpenApp, placement, "App-open ad unit ID is not set.");
+
+            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.OpenApp, placement, unitId.UnitId);
+            if (handler.IsTerminal) return handler;
+            try
+            {
+                MaxSdk.ShowAppOpenAd(unitId.UnitId, placement);
+                SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenCallShow, placement);
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show app-open ad: {0}", exception.Message);
+                FailInvocationStart(handler, "Failed to start app-open ad: " + exception.Message);
+            }
+            return handler;
         }
 
-        public void ShowBanner()
+        public AdsInvocationHandler ShowBanner()
         {
-            if (!IsInitialized)
+            var handler = new AdsInvocationHandler(AdsType.Banner);
+            if (!IsInitialized || !EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Banner) ||
+                !IsBannerAvailable || !BannerState.IsAvailable)
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: SDK is not initialized.");
-                return;
+                handler.CompleteFailed("Banner ads are not available.");
+                return handler;
             }
-
-            if (!EnabledAds.HasFlag(ApplovinMaxAdsEnabledAds.Banner))
+            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: Banner ads are disabled.");
-                return;
+                handler.CompleteFailed("Banner ad unit ID is not set.");
+                return handler;
             }
-
-            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId)
-                || string.IsNullOrEmpty(unitId.UnitId))
-            {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Cannot show banner: Banner ad unit ID is not set.");
-                return;
-            }
-
             try
             {
                 MaxSdk.ShowBanner(unitId.UnitId);
+                _bannerVisibleRequested = true;
+                UpdateBannerState(AdsBannerStatus.Showing, "Banner show command accepted.", true);
+                handler.MarkShowing();
+                handler.CompleteSucceeded("Banner show command accepted.");
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>($"Failed to show banner ad: {ex.Message}");
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Failed to show banner ad: {0}", exception.Message);
+                handler.CompleteFailed("Failed to show banner: " + exception.Message);
             }
+            return handler;
         }
 
-        public void HideBanner()
+        public AdsInvocationHandler HideBanner()
         {
-            if (!IsInitialized)
+            var handler = new AdsInvocationHandler(AdsType.Banner);
+            if (!IsInitialized || !IsBannerAvailable || !BannerState.IsAvailable)
             {
-                return;
+                handler.CompleteFailed("Banner ads are not available.");
+                return handler;
             }
-
-            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId)
-                || string.IsNullOrEmpty(unitId.UnitId))
+            if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
             {
-                return;
+                handler.CompleteFailed("Banner ad unit ID is not set.");
+                return handler;
             }
-
             try
             {
                 MaxSdk.HideBanner(unitId.UnitId);
+                _bannerVisibleRequested = false;
+                UpdateBannerState(AdsBannerStatus.Hidden, "Banner hide command accepted.", true);
+                handler.CompleteSucceeded("Banner hide command accepted.", true);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>($"Failed to hide banner ad: {ex.Message}");
+                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Failed to hide banner ad: {0}", exception.Message);
+                handler.CompleteFailed("Failed to hide banner: " + exception.Message);
             }
+            return handler;
         }
 
-        public bool ShowInterstitialAds(Action<bool> callback, string placement)
+        public AdsInvocationHandler ShowInterstitialAds(string placement)
         {
             if (!IsInitialized || !IsInterstitialAvailable)
-            {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Interstitial Ads are not available.");
-                callback?.Invoke(false);
-                return false;
-            }
+                return AdsInvocationHandler.Failed(AdsType.Interstitial, placement, "Interstitial ads are not available.");
+            if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
+                return AdsInvocationHandler.Failed(AdsType.Interstitial, placement, "Interstitial ad unit ID is not set.");
 
-            if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId)
-                || string.IsNullOrEmpty(unitId.UnitId))
-            {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Interstitial ad unit ID is not set.");
-                callback?.Invoke(false);
-                return false;
-            }
-
+            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.Interstitial, placement, unitId.UnitId);
+            if (handler.IsTerminal) return handler;
             try
             {
-                _interstitialFulfilled = false;
-                MaxSdk.ShowInterstitial(
-                    unitId.UnitId,
-                    placement
-                );
+                MaxSdk.ShowInterstitial(unitId.UnitId, placement);
                 SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.InterCallShow, placement);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                QuickLog.Error<ApplovinMaxAdsServiceProvider>($"Failed to show interstitial ad: {ex.Message}");
-                callback?.Invoke(false);
-                return false;
+                QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show interstitial ad: {0}", exception.Message);
+                FailInvocationStart(handler, "Failed to start interstitial ad: " + exception.Message);
             }
-
-            _interstitialCallback = callback;
-            return true;
+            return handler;
         }
 
-        public bool ShowRewardAds(Action<bool> callback, string placement)
+        public AdsInvocationHandler ShowRewardAds(string placement)
         {
-            if (!IsInitialized)
+            if (!IsInitialized || !IsRewardedAvailable)
+                return AdsInvocationHandler.Failed(AdsType.Rewarded, placement, "Rewarded ads are not available.");
+            if (!UnitIdsMapping.TryGetValue(AdsType.Rewarded, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
+                return AdsInvocationHandler.Failed(AdsType.Rewarded, placement, "Rewarded ad unit ID is not set.");
+
+            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.Rewarded, placement, unitId.UnitId);
+            if (handler.IsTerminal) return handler;
+            try
             {
-                QuickLog.Warning<ApplovinMaxAdsServiceProvider>("Applovin Max SDK is not initialized.");
-                callback?.Invoke(false);
-                return false;
+                MaxSdk.ShowRewardedAd(unitId.UnitId, placement);
+                SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallShow, placement);
             }
-
-            if (IsRewardedAvailable)
+            catch (Exception exception)
             {
-                _rewardFulfilled = false;
-                bool called = false;
-                try
-                {
-                    MaxSdk.ShowRewardedAd(
-                        UnitIdsMapping[AdsType.Rewarded].UnitId,
-                        placement
-                    );
-
-                    _rewardedCallback = callback;
-                    called = true;
-                }
-                catch (Exception ex)
-                {
-                    QuickLog.Error<ApplovinMaxAdsServiceProvider>(
-                        "Failed to show rewarded ad: {0}",
-                        ex.Message
-                    );
-                }
-
-                if (called)
-                {
-                    SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallShow, placement);
-                    return true;
-                }
+                QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show rewarded ad: {0}", exception.Message);
+                FailInvocationStart(handler, "Failed to start rewarded ad: " + exception.Message);
             }
-
-            if (IsInterstitialAvailable)
-            {
-                bool called = false;
-                try
-                {
-                    MaxSdk.ShowInterstitial(
-                        UnitIdsMapping[AdsType.Interstitial].UnitId,
-                        placement
-                    );
-                    _interstitialCallback = callback;
-                    called = true;
-                }
-                catch (Exception ex)
-                {
-                    QuickLog.Error<ApplovinMaxAdsServiceProvider>(
-                        "Failed to show interstitial ad: {0}",
-                        ex.Message
-                    );
-                }
-
-                if (called)
-                {
-                    SendAdsCallShowTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardCallShow, placement);
-                    return true;
-                }
-            }
-
-            QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
-                "Both Rewarded Ads and Interstitial Ads are not available."
-            );
-            InvokeAdsCallbackOnce(ref callback, false);
-            return false;
+            return handler;
         }
 
         #endregion
@@ -551,18 +497,73 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             SendTrackingEvent(type, ("placement", placement));
         }
 
-        private void InvokeAdsCallbackOnce(ref Action<bool> callback, bool param)
+        private void SubscribeCallbacks()
         {
-            lock (this)
-            {
-                Action<bool> copiedInstance = callback;
-                Dispatcher.DispatchOnMainThread(() => { copiedInstance?.Invoke(param); });
-                callback = null;
-            }
+            if (_subscribed) return;
+            _subscribed = true;
+            MaxSdkCallbacks.OnSdkInitializedEvent += HandleMaxSdkInitializedEvents;
+            MaxSdkCallbacks.AppOpen.OnAdLoadedEvent += HandleAppOpenAdLoaded;
+            MaxSdkCallbacks.AppOpen.OnAdLoadFailedEvent += HandleAppOpenAdFailedToLoad;
+            MaxSdkCallbacks.AppOpen.OnAdRevenuePaidEvent += HandleAppOpenAdRevenuePaid;
+            MaxSdkCallbacks.AppOpen.OnAdClickedEvent += HandleAppOpenAdClicked;
+            MaxSdkCallbacks.AppOpen.OnAdDisplayedEvent += HandleAppOpenAdDisplayed;
+            MaxSdkCallbacks.AppOpen.OnAdDisplayFailedEvent += HandleAppOpenAdDisplayFailed;
+            MaxSdkCallbacks.AppOpen.OnAdHiddenEvent += HandleAppOpenAdHidden;
+            MaxSdkCallbacks.Interstitial.OnAdLoadedEvent += HandleInterstitialAdLoaded;
+            MaxSdkCallbacks.Interstitial.OnAdLoadFailedEvent += HandleInterstitialAdFailedToLoad;
+            MaxSdkCallbacks.Interstitial.OnAdRevenuePaidEvent += HandleInterstitialAdRevenuePaid;
+            MaxSdkCallbacks.Interstitial.OnAdClickedEvent += HandleInterstitialAdClicked;
+            MaxSdkCallbacks.Interstitial.OnAdDisplayedEvent += HandleInterstitialAdDisplayed;
+            MaxSdkCallbacks.Interstitial.OnAdDisplayFailedEvent += HandleInterstitialAdDisplayFailed;
+            MaxSdkCallbacks.Interstitial.OnAdHiddenEvent += HandleInterstitialAdHidden;
+            MaxSdkCallbacks.Rewarded.OnAdLoadedEvent += HandleRewardedAdLoaded;
+            MaxSdkCallbacks.Rewarded.OnAdLoadFailedEvent += HandleRewardedAdFailedToLoad;
+            MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent += HandleRewardedAdRevenuePaid;
+            MaxSdkCallbacks.Rewarded.OnAdClickedEvent += HandleRewardedAdClicked;
+            MaxSdkCallbacks.Rewarded.OnAdDisplayedEvent += HandleRewardedAdDisplayed;
+            MaxSdkCallbacks.Rewarded.OnAdDisplayFailedEvent += HandleRewardedAdDisplayFailed;
+            MaxSdkCallbacks.Rewarded.OnAdHiddenEvent += HandleRewardedAdHidden;
+            MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent += HandleRewardedAdReceivedReward;
+            MaxSdkCallbacks.Banner.OnAdLoadedEvent += HandleBannerAdLoaded;
+            MaxSdkCallbacks.Banner.OnAdLoadFailedEvent += HandleBannerAdFailedToLoad;
+            MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent += HandleBannerAdRevenuePaid;
+        }
+
+        private void UnsubscribeCallbacks()
+        {
+            if (!_subscribed) return;
+            _subscribed = false;
+            MaxSdkCallbacks.OnSdkInitializedEvent -= HandleMaxSdkInitializedEvents;
+            MaxSdkCallbacks.AppOpen.OnAdLoadedEvent -= HandleAppOpenAdLoaded;
+            MaxSdkCallbacks.AppOpen.OnAdLoadFailedEvent -= HandleAppOpenAdFailedToLoad;
+            MaxSdkCallbacks.AppOpen.OnAdRevenuePaidEvent -= HandleAppOpenAdRevenuePaid;
+            MaxSdkCallbacks.AppOpen.OnAdClickedEvent -= HandleAppOpenAdClicked;
+            MaxSdkCallbacks.AppOpen.OnAdDisplayedEvent -= HandleAppOpenAdDisplayed;
+            MaxSdkCallbacks.AppOpen.OnAdDisplayFailedEvent -= HandleAppOpenAdDisplayFailed;
+            MaxSdkCallbacks.AppOpen.OnAdHiddenEvent -= HandleAppOpenAdHidden;
+            MaxSdkCallbacks.Interstitial.OnAdLoadedEvent -= HandleInterstitialAdLoaded;
+            MaxSdkCallbacks.Interstitial.OnAdLoadFailedEvent -= HandleInterstitialAdFailedToLoad;
+            MaxSdkCallbacks.Interstitial.OnAdRevenuePaidEvent -= HandleInterstitialAdRevenuePaid;
+            MaxSdkCallbacks.Interstitial.OnAdClickedEvent -= HandleInterstitialAdClicked;
+            MaxSdkCallbacks.Interstitial.OnAdDisplayedEvent -= HandleInterstitialAdDisplayed;
+            MaxSdkCallbacks.Interstitial.OnAdDisplayFailedEvent -= HandleInterstitialAdDisplayFailed;
+            MaxSdkCallbacks.Interstitial.OnAdHiddenEvent -= HandleInterstitialAdHidden;
+            MaxSdkCallbacks.Rewarded.OnAdLoadedEvent -= HandleRewardedAdLoaded;
+            MaxSdkCallbacks.Rewarded.OnAdLoadFailedEvent -= HandleRewardedAdFailedToLoad;
+            MaxSdkCallbacks.Rewarded.OnAdRevenuePaidEvent -= HandleRewardedAdRevenuePaid;
+            MaxSdkCallbacks.Rewarded.OnAdClickedEvent -= HandleRewardedAdClicked;
+            MaxSdkCallbacks.Rewarded.OnAdDisplayedEvent -= HandleRewardedAdDisplayed;
+            MaxSdkCallbacks.Rewarded.OnAdDisplayFailedEvent -= HandleRewardedAdDisplayFailed;
+            MaxSdkCallbacks.Rewarded.OnAdHiddenEvent -= HandleRewardedAdHidden;
+            MaxSdkCallbacks.Rewarded.OnAdReceivedRewardEvent -= HandleRewardedAdReceivedReward;
+            MaxSdkCallbacks.Banner.OnAdLoadedEvent -= HandleBannerAdLoaded;
+            MaxSdkCallbacks.Banner.OnAdLoadFailedEvent -= HandleBannerAdFailedToLoad;
+            MaxSdkCallbacks.Banner.OnAdRevenuePaidEvent -= HandleBannerAdRevenuePaid;
         }
 
         private void HandleMaxSdkInitializedEvents(MaxSdkBase.SdkConfiguration configuration)
         {
+            if (!_subscribed || IsInitialized) return;
             if (IsTestAds)
             {
                 MaxSdk.ShowMediationDebugger();
@@ -767,6 +768,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (!UnitIdsMapping.TryGetValue(AdsType.Banner, out var bannerUnitId)
                 || string.IsNullOrEmpty(bannerUnitId.UnitId))
             {
+                BannerState = new AdsBannerState(AdsBannerStatus.Failed, BannerState.Size,
+                    "Banner ad unit ID is not configured.");
                 QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
                     "Banner ad unit ID is not set. Please check the configuration."
                 );
@@ -781,6 +784,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
             try
             {
+                UpdateBannerState(AdsBannerStatus.Loading, "Banner load requested.");
                 MaxSdk.LoadBanner(bannerUnitId.UnitId);
                 MaxSdk.StartBannerAutoRefresh(bannerUnitId.UnitId);
                 _bannerAutoRefreshing = true;
@@ -789,12 +793,36 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
             catch (Exception ex)
             {
+                IsBannerAvailable = false;
+                BannerState = new AdsBannerState(AdsBannerStatus.Failed, BannerState.Size,
+                    "Banner load request failed: " + ex.Message);
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>(
                     "Failed to load banner ad: {0}",
                     ex.Message
                 );
             }
         }
+
+        private void UpdateBannerState(AdsBannerStatus status, string reason, bool refreshLayout = false)
+        {
+            Vector2 size = BannerState.Size;
+            if (refreshLayout && UnitIdsMapping.TryGetValue(AdsType.Banner, out var unit) &&
+                !string.IsNullOrEmpty(unit.UnitId))
+            {
+                try { size = MaxSdk.GetBannerLayout(unit.UnitId).size; }
+                catch (Exception exception)
+                {
+                    QuickLog.Warning<ApplovinMaxAdsServiceProvider>(
+                        "Could not read banner layout: {0}", exception.Message
+                    );
+                }
+            }
+            BannerState = new AdsBannerState(status, size, reason);
+        }
+
+        private bool IsConfiguredBannerUnit(string unitId) =>
+            UnitIdsMapping.TryGetValue(AdsType.Banner, out var configured) &&
+            string.Equals(configured.UnitId, unitId, StringComparison.Ordinal);
 
         private void SendRevenueTracking(MaxSdkBase.AdInfo info, AdsType type)
         {
@@ -828,31 +856,226 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 _ => MaxSdkBase.AdViewPosition.BottomCenter
             });
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetFullscreenChannel() => _fullscreenChannelQuarantined = false;
+
+        private AdsInvocationHandler BeginFullscreenInvocation(
+            AdsType type,
+            string placement,
+            string unitId)
+        {
+            if (_fullscreenChannelQuarantined)
+                return AdsInvocationHandler.Failed(type, placement,
+                    "A previous fullscreen ad did not close safely; restart the app before showing another ad.");
+            if (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)
+            {
+                return AdsInvocationHandler.Failed(
+                    type,
+                    placement,
+                    "Another fullscreen ad invocation is already active."
+                );
+            }
+
+            var handler = new AdsInvocationHandler(type, placement);
+            _activeFullscreen = new FullscreenInvocation(handler, unitId);
+            return handler;
+        }
+
+        private bool IsCurrentInvocation(AdsInvocationHandler handler) =>
+            handler != null && ReferenceEquals(_activeFullscreen?.Handler, handler) && !handler.IsTerminal;
+
+        private FullscreenInvocation GetActiveInvocation(AdsType type, string unitId, string eventPlacement = null)
+        {
+            FullscreenInvocation invocation = _activeFullscreen;
+            if (invocation == null || invocation.Handler.IsTerminal || invocation.Handler.AdType != type)
+                return null;
+            if (!string.IsNullOrEmpty(unitId) &&
+                !string.Equals(invocation.UnitId, unitId, StringComparison.Ordinal))
+                return null;
+            if (!string.IsNullOrEmpty(eventPlacement) &&
+                !string.Equals(invocation.Handler.Placement, eventPlacement, StringComparison.Ordinal))
+                return null;
+            return invocation;
+        }
+
+        private void MarkFullscreenDisplayed(AdsType type, string unitId, string placement)
+        {
+            GetActiveInvocation(type, unitId, placement)?.Handler.MarkShowing();
+        }
+
+        private void MarkRewardEarned(string unitId, string placement)
+        {
+            FullscreenInvocation invocation = GetActiveInvocation(AdsType.Rewarded, unitId, placement);
+            if (invocation == null) return;
+            // Record economic credit before Showing can invoke reentrant user code.
+            invocation.Handler.MarkRewardEarned();
+            if (!invocation.Handler.WasDisplayed) invocation.Handler.MarkShowing();
+            if (invocation.Hidden)
+                CompleteInvocationSucceeded(invocation, "Reward earned after ad close.");
+        }
+
+        private void MarkFullscreenHidden(AdsType type, string unitId, string placement)
+        {
+            FullscreenInvocation invocation = GetActiveInvocation(type, unitId, placement);
+            if (invocation == null) return;
+
+            invocation.Hidden = true;
+            invocation.RewardWaitElapsed = 0;
+            invocation.SkipRewardWaitTick = true;
+            invocation.Handler.MarkClosed();
+
+            if (type != AdsType.Rewarded)
+            {
+                CompleteInvocationSucceeded(invocation, "Fullscreen ad closed.");
+                return;
+            }
+
+            if (invocation.Handler.RewardEarned)
+                CompleteInvocationSucceeded(invocation, "Reward earned and ad closed.");
+        }
+
+        private void FailFullscreenInvocation(AdsType type, string unitId, string placement, string reason)
+        {
+            FullscreenInvocation invocation = GetActiveInvocation(type, unitId, placement);
+            if (invocation == null) return;
+            if (invocation.Handler.RewardEarned)
+                invocation.Handler.CompleteSucceeded(reason, invocation.Handler.WasClosed);
+            else
+                invocation.Handler.CompleteFailed(reason, invocation.Handler.WasClosed);
+            ReleaseInvocation(invocation);
+        }
+
+        private void FailInvocationStart(AdsInvocationHandler handler, string reason)
+        {
+            if (!IsCurrentInvocation(handler)) return;
+            handler.CompleteFailed(reason, handler.WasClosed);
+            ReleaseInvocation(_activeFullscreen);
+        }
+
+        private void CompleteInvocationSucceeded(FullscreenInvocation invocation, string reason)
+        {
+            if (invocation == null || !IsCurrentInvocation(invocation.Handler)) return;
+            invocation.Handler.CompleteSucceeded(reason, invocation.Handler.WasClosed);
+            ReleaseInvocation(invocation);
+        }
+
+        private void CancelInvocation(FullscreenInvocation invocation, string reason)
+        {
+            if (invocation == null || !IsCurrentInvocation(invocation.Handler)) return;
+            invocation.Handler.CompleteCancelled(reason, invocation.Handler.WasClosed);
+            ReleaseInvocation(invocation);
+        }
+
+        private void ReleaseInvocation(FullscreenInvocation invocation)
+        {
+            if (!ReferenceEquals(_activeFullscreen, invocation)) return;
+            _activeFullscreen = null;
+            if (_fullscreenChannelQuarantined) return;
+            switch (invocation.Handler.AdType)
+            {
+                case AdsType.Rewarded:
+                    _rewardedHandle?.Execute();
+                    break;
+                case AdsType.Interstitial:
+                    _interstitialHandle?.Execute();
+                    break;
+                case AdsType.OpenApp:
+                    _openAppHandle?.Execute();
+                    break;
+            }
+        }
+
+        private void AdvanceFullscreenInvocation(float unscaledDeltaTime)
+        {
+            FullscreenInvocation invocation = _activeFullscreen;
+            if (invocation == null || invocation.Handler.IsTerminal)
+            {
+                _activeFullscreen = null;
+                return;
+            }
+
+            float delta = float.IsNaN(unscaledDeltaTime) || float.IsInfinity(unscaledDeltaTime)
+                ? 0 : Mathf.Max(0, unscaledDeltaTime);
+            invocation.Elapsed += delta;
+
+            if (invocation.Hidden && invocation.Handler.AdType == AdsType.Rewarded &&
+                !invocation.Handler.RewardEarned)
+            {
+                // The first frame after native close can include the whole video.
+                // Start an independent grace clock on the following provider tick.
+                if (invocation.SkipRewardWaitTick)
+                {
+                    invocation.SkipRewardWaitTick = false;
+                    return;
+                }
+                invocation.RewardWaitElapsed += delta;
+                if (invocation.RewardWaitElapsed >= rewardCallbackTimeoutSeconds)
+                    CancelInvocation(invocation, "Reward callback did not arrive after the ad closed.");
+                return;
+            }
+
+            if (!invocation.Handler.WasDisplayed && !invocation.Hidden &&
+                invocation.Elapsed >= showStartTimeoutSeconds)
+            {
+                _fullscreenChannelQuarantined = true;
+                invocation.Handler.CompleteFailed("The ad did not start before its timeout; native closure is unknown.");
+                ReleaseInvocation(invocation);
+                return;
+            }
+
+            if (invocation.Elapsed < requestTimeoutSeconds) return;
+            if (!invocation.Hidden) _fullscreenChannelQuarantined = true;
+            if (invocation.Handler.RewardEarned)
+                CompleteInvocationSucceeded(invocation, "Reward was earned before the invocation timeout.");
+            else
+                CancelInvocation(invocation, "The fullscreen ad invocation timed out; native closure is unknown.");
+        }
+
+        private void TerminateActiveInvocationForCleanup()
+        {
+            FullscreenInvocation invocation = _activeFullscreen;
+            if (invocation == null)
+                return;
+
+            if (!invocation.Hidden) _fullscreenChannelQuarantined = true;
+            if (invocation.Handler.RewardEarned)
+                invocation.Handler.CompleteSucceeded(
+                    "Provider cleanup followed a confirmed reward.",
+                    invocation.Handler.WasClosed
+                );
+            else
+                invocation.Handler.CompleteCancelled(
+                    "Provider was cleaned up before the invocation completed.",
+                    invocation.Handler.WasClosed
+                );
+
+            _activeFullscreen = null;
+        }
+
         #region Rewarded Ad Callbacks
 
         private void HandleRewardedAdReceivedReward(string arg1, MaxSdkBase.Reward reward, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardRewardReceived);
-            _rewardFulfilled = true;
+            MarkRewardEarned(arg1, info?.Placement);
         }
 
         private void HandleRewardedAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardHidden);
-            InvokeAdsCallbackOnce(ref _rewardedCallback, _rewardFulfilled);
+            MarkFullscreenHidden(AdsType.Rewarded, arg1, info?.Placement);
         }
 
         private void HandleRewardedAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardDisplayFailed);
-            InvokeAdsCallbackOnce(ref _rewardedCallback, false);
+            FailFullscreenInvocation(AdsType.Rewarded, arg1, info2?.Placement, "Rewarded ad display failed.");
         }
 
         private void HandleRewardedAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardDisplayed);
-            _rewardFulfilled = false;
-            _rewardedHandle.Execute();
+            MarkFullscreenDisplayed(AdsType.Rewarded, arg1, info?.Placement);
         }
 
         private void HandleRewardedAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -868,13 +1091,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleRewardedAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
-            _rewardedHandle.Fail(_rewardedLoadGen);
+            _rewardedHandle?.Fail(_rewardedLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardFailedToLoad);
         }
 
         private void HandleRewardedAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
-            _rewardedHandle.Complete(_rewardedLoadGen);
+            _rewardedHandle?.Complete(_rewardedLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Rewarded Ad is loaded and ready to be shown."
@@ -888,44 +1111,41 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterHidden);
-            InvokeAdsCallbackOnce(ref _interstitialCallback, _interstitialFulfilled);
+            MarkFullscreenHidden(AdsType.Interstitial, arg1, info?.Placement);
         }
 
         private void HandleInterstitialAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterDisplayFailed);
-            InvokeAdsCallbackOnce(ref _interstitialCallback, false);
+            FailFullscreenInvocation(AdsType.Interstitial, arg1, info2?.Placement, "Interstitial ad display failed.");
         }
 
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterDisplayed);
-            _interstitialFulfilled = true;
-            _interstitialHandle.Execute();
+            MarkFullscreenDisplayed(AdsType.Interstitial, arg1, info?.Placement);
         }
 
         private void HandleInterstitialAdClicked(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterClicked);
-            _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterRevenuePaid);
             SendRevenueTracking(info, AdsType.Interstitial);
-            _interstitialFulfilled = true;
         }
 
         private void HandleInterstitialAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
-            _interstitialHandle.Fail(_interstitialLoadGen);
+            _interstitialHandle?.Fail(_interstitialLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterFailedToLoad);
         }
 
         private void HandleInterstitialAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
-            _interstitialHandle.Complete(_interstitialLoadGen);
+            _interstitialHandle?.Complete(_interstitialLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Interstitial Ad is loaded and ready to be shown."
@@ -938,23 +1158,32 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleBannerAdRevenuePaid(string arg1, MaxSdkBase.AdInfo info)
         {
+            if (!IsConfiguredBannerUnit(arg1)) return;
+            UpdateBannerState(_bannerVisibleRequested ? AdsBannerStatus.Showing : AdsBannerStatus.Available,
+                "Banner impression callback received.", true);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerRevenuePaid);
             SendRevenueTracking(info, AdsType.Banner);
         }
 
         private void HandleBannerAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
+            if (!IsConfiguredBannerUnit(arg1)) return;
             _bannerAutoRefreshing = false;
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerFailedToLoad);
             IsBannerAvailable = false;
-            _bannerHandle.Fail(_bannerLoadGen);
+            BannerState = new AdsBannerState(AdsBannerStatus.Failed, BannerState.Size,
+                "Banner failed to load: " + (info?.Message ?? "unknown error"));
+            _bannerHandle?.Fail(_bannerLoadGen);
         }
 
         private void HandleBannerAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
+            if (!IsConfiguredBannerUnit(arg1)) return;
+            UpdateBannerState(_bannerVisibleRequested ? AdsBannerStatus.Showing : AdsBannerStatus.Available,
+                "Banner loaded.", true);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.BannerLoaded);
             IsBannerAvailable = true;
-            _bannerHandle.Complete(_bannerLoadGen);
+            _bannerHandle?.Complete(_bannerLoadGen);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Banner Ad is loaded and ready to be shown."
             );
@@ -967,17 +1196,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleAppOpenAdHidden(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenHidden);
-            _openAppHandle.Execute();
+            MarkFullscreenHidden(AdsType.OpenApp, arg1, info?.Placement);
         }
 
         private void HandleAppOpenAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenDisplayFailed);
+            FailFullscreenInvocation(AdsType.OpenApp, arg1, info2?.Placement, "App-open ad display failed.");
         }
 
         private void HandleAppOpenAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenDisplayed);
+            MarkFullscreenDisplayed(AdsType.OpenApp, arg1, info?.Placement);
         }
 
         private void HandleAppOpenAdClicked(string arg1, MaxSdkBase.AdInfo info)
@@ -993,13 +1224,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         private void HandleAppOpenAdFailedToLoad(string arg1, MaxSdkBase.ErrorInfo info)
         {
-            _openAppHandle.Fail(_openAppLoadGen);
+            _openAppHandle?.Fail(_openAppLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenFailedToLoad);
         }
 
         private void HandleAppOpenAdLoaded(string arg1, MaxSdkBase.AdInfo info)
         {
-            _openAppHandle.Complete(_openAppLoadGen);
+            _openAppHandle?.Complete(_openAppLoadGen);
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenLoaded);
             QuickLog.Info<ApplovinMaxAdsServiceProvider>(
                 "Open App Ad is loaded and ready to be shown."
@@ -1008,6 +1239,24 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         #endregion
 
+        #endregion
+
+        #region Nested Types
+        private sealed class FullscreenInvocation
+        {
+            internal readonly AdsInvocationHandler Handler;
+            internal readonly string UnitId;
+            internal float Elapsed;
+            internal float RewardWaitElapsed;
+            internal bool Hidden;
+            internal bool SkipRewardWaitTick;
+
+            internal FullscreenInvocation(AdsInvocationHandler handler, string unitId)
+            {
+                Handler = handler;
+                UnitId = unitId ?? string.Empty;
+            }
+        }
         #endregion
     }
 }
