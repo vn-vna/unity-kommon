@@ -1,7 +1,7 @@
-﻿using UnityEditor;
+﻿﻿using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound.Editor
+namespace Com.Scheherazade.Common.Sound.Editor
 {
     [CustomPropertyDrawer(typeof(SoundDefinitionRef))]
     internal sealed class SoundDefinitionRefPropertyDrawer : PropertyDrawer

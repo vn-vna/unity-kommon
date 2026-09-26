@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     [AddComponentMenu("Scheherazade/Sound Manager")]
     [DontDestroyOnLoad]

@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
+namespace Com.Scheherazade.Common.Integration.RemoteConfig
 {
     public interface IRemoteConfigManager
     {

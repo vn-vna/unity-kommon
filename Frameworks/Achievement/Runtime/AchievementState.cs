@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Achievement
+namespace Com.Scheherazade.Common.Achievement
 {
     [Serializable]
     public struct AchievementState

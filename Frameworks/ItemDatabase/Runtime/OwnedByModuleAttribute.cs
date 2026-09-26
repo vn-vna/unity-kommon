@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Applied to TagDefinition subclasses to declare that the tag and

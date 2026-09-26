@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
     public enum ActionState
     {

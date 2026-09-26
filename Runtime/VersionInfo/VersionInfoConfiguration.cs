@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC
+namespace Com.Scheherazade.Common.VIC
 {
     [CreateAssetMenu(
         fileName = "VersionInfoConfiguration",

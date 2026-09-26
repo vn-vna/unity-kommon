@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>
     /// Contract for every noise module in the NoiseBaker pipeline.

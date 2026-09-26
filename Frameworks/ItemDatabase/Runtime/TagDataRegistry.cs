@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Maps TagDefinition types to their associated ITagData types
@@ -239,7 +239,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
         {
             if (string.IsNullOrEmpty(legacyTypeName)) return null;
 
-            Type legacyType = Type.GetType(legacyTypeName);
+            Type legacyType = ScheherazadeTypeNameMigration.ResolveType(legacyTypeName);
             return legacyType != null
                 && typeof(TagDefinition).IsAssignableFrom(legacyType)
                 ? legacyType

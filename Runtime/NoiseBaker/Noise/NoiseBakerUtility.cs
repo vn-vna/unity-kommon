@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>Shared math helpers for the noise modules.</summary>
     public static class NoiseBakerUtility

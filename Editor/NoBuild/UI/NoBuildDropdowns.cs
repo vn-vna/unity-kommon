@@ -5,12 +5,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Editor;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     internal static class NoBuildDropdowns
     {
@@ -132,7 +132,26 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             editorWindow.Close();
                         }
 
-                        int valid = set.scenes.Count(sl => sl.enabled && sl.IsValid);
+                        EditorGUI.BeginDisabledGroup(
+                            EditorApplication
+                                .isPlayingOrWillChangePlaymode);
+                        if (GUILayout.Button(
+                                new GUIContent(
+                                    "▶",
+                                    $"Play from scene set "
+                                    + $"'{set.setName}'"),
+                                GUILayout.Width(24),
+                                GUILayout.Height(20)))
+                        {
+                            if (SceneSwitcher.PlayFromSet(set))
+                            {
+                                _s.activeSceneSetIndex = i;
+                                EditorUtility.SetDirty(_s);
+                                NoBuildToolbarState.RequestRepaint();
+                                editorWindow.Close();
+                            }
+                        }
+                        EditorGUI.EndDisabledGroup();
 
                         EditorGUILayout.EndHorizontal();
                     }
@@ -163,7 +182,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     for (int i = 0; i < combos.Count; i++)
                     {
                         SceneCombination c = combos[i];
-                        bool valid = c.IsValid;
+                        bool valid = c.enabled
+                            && c.ResolveScenes(activeSet).Count > 0;
 
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
@@ -262,7 +282,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         editorWindow.Close();
                     }
 
-                    int n = set.slots?.Count(sl => sl.enabled) ?? 0;
+                    int n = set.slots?.Count(
+                        slot => slot != null && slot.enabled) ?? 0;
                     EditorGUILayout.EndHorizontal();
                 }
 
@@ -515,7 +536,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     onSelected)
             {
                 _onSelected = onSelected;
-                _devices = AdbUtility.GetDevices();
+                _devices = AdbUtility.GetDevices()
+                    .Where(device => device.State == "device")
+                    .ToList();
             }
 
             public override Vector2 GetWindowSize()

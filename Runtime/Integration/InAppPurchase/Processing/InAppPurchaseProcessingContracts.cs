@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Processing
 {
     public enum InAppPurchaseOrderSource { Direct, Fetched, Simulated }
     public enum InAppPurchaseOrderKind { Pending, Confirmed, Deferred }

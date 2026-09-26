@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     public enum GridManagerStatus
     {

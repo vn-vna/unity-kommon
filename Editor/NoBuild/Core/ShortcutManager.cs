@@ -7,7 +7,7 @@ using UnityEditor;
 using UnityEditor.ShortcutManagement;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Registers keyboard shortcuts. Shift+Ctrl+F1..F12 switch scene sets.
@@ -75,9 +75,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (s == null) return;
             if (index < 0 || index >= s.sceneSets.Count) return;
 
-            s.activeSceneSetIndex = index;
-            EditorUtility.SetDirty(s);
-            SceneSwitcher.SwitchToSet(s.sceneSets[index]);
+            if (SceneSwitcher.SwitchToSet(
+                    s.sceneSets[index]))
+            {
+                s.activeSceneSetIndex = index;
+                EditorUtility.SetDirty(s);
+                NoBuildToolbarState.RequestRepaint();
+            }
         }
 
         private static void HandleComboSwitch(int index)

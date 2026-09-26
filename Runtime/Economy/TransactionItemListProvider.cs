@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     public abstract class TransactionItemListProvider :
         ScriptableObject

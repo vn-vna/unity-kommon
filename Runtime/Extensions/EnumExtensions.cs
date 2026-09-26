@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace Com.Hapiga.Scheherazade.Common.Extensions
+namespace Com.Scheherazade.Common.Extensions
 {
     public static class EnumExtensions
     {

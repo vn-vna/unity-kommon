@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Game-state gates the board honors while ticking. Null-safe: when a board

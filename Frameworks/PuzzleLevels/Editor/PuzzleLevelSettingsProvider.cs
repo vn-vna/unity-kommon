@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.AsyncResourceLoader.Editor;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEditor.PackageManager.Requests;
@@ -11,7 +11,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 {
     public class PuzzleLevelSettingsProvider : SettingsProvider
     {

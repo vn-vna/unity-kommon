@@ -1,7 +1,7 @@
 using System;
 using UnityEditor;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Framework.State
+namespace Com.Scheherazade.Common.Editor.Framework.State
 {
     public enum EditorStateScope
     {
@@ -24,7 +24,7 @@ namespace Com.Hapiga.Scheherazade.Common.Editor.Framework.State
         #region Constants
 
         private const string KeyPrefix =
-            "Com.Hapiga.Scheherazade.Editor.Framework";
+            "Com.Scheherazade.Editor.Framework";
 
         #endregion
 

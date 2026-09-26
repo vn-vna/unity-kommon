@@ -1,10 +1,10 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard
+namespace Com.Scheherazade.Common.Leaderboard
 {
     public class Leaderboard
     {

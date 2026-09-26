@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>
     /// A template asset wrapping a full <see cref="NoiseBakerSettings"/>.

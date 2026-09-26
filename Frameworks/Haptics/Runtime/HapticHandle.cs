@@ -1,7 +1,7 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Haptics;
+using Com.Scheherazade.Common.Haptics;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Zero-alloc address of an active rhythm playback. The generation counter

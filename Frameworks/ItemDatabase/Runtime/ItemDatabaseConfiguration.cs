@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Central configuration for the Item Database framework.

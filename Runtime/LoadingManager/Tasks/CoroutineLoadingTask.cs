@@ -1,7 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// Wraps an <see cref="IEnumerator"/> loading routine. The manager drives it through

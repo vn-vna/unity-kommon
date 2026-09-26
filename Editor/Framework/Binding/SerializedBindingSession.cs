@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityObject = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Framework.Binding
+namespace Com.Scheherazade.Common.Editor.Framework.Binding
 {
     public interface ISerializedBindingSession : IDisposable
     {

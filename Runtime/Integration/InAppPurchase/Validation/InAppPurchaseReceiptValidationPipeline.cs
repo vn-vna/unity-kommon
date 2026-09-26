@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
 {
     [Serializable]
     public sealed class InAppPurchaseReceiptValidationPlatformSteps

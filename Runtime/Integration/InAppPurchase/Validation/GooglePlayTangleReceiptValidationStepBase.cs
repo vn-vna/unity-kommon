@@ -1,13 +1,13 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
 #if UNITY_PURCHASING
 using UnityEngine.Purchasing.Security;
 #endif
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
 {
     /// <summary>
     /// Project subclasses bind generated obfuscation data directly by overriding

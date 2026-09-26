@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// A self-reporting unit of tracked work during a loading session.

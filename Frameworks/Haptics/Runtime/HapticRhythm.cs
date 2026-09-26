@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Rhythm definition sub-asset stored inside HapticConfiguration.

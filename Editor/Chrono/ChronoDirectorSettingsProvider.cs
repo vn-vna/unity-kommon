@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Chrono;
-using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
+using Com.Scheherazade.Common.Chrono;
+using Com.Scheherazade.Common.Editor.ScriptGeneration;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono.Editor
+namespace Com.Scheherazade.Common.Chrono.Editor
 {
     internal sealed class ChronoDirectorSettingsProvider : SettingsProvider
     {

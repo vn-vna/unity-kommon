@@ -1,7 +1,7 @@
 using System.Linq;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     public interface IManagableScriptableDatabase<T>
         where T : ScriptableObject

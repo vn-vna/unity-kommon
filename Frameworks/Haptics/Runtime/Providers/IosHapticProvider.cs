@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// iOS provider — CHHapticEngine (iOS 13+) with

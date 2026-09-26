@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Defines the keyframe timelines behind each <see cref="HapticRhythmTemplate"/>.

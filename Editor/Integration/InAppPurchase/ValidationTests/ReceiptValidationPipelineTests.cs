@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation.Editor.Tests
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation.Editor.Tests
 {
     public sealed class ReceiptValidationPipelineTests
     {

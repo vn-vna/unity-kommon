@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Thrown when attempting to delete or mutate an entity owned by

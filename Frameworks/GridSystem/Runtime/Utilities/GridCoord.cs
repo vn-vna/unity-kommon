@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Integer coordinate used across the Grid System (cell position, size,

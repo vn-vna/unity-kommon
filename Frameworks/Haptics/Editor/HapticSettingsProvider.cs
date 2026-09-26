@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics.Editor
+namespace Com.Scheherazade.Common.Haptics.Editor
 {
     internal sealed class HapticSettingsProvider : SettingsProvider
     {

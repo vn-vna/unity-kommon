@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.Common.DataSync;
 using UnityEngine.Scripting;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     [Serializable]
     [Preserve]

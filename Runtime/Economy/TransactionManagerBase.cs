@@ -2,15 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using Com.Hapiga.FallAway.Economy;
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Economy;
-using Com.Hapiga.Schehrazade.IS;
+using Com.Scheherazade.FallAway.Economy;
+using Com.Scheherazade.FallAway.Inventory;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Economy;
+using Com.Scheherazade.IS;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     [DisallowMultipleComponent]
     [AddComponentMenu("FallAway/Manager/Transaction Manager")]
@@ -153,7 +153,7 @@ namespace Com.Hapiga.Scheherazade.Economy
     }
 }
 
-namespace Com.Hapiga.FallAway.Economy
+namespace Com.Scheherazade.FallAway.Economy
 {
     public struct TransactionResult
     {

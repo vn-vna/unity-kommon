@@ -4,13 +4,13 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
 {
     [AsyncResourceManagerHost("Project/Tools/Puzzle Levels")]
     public class PuzzleLevelManager :

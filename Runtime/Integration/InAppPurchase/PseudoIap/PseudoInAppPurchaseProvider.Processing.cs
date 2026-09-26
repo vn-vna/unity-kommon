@@ -1,10 +1,10 @@
 using System;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     public partial class PseudoInAppPurchaseProvider
     {
@@ -91,7 +91,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             );
         }
 
-        private void BuyProductWithProcessing(string productId)
+        private void BuyProductWithProcessing(string productId, PurchaseHandleSource source)
         {
             IInAppPurchaseProduct product;
             try
@@ -102,23 +102,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             }
             catch (Exception exception)
             {
-                RejectSimulation(null, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot read the product catalog: " + exception.Message);
+                RejectSimulation(source, null, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot read the product catalog: " + exception.Message);
                 return;
             }
 
             if (!IsInitialized || _processingPipeline == null)
             {
-                RejectSimulation(product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Unavailable, "The pseudo provider is not initialized.");
+                RejectSimulation(source, product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Unavailable, "The pseudo provider is not initialized.");
                 return;
             }
             if (product == null)
             {
-                RejectSimulation(null, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "The product is not in the configured catalog.");
+                RejectSimulation(source, null, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "The product is not in the configured catalog.");
                 return;
             }
             if (_pendingSimulation != null)
             {
-                RejectSimulation(product, InAppPurchasePipelineOutcome.Busy, PurchaseStatus.Busy, "A simulated purchase is already pending.");
+                RejectSimulation(source, product, InAppPurchasePipelineOutcome.Busy, PurchaseStatus.Busy, "A simulated purchase is already pending.");
                 return;
             }
 
@@ -138,11 +138,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             }
             catch (Exception exception)
             {
-                RejectSimulation(product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot create the simulated order: " + exception.Message);
+                RejectSimulation(source, product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot create the simulated order: " + exception.Message);
                 return;
             }
 
-            var pending = new PendingSimulation(product, order);
+            var pending = new PendingSimulation(product, order, source);
             int generation = _processingGeneration;
             _pendingSimulation = pending;
             LastProcessingResult = null;
@@ -159,7 +159,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             catch (Exception exception)
             {
                 _pendingSimulation = null;
-                RejectSimulation(product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed,
+                RejectSimulation(source, product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed,
                     "The simulation policy failed: " + exception.Message);
                 return;
             }
@@ -172,6 +172,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                         : simulatedOutcome == PurchaseStatus.Busy ? InAppPurchasePipelineOutcome.Busy
                         : InAppPurchasePipelineOutcome.Rejected, null, "The simulated purchase returned " + simulatedOutcome + "."
                 );
+                source.TryComplete(simulatedOutcome, LastProcessingResult.Reason);
                 NotifyProcessing(simulatedOutcome == PurchaseStatus.Deferred ? PurchaseDeferred : PurchaseFailed, product);
                 return;
             }
@@ -191,7 +192,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             {
                 if (!IsCurrentSimulation(pending, generation)) return;
                 _pendingSimulation = null;
-                RejectSimulation(product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot schedule the simulated purchase: " + exception.Message);
+                RejectSimulation(source, product, InAppPurchasePipelineOutcome.Rejected, PurchaseStatus.Failed, "Cannot schedule the simulated purchase: " + exception.Message);
             }
         }
 
@@ -228,16 +229,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             _pendingSimulation = null;
             if (result.Outcome == InAppPurchasePipelineOutcome.Completed)
             {
+                VerifiedInAppPurchaseTransaction transaction = pending.Publication ?? result.Transaction;
+                LastPurchaseStatus = PurchaseStatus.Confirmed;
+                pending.Source.TryComplete(
+                    PurchaseStatus.Confirmed,
+                    transactionId: transaction?.TransactionId
+                );
                 if (pending.Publication != null)
-                {
-                    LastPurchaseStatus = PurchaseStatus.Confirmed;
                     NotifyProcessing(pending.Publication.IsRestoration ? ProductRestored : PurchaseSucceeded, pending.Product);
-                }
                 return;
             }
             if (result.Outcome == InAppPurchasePipelineOutcome.Deferred)
             {
                 LastPurchaseStatus = PurchaseStatus.Deferred;
+                pending.Source.TryComplete(PurchaseStatus.Deferred, result.Reason, result.Transaction?.TransactionId);
                 NotifyProcessing(PurchaseDeferred, pending.Product);
                 return;
             }
@@ -246,6 +251,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             // requiring that handoff must reject simulation rather than grant it.
             LastPurchaseStatus = result.Outcome == InAppPurchasePipelineOutcome.WaitForStore
                 ? PurchaseStatus.Pending : PurchaseStatus.Failed;
+            pending.Source.TryComplete(LastPurchaseStatus, result.Reason, result.Transaction?.TransactionId);
             NotifyProcessing(PurchaseFailed, pending.Product);
         }
 
@@ -254,6 +260,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             ReferenceEquals(_pendingSimulation, pending) && _processingPipeline != null;
 
         private void RejectSimulation(
+            PurchaseHandleSource source,
             IInAppPurchaseProduct product,
             InAppPurchasePipelineOutcome outcome,
             PurchaseStatus status,
@@ -262,6 +269,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         {
             LastPurchaseStatus = status;
             LastProcessingResult = new InAppPurchasePipelineResult(outcome, null, reason);
+            source?.TryComplete(status, reason);
             NotifyProcessing(PurchaseFailed, product);
         }
 
@@ -270,9 +278,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             ++_processingGeneration;
             if (_pendingSimulation != null)
             {
+                const string reason = "The simulated purchase was cancelled by provider cleanup.";
                 LastProcessingResult = new InAppPurchasePipelineResult(
-                    InAppPurchasePipelineOutcome.Disposed, null, "The simulated purchase was cancelled by provider cleanup."
+                    InAppPurchasePipelineOutcome.Disposed, null, reason
                 );
+                _pendingSimulation.Source.TryComplete(PurchaseStatus.Pending, reason);
             }
             _pendingSimulation = null;
             var pipeline = _processingPipeline;
@@ -299,15 +309,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         {
             internal readonly IInAppPurchaseProduct Product;
             internal readonly InAppPurchaseOrderData Order;
+            internal readonly PurchaseHandleSource Source;
             internal bool Ready;
             internal float RetryRemaining;
             internal int Attempts = 1;
             internal VerifiedInAppPurchaseTransaction Publication;
 
-            internal PendingSimulation(IInAppPurchaseProduct product, InAppPurchaseOrderData order)
+            internal PendingSimulation(
+                IInAppPurchaseProduct product,
+                InAppPurchaseOrderData order,
+                PurchaseHandleSource source
+            )
             {
                 Product = product;
                 Order = order;
+                Source = source;
             }
         }
         #endregion

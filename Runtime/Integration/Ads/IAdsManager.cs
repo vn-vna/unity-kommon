@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     public interface IAdsManager
     {

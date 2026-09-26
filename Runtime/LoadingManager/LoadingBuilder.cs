@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// Root fluent builder for composing a loading session (mirrors

@@ -1,9 +1,9 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.Common.Extensions;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Com.Hapiga.Scheherazade.Common.UserInterface
+namespace Com.Scheherazade.Common.UserInterface
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(RectTransform))]
@@ -19,30 +19,22 @@ namespace Com.Hapiga.Scheherazade.Common.UserInterface
         AnimationHandle IUIAnimatedElement.HideAnimation => PerformHideAnimation();
 
         public RectTransform RectTransform => rectTransform;
-        public Image Image => image;
         #endregion
 
         #region Serialized Fields
         [SerializeField]
         [HideInInspector]
         private RectTransform rectTransform;
-
-        [SerializeField]
-        [HideInInspector]
-        private Image image;
         #endregion
 
         #region Unity Methods
         private void Awake()
-        {
-            Image.color = Color.clear;
-        }
+        { }
 
 #if UNITY_EDITOR
         private void OnValidate()
         {
             rectTransform = GetComponent<RectTransform>();
-            image = GetComponent<Image>();
         }
 #endif
         #endregion

@@ -1,8 +1,8 @@
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 using UnityEngine.Audio;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     /// <summary>
     /// Default / primary provider: plays through <see cref="AudioSourcePlayerPool"/>.

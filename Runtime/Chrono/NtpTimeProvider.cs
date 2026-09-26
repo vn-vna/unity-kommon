@@ -5,11 +5,11 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     [CreateAssetMenu(fileName = "NtpTimeProvider", menuName = "Scheherazade/Chrono/NTP Time Provider")]
     public class NtpTimeProvider : TimeProviderBase, ITickableTimeProvider

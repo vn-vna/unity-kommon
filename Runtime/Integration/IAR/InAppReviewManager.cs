@@ -1,10 +1,10 @@
 using System;
 using System.Collections;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
+namespace Com.Scheherazade.Common.Integration.IAR
 {
     public abstract class InAppReviewManagerBase<T> :
         SingletonScriptableObject<T>,

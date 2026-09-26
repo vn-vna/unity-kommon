@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// Polling delegate-based task for cheap/uncoupled work. Progress is normally

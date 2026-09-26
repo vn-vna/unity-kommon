@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// A single timeline keyframe of a haptic rhythm.

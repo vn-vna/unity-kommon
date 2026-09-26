@@ -1,9 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
+namespace Com.Scheherazade.Common.ItemDatabase.Middlewares
 {
     /// <summary>
     /// Guards expirable items. Runs as a real middleware hook: it rejects

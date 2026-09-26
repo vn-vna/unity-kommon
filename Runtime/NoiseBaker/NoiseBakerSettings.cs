@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>Sub-settings for <see cref="FractalNoise"/>.</summary>
     [Serializable]

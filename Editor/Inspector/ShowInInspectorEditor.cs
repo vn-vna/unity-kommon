@@ -5,7 +5,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Inspector
+namespace Com.Scheherazade.Common.Inspector
 {
 
     [CustomEditor(typeof(MonoBehaviour), true)]

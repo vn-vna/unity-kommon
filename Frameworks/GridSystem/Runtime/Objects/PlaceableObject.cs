@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Scriptable-delivered placeable shape config (drop-car

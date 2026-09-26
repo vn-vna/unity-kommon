@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
+namespace Com.Scheherazade.Common.ItemDatabase.Middlewares
 {
     [ItemDatabaseMiddleware(DefaultPriority = 100,
         Description = "Compatibility hook. Capacity-aware stacking is enforced atomically by the Item Database engine.")]

@@ -5,14 +5,14 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using Firebase.RemoteConfig;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
+namespace Com.Scheherazade.Common.Integration.RemoteConfig
 {
     public enum FirebaseRemoteValueType { String, Boolean, Integer, Float }
 

@@ -4,13 +4,13 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Editor;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
+namespace Com.Scheherazade.Common.AsyncResourceLoader.Editor
 {
     [CustomEditor(typeof(CatalogBuilderConfig))]
     public class CatalogBuilderConfigEditor : UnityEditor.Editor

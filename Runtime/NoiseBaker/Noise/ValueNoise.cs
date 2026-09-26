@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>Interpolation fade used by <see cref="ValueNoise"/>.</summary>
     public enum FadeType

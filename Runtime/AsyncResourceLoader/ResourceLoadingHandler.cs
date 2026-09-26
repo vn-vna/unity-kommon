@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     public class ResourceLoadingHandler<ResourceType>
         where ResourceType : class

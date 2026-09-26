@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common
+namespace Com.Scheherazade.Common
 {
     using IntegrationGlobal = Integration.Integration;
 
@@ -366,18 +366,7 @@ namespace Com.Hapiga.Scheherazade.Common
 
         private static System.Type ResolveType(string typeName)
         {
-            System.Type type = System.Type.GetType(typeName);
-            if (type != null)
-                return type;
-
-            foreach (System.Reflection.Assembly asm in System.AppDomain.CurrentDomain.GetAssemblies())
-            {
-                type = asm.GetType(typeName);
-                if (type != null)
-                    return type;
-            }
-
-            return null;
+            return ScheherazadeTypeNameMigration.ResolveType(typeName);
         }
         #endregion
 

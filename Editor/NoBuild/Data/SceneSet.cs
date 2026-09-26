@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     [Serializable]
     public sealed class SceneSet
@@ -37,8 +37,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             List<SceneCombination> r = new();
             if (combinations == null) return r;
-            foreach (var c in combinations)
-                if (c != null && c.IsValid) r.Add(c);
+            foreach (SceneCombination combination in combinations)
+            {
+                if (combination != null
+                    && combination.enabled
+                    && combination.ResolveScenes(this).Count > 0)
+                {
+                    r.Add(combination);
+                }
+            }
             return r;
         }
     }

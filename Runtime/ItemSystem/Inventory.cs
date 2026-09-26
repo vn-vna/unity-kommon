@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common.Chrono;
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.FallAway.Inventory;
+using Com.Scheherazade.Common.Chrono;
+using Com.Scheherazade.Common.DataSync;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Schehrazade.IS
+namespace Com.Scheherazade.IS
 {
     public interface IInventory
     {

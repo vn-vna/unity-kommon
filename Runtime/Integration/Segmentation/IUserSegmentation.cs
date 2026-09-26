@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     public enum UserSegmentationStatus
     {

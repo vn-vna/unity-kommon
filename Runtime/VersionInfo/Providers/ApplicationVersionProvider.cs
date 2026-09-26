@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC.Providers
+namespace Com.Scheherazade.Common.VIC.Providers
 {
     [CreateAssetMenu(
         fileName = "ApplicationVersionProvider",

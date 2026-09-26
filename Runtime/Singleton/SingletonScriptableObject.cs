@@ -3,7 +3,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Singleton
+namespace Com.Scheherazade.Common.Singleton
 {
     public enum ScriptableLoadSource
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Opt-in contract for occupants that expose a selection state (drop-car's

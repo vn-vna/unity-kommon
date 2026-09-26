@@ -8,7 +8,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
+namespace Com.Scheherazade.Common.Editor.Toolkit
 {
     /// <summary>
     /// Consolidated ADB and Android SDK path resolution.

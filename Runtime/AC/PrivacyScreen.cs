@@ -1,9 +1,9 @@
 using System.Collections;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.FallAway.AC
+namespace Com.Scheherazade.FallAway.AC
 {
     [AddComponentMenu("Scheherazade/Anti Cheat/Privacy Screen")]
     public sealed class PrivacyScreen
@@ -12,7 +12,7 @@ namespace Com.Hapiga.FallAway.AC
 #if UNITY_ANDROID && !UNITY_EDITOR
         const string UnityPlayerClass = "com.unity3d.player.UnityPlayer";
         const string UnityPlayerCurrentActivityField = "currentActivity";
-        const string PrivacyCoverManagerClass = "com.hapiga.scheherazade.android.PrivacyCoverManager";
+        const string PrivacyCoverManagerClass = "com.scheherazade.android.PrivacyCoverManager";
         const string ShowCoverMethod = "showCover";
         const string RemoveCoverMethod = "removeCover";
 #endif

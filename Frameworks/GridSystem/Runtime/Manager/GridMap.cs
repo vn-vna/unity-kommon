@@ -1,10 +1,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.Common.Extensions;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Pure grid logic (drop-car <c>GridMap</c> ported with no MonoBehaviour,

@@ -5,11 +5,11 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     [ResourceProvider(
         "Cached (LRU)",

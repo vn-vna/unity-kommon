@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common
+namespace Com.Scheherazade.Common
 {
     internal interface IDirectCmdParameter
     {

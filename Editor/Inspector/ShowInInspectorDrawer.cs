@@ -2,7 +2,7 @@ using UnityEditor;
 using UnityEngine;
 using System.Reflection;
 
-namespace Com.Hapiga.Scheherazade.Common.Inspector
+namespace Com.Scheherazade.Common.Inspector
 {
     [CustomPropertyDrawer(typeof(ShowInInspectorAttribute), true)]
     public class ShowInInspectorDrawer : PropertyDrawer

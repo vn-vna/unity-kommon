@@ -2,12 +2,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     public abstract class UserSegmentationBase<T> :
         SingletonScriptableObject<T>,

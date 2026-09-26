@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor
+namespace Com.Scheherazade.Common.Editor
 {
     public static class CustomPopupDropdown
     {

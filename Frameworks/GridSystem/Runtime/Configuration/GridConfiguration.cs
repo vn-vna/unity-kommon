@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Plain per-board configuration (NOT a singleton — one asset per grid).
@@ -16,6 +16,8 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridCoord GridSize => _gridSize;
         public GridCoord PoolSize => _poolSize;
         public GridCoord BorderSize => _borderSize;
+        public float DrifterBaseSpeed => _drifterBaseSpeed;
+        public float DrifterAcceleration => _drifterAcceleration;
         public float DrifterSpeedLimit => _drifterSpeedLimit;
         public float NudgeAmount => _nudgeAmount;
         public bool DisableNudgingAfterDisplacement => _disableNudgingAfterDisplacement;
@@ -63,9 +65,18 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         [SerializeField]
         private GridCoord _borderSize = new GridCoord(5, 5);
 
+        [Tooltip("Drift speed in world units per tick when movement is blocked or acceleration has just reset.")]
+        [Min(0f)]
+        [SerializeField] private float _drifterBaseSpeed = 0.08f;
+
+        [Tooltip("Speed gained per unobstructed drift tick. Blocked movement resets to base speed.")]
+        [Min(0f)]
+        [SerializeField] private float _drifterAcceleration = 0.04f;
+
 #if UNITY_EDITOR
-        [Tooltip("Maximum drift speed in world units per tick.")]
+        [Tooltip("Maximum drift speed in world units per tick after acceleration.")]
 #endif
+        [Min(0f)]
         [SerializeField]
         private float _drifterSpeedLimit = 0.5f;
 

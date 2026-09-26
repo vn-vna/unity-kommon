@@ -1,9 +1,9 @@
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Singleton.Editor.Tests
+namespace Com.Scheherazade.Common.Singleton.Editor.Tests
 {
     public sealed class SingletonBehaviorTests
     {

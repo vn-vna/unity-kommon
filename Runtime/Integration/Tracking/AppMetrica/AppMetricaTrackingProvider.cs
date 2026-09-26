@@ -1,13 +1,13 @@
 #if TRACKING_APPMETRICA
 
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using Io.AppMetrica;
 using Io.AppMetrica.Ecommerce;
 using Newtonsoft.Json;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
 
     [CreateAssetMenu(

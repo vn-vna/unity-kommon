@@ -3,7 +3,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager.Editor
+namespace Com.Scheherazade.Common.LoadingManager.Editor
 {
     internal sealed class LoadingManagerSettingsProvider : SettingsProvider
     {

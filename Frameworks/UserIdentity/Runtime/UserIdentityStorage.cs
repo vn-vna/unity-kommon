@@ -1,8 +1,8 @@
 using System.IO;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     /// <summary>
     /// JSON persistence for the current user profile. Local-only storage:

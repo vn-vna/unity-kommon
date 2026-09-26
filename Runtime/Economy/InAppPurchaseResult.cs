@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     public struct InAppPurchaseResult
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.UserInterface
+namespace Com.Scheherazade.Common.UserInterface
 {
     [AttributeUsage(
         AttributeTargets.Class,

@@ -1,13 +1,13 @@
 using System;
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.DataSync;
-using DS = global::Com.Hapiga.Scheherazade.Common.DataSync.DataSync;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.FallAway.Inventory;
+using Com.Scheherazade.Common;
+using Com.Scheherazade.Common.DataSync;
+using DS = global::Com.Scheherazade.Common.DataSync.DataSync;
+using Com.Scheherazade.Common.Singleton;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Schehrazade.IS
+namespace Com.Scheherazade.IS
 {
     public interface IInventoryManager
     {

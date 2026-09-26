@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Chain executor for split middleware hooks. Each hook point has its
@@ -163,7 +163,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
                     );
                 }
 
-                Type type = Type.GetType(typeName);
+                Type type = ScheherazadeTypeNameMigration.ResolveType(typeName);
                 if (type == null)
                 {
                     throw new ItemDatabaseException(

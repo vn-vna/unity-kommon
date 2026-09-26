@@ -10,7 +10,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Stateless orchestrator for scene switching operations.
@@ -24,23 +24,31 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// <summary>
         /// Closes all current scenes, then loads all enabled, valid scenes from the set.
         /// </summary>
-        public static void SwitchToSet(SceneSet set)
+        public static bool SwitchToSet(SceneSet set)
         {
-            if (set == null) { FireFailed("Scene set is null."); return; }
+            if (set == null)
+            {
+                FireFailed("Scene set is null.");
+                return false;
+            }
 
             List<SceneSlot> valid = set.scenes
-                .Where(s => s.enabled && s.IsValid)
+                .Where(s => s != null && s.enabled && s.IsValid)
                 .ToList();
 
             if (valid.Count == 0)
             {
                 FireFailed($"Scene set '{set.setName}' has no valid, enabled scenes.");
-                return;
+                return false;
             }
 
             try
             {
-                if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+                if (!EditorSceneManager
+                        .SaveCurrentModifiedScenesIfUserWantsTo())
+                {
+                    return false;
+                }
 
                 Scene firstScene = EditorSceneManager.OpenScene(
                     valid[0].ScenePath, OpenSceneMode.Single);
@@ -49,13 +57,39 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 for (int i = 1; i < valid.Count; i++)
                     EditorSceneManager.OpenScene(valid[i].ScenePath, OpenSceneMode.Additive);
 
-                SceneSetSwitched?.Invoke(set);
+                NotifySceneSetSwitched(set);
+                NoBuildToolbarState.RequestRepaint();
+                return true;
             }
             catch (Exception ex)
             {
                 FireFailed($"Failed to switch to scene set '{set.setName}': {ex.Message}");
                 Debug.LogException(ex);
+                return false;
             }
+        }
+
+        public static bool PlayFromSet(SceneSet set)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                return false;
+            }
+
+            if (!SwitchToSet(set))
+            {
+                return false;
+            }
+
+            EditorApplication.delayCall += () =>
+            {
+                if (!EditorApplication.isCompiling
+                    && !EditorApplication.isPlayingOrWillChangePlaymode)
+                {
+                    EditorApplication.isPlaying = true;
+                }
+            };
+            return true;
         }
 
         /// <summary>
@@ -91,7 +125,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     EditorSceneManager.OpenScene(
                         valid[i].ScenePath, OpenSceneMode.Additive);
 
-                CombinationSwitched?.Invoke(combination);
+                NotifyCombinationSwitched(combination);
             }
             catch (Exception ex)
             {
@@ -100,11 +134,48 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
         }
 
+        private static void NotifySceneSetSwitched(
+            SceneSet set)
+        {
+            try
+            {
+                SceneSetSwitched?.Invoke(set);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
+        private static void NotifyCombinationSwitched(
+            SceneCombination combination)
+        {
+            try
+            {
+                CombinationSwitched?.Invoke(combination);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
         private static void FireFailed(string message)
         {
             Debug.LogError($"[NoBuild] {message}");
-            SwitchFailed?.Invoke(message);
-            EditorUtility.DisplayDialog("NoBuild — Scene Switch Failed", message, "OK");
+            try
+            {
+                SwitchFailed?.Invoke(message);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+
+            EditorUtility.DisplayDialog(
+                "NoBuild — Scene Switch Failed",
+                message,
+                "OK");
         }
     }
 }

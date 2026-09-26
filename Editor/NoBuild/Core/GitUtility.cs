@@ -4,11 +4,10 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Retrieves git metadata by shelling out to the <c>git</c> CLI.
@@ -33,7 +32,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static string _cachedFullHash;
         private static string _cachedBranch;
         private static DateTime _lastFetchTime = DateTime.MinValue;
-        private static bool _gitAvailable = true;
 
         private static readonly Dictionary<string, SubmoduleGitInfo>
             _submoduleCache = new(StringComparer.OrdinalIgnoreCase);
@@ -80,9 +78,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// </summary>
         public static string GetSubmoduleCommit(string submoduleName)
         {
-            SubmoduleGitInfo info =
-                ResolveSubmoduleInfo(submoduleName);
-            return info?.shortHash ?? FallbackValue;
+            try
+            {
+                SubmoduleGitInfo info =
+                    ResolveSubmoduleInfo(submoduleName);
+                return info?.shortHash ?? FallbackValue;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[NoBuild] Could not resolve git submodule "
+                    + $"'{submoduleName}': {exception.Message}");
+                return FallbackValue;
+            }
         }
 
         /// <summary>
@@ -91,9 +99,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         public static string GetSubmoduleFullCommit(
             string submoduleName)
         {
-            SubmoduleGitInfo info =
-                ResolveSubmoduleInfo(submoduleName);
-            return info?.fullHash ?? FallbackValue;
+            try
+            {
+                SubmoduleGitInfo info =
+                    ResolveSubmoduleInfo(submoduleName);
+                return info?.fullHash ?? FallbackValue;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[NoBuild] Could not resolve git submodule "
+                    + $"'{submoduleName}': {exception.Message}");
+                return FallbackValue;
+            }
         }
 
         // ══════════════════════════════════════════════════
@@ -111,17 +129,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 _lastFetchTime = DateTime.UtcNow;
 
-                if (!_gitAvailable)
-                {
-                    SetAllToFallback();
-                    return;
-                }
-
                 // Project root is one level above Application.dataPath (Assets/)
                 string projectPath = System.IO.Path.GetDirectoryName(Application.dataPath);
                 if (string.IsNullOrEmpty(projectPath))
                 {
-                    _gitAvailable = false;
                     SetAllToFallback();
                     return;
                 }
@@ -134,7 +145,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 }
                 catch (Exception ex)
                 {
-                    _gitAvailable = false;
                     SetAllToFallback();
                     Debug.LogWarning(
                         $"[NoBuild] GitUtility failed to retrieve git info: {ex.Message}"
@@ -150,43 +160,45 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             _cachedBranch    = FallbackValue;
         }
 
-        private static string RunGitCommand(string workingDirectory, string arguments)
+        private static string RunGitCommand(
+            string workingDirectory,
+            string arguments)
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            ProcessExecutionResult result =
+                NoBuildProcessRunner.Run(
+                    "git",
+                    arguments,
+                    ProcessTimeoutMs,
+                    workingDirectory);
+            if (result.TimedOut)
             {
-                FileName               = "git",
-                Arguments              = arguments,
-                WorkingDirectory       = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true
-            };
-
-            using Process process = Process.Start(startInfo);
-            if (process == null)
-            {
-                throw new InvalidOperationException("Failed to start git process.");
+                throw new TimeoutException(
+                    $"Git command timed out after "
+                    + $"{ProcessTimeoutMs}ms.");
             }
 
-            process.WaitForExit(ProcessTimeoutMs);
-
-            if (!process.HasExited)
+            if (result.ExitCode != 0)
             {
-                process.Kill();
-                throw new TimeoutException($"Git command timed out after {ProcessTimeoutMs}ms.");
+                throw new InvalidOperationException(
+                    $"Git exited with code {result.ExitCode}: "
+                    + result.StandardError);
             }
 
-            string output = process.StandardOutput.ReadToEnd().Trim();
+            string output = result.StandardOutput.Trim();
 
-            // git rev-parse --abbrev-ref HEAD returns "HEAD" in detached state
-            if (arguments.Contains("abbrev-ref") && output == "HEAD")
+            // git rev-parse --abbrev-ref HEAD returns
+            // "HEAD" in detached state.
+            if (arguments.Contains("abbrev-ref")
+                && output == "HEAD")
             {
-                // Try to get tag or commit for detached HEAD
-                output = RunGitCommand(workingDirectory, "rev-parse --short HEAD");
+                output = RunGitCommand(
+                    workingDirectory,
+                    "rev-parse --short HEAD");
             }
 
-            return string.IsNullOrEmpty(output) ? FallbackValue : output;
+            return string.IsNullOrEmpty(output)
+                ? FallbackValue
+                : output;
         }
 
         private static SubmoduleGitInfo ResolveSubmoduleInfo(

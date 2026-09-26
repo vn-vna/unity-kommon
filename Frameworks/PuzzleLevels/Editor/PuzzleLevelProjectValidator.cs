@@ -2,16 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 {
     internal sealed class PuzzleLevelProjectValidator :
         IPreprocessBuildWithReport

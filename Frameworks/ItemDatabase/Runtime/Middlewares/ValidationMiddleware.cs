@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Middlewares
+namespace Com.Scheherazade.Common.ItemDatabase.Middlewares
 {
     [ItemDatabaseMiddleware(DefaultPriority = 0,
         Description = "Gatekeeper — validates item integrity before every operation: non-empty keys, existing definitions, allowed tags.")]

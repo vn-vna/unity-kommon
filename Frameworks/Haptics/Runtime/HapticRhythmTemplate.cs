@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Built-in rhythm presets. Named after the game feel they produce.

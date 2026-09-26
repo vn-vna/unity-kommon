@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-using Com.Hapiga.FallAway.Economy;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.MappedList;
+using Com.Scheherazade.FallAway.Economy;
+using Com.Scheherazade.Common.Integration.InAppPurchase;
+using Com.Scheherazade.Common.MappedList;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     [CreateAssetMenu(fileName = "InAppPurchaseDatabase", menuName = "FallAway/Economy/In App Purchase Database")]
     public class InAppPurchaseDatabase :

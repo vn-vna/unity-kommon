@@ -1,13 +1,13 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Sound;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Sound;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound.Editor
+namespace Com.Scheherazade.Common.Sound.Editor
 {
     internal sealed class SoundSettingsProvider : SettingsProvider
     {

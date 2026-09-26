@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
     [CustomEditor(typeof(PathController))]
     public class PathControllerDrawer : UnityEditor.Editor

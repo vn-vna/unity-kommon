@@ -1,7 +1,7 @@
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common
+namespace Com.Scheherazade.Common
 {
     public sealed class DirectCmdSettings : SingletonScriptableObject<DirectCmdSettings>
     {

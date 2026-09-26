@@ -1,10 +1,10 @@
 using System.IO;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 {
     public class PuzzleLevelOverrideWindow : EditorWindow
     {

@@ -9,7 +9,7 @@ using UnityEditor.AssetImporters;
 using UnityEditorInternal;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Editor.TextureAdjustment
+namespace Com.Scheherazade.Editor.TextureAdjustment
 {
     [CustomEditor(typeof(TextureAdjustmentImporter))]
     public class TextureAdjustmentImporterEditor : AssetImporterEditor

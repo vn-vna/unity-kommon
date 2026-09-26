@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// External controller attached to a <see cref="GridCell"/>. Drop-car port

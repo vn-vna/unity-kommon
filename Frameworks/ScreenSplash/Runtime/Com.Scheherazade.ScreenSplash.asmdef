@@ -1,0 +1,16 @@
+{
+  "name": "Com.Scheherazade.ScreenSplash",
+  "rootNamespace": "Com.Scheherazade.Common.ScreenSplash",
+  "references": [
+    "Com.Scheherazade.Common"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -12,7 +12,7 @@ using UnityEngine.Networking;
 using Newtonsoft.Json.Linq;
 #endif
 
-namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
+namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 {
     public static class GitHubReleaseFetcher
     {

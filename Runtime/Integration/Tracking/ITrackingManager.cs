@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     public interface ITrackingManager
     {

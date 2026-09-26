@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation
 {
     public static class PuzzleLevelValidationService
     {

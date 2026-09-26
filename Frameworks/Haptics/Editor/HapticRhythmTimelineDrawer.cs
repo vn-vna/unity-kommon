@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics.Editor
+namespace Com.Scheherazade.Common.Haptics.Editor
 {
     /// <summary>
     /// Static timeline drawing helper for the rhythm editor.

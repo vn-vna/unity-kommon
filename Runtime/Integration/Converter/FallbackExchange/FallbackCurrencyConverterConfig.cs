@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
+namespace Com.Scheherazade.Common.Integration.Converter
 {
     public class FallbackCurrencyConverterConfig :
         ScriptableObject

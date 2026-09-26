@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using System.IO;
-using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Com.Hapiga.Scheherazade.Editor
+namespace Com.Scheherazade.Editor
 {
     internal sealed partial class DirectCmdSettingsProvider : SettingsProvider
     {

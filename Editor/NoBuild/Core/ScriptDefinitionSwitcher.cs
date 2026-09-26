@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Applies a <see cref="ScriptDefinitionSet"/> to the project's scripting define symbols.
@@ -54,14 +54,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// Use <c>EditorUserBuildSettings.selectedBuildTargetGroup</c> for the
         /// currently active platform.
         /// </param>
-        public static void ApplySet(
+        public static bool ApplySet(
             ScriptDefinitionSet set,
             BuildTargetGroup? targetGroup = null)
         {
             if (set == null)
             {
                 FireFailed("Script definition set is null.");
-                return;
+                return false;
             }
 
             BuildTargetGroup target = targetGroup
@@ -72,7 +72,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (validationError != null)
             {
                 FireFailed(validationError);
-                return;
+                return false;
             }
 
             try
@@ -87,7 +87,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 HashSet<string> ownedSymbols = new(StringComparer.Ordinal);
                 foreach (ScriptDefinitionSlot slot in set.slots)
                 {
-                    if (!string.IsNullOrEmpty(slot.defineSymbol))
+                    if (slot != null
+                        && !string.IsNullOrEmpty(slot.defineSymbol))
                     {
                         ownedSymbols.Add(slot.defineSymbol.Trim());
                     }
@@ -107,24 +108,36 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
                 foreach (ScriptDefinitionSlot slot in set.slots)
                 {
-                    if (slot.enabled && !string.IsNullOrEmpty(slot.defineSymbol))
+                    if (slot != null
+                        && slot.enabled
+                        && !string.IsNullOrEmpty(slot.defineSymbol))
                     {
                         newDefines.Add(slot.defineSymbol.Trim());
                     }
                 }
 
-                // Write back
-                string newDefinesString = string.Join(";", newDefines.OrderBy(d => d));
-                PlayerSettings.SetScriptingDefineSymbols(
-                    UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(target),
-                    newDefinesString);
+                // Write back only when the set changed. Rewriting
+                // identical symbols needlessly triggers compilation.
+                if (!newDefines.SetEquals(currentDefines))
+                {
+                    string newDefinesString = string.Join(
+                        ";",
+                        newDefines.OrderBy(define => define));
+                    PlayerSettings.SetScriptingDefineSymbols(
+                        UnityEditor.Build.NamedBuildTarget
+                            .FromBuildTargetGroup(target),
+                        newDefinesString);
+                }
 
-                ScriptDefinitionsApplied?.Invoke(set);
+                NotifyApplied(set);
+                NoBuildToolbarState.RequestRepaint();
+                return true;
             }
             catch (Exception ex)
             {
                 FireFailed($"Failed to apply script definitions: {ex.Message}");
                 Debug.LogException(ex);
+                return false;
             }
         }
 
@@ -178,7 +191,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             foreach (ScriptDefinitionSlot slot in set.slots)
             {
-                string error = ValidateSymbol(slot.defineSymbol);
+                string error = ValidateSymbol(
+                    slot?.defineSymbol);
                 if (error != null)
                 {
                     return $"Invalid symbol in set '{set.setName}': {error}";
@@ -209,10 +223,30 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             return result;
         }
 
+        private static void NotifyApplied(
+            ScriptDefinitionSet set)
+        {
+            try
+            {
+                ScriptDefinitionsApplied?.Invoke(set);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
+        }
+
         private static void FireFailed(string message)
         {
             Debug.LogError($"[NoBuild] {message}");
-            ScriptDefinitionsFailed?.Invoke(message);
+            try
+            {
+                ScriptDefinitionsFailed?.Invoke(message);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
         }
     }
 }

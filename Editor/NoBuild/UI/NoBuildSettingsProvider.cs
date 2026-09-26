@@ -5,13 +5,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Editor;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     public sealed class NoBuildSettingsProvider : SettingsProvider
     {
@@ -29,6 +29,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private SerializedObject _so;
         private SerializedProperty _sceneSets, _defineSets, _buildProfiles, _flagDefs;
         private SerializedProperty _activeScene, _activeDefine;
+        private SerializedProperty _toolbarLabelTemplate;
         private int _tab;
         private int _selSet = -1, _selDef = -1, _selBuild = -1, _selFlag = -1;
         private Vector2 _pvScroll;
@@ -39,7 +40,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         // ── Device Tab State ───────────────────────
         private List<AdbDeviceInfo> _cachedDevices;
         private double _lastDeviceRefreshTime;
-        private const double DeviceRefreshInterval = 2.0;
+        private const double DeviceRefreshInterval = 10.0;
         private string _installApkPath = "";
         private string _installAabPath = "";
         private List<WirelessDeviceInfo> _wirelessDevices;
@@ -74,6 +75,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 _selFlag = 0;
 
             DrawProviderHeader(s);
+            DrawToolbarLabelSettings(s);
             int selectedTab = EditorGuiLayout.DrawTabBar(_tab, Tabs);
             if (selectedTab != _tab)
             {
@@ -94,7 +96,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 DrawCollectionBrowser();
             }
 
-            _so.ApplyModifiedProperties();
+            if (_so.ApplyModifiedProperties())
+            {
+                NoBuildToolbarState.RequestRepaint();
+            }
         }
 
         private static void DrawProviderHeader(NoBuildSettings settings)
@@ -105,6 +110,48 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 "No Build",
                 $"Scenes: {sceneSet}  •  Defines: {defineSet}"
             );
+        }
+
+        private void DrawToolbarLabelSettings(
+            NoBuildSettings settings)
+        {
+            EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(
+                "Toolbar Label",
+                GUILayout.Width(LabelW));
+
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(
+                _toolbarLabelTemplate,
+                GUIContent.none);
+            bool changed = EditorGUI.EndChangeCheck();
+
+            if (GUILayout.Button("Reset", GUILayout.Width(48)))
+            {
+                _toolbarLabelTemplate.stringValue = "NoBuild";
+                changed = true;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField(
+                "{scene-set}  {define-set}  {platform}  "
+                + "{scene-count}  {define-count}  "
+                + "{project-name}",
+                EditorStyles.miniLabel);
+
+            if (changed)
+            {
+                _so.ApplyModifiedProperties();
+                NoBuildToolbarState.RequestRepaint();
+            }
+
+            EditorGUILayout.LabelField(
+                "Preview: "
+                + NoBuildToolbarLabelResolver.Resolve(settings),
+                EditorStyles.miniBoldLabel);
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(4);
         }
 
         private void DrawCollectionBrowser()
@@ -570,8 +617,12 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     : new List<SceneCombination>()
             };
 
-            settings.sceneSets.Insert(_selSet + 1, clone);
-            _selSet++;
+            int insertionIndex = _selSet + 1;
+            RemapSceneSetReferencesAfterInsertion(
+                settings,
+                insertionIndex);
+            settings.sceneSets.Insert(insertionIndex, clone);
+            _selSet = insertionIndex;
         }
 
         private void CloneDefineSet(NoBuildSettings settings)
@@ -595,9 +646,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     : new List<ScriptDefinitionSlot>()
             };
 
+            int insertionIndex = _selDef + 1;
+            RemapDefineSetReferencesAfterInsertion(
+                settings,
+                insertionIndex);
             settings.scriptDefinitionSets.Insert(
-                _selDef + 1, clone);
-            _selDef++;
+                insertionIndex,
+                clone);
+            _selDef = insertionIndex;
         }
 
         private void CloneBuildProfile(NoBuildSettings settings)
@@ -640,7 +696,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             settings.buildProfiles.Insert(
                 _selBuild + 1, clone);
             _selBuild++;
-            _selFlag++;
         }
 
         private void CloneFlagDefinition(NoBuildSettings settings)
@@ -703,6 +758,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             var sp = _sceneSets.GetArrayElementAtIndex(_selSet);
             var nameP = sp.FindPropertyRelative("setName");
             var scenesP = sp.FindPropertyRelative("scenes");
+            var buildOrderP = sp.FindPropertyRelative(
+                "buildOrderOverride");
             var combosP = sp.FindPropertyRelative("combinations");
             bool active = s.activeSceneSetIndex == _selSet;
 
@@ -723,6 +780,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 {
                     s.activeSceneSetIndex = _selSet;
                     EditorUtility.SetDirty(s);
+                    NoBuildToolbarState.RequestRepaint();
                 }
 
                 GUI.backgroundColor = previousBackground;
@@ -734,9 +792,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
                 {
-                    _sceneSets.DeleteArrayElementAtIndex(_selSet); _so.ApplyModifiedProperties();
+                    int removedIndex = _selSet;
+                    _sceneSets.DeleteArrayElementAtIndex(removedIndex);
+                    _so.ApplyModifiedProperties();
+                    RemapSceneSetReferencesAfterRemoval(
+                        s,
+                        removedIndex);
                     if (s.activeSceneSetIndex == _selSet) s.activeSceneSetIndex = -1;
                     if (s.activeSceneSetIndex > _selSet) s.activeSceneSetIndex--;
+                    NoBuildToolbarState.RequestRepaint();
                     _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return;
                 }
             }
@@ -758,6 +822,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 scenesP.arraySize++;
                 scenesP.GetArrayElementAtIndex(scenesP.arraySize - 1)
                     .FindPropertyRelative("enabled").boolValue = true;
+            }
+            GUILayout.Space(8);
+
+            EditorGUILayout.LabelField(
+                "Build Order Override",
+                EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Optional. When empty, the scene order above is "
+                + "used for builds.",
+                MessageType.None);
+            DrawSceneReorderableList(buildOrderP);
+            if (GUILayout.Button(
+                    "+ Add Build Scene",
+                    GUILayout.Height(22),
+                    GUILayout.Width(125)))
+            {
+                buildOrderP.arraySize++;
+                buildOrderP.GetArrayElementAtIndex(
+                        buildOrderP.arraySize - 1)
+                    .FindPropertyRelative("enabled")
+                    .boolValue = true;
             }
             GUILayout.Space(8);
 
@@ -952,19 +1037,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             // Build display names from parent scene set
             List<string> sceneNames = new();
+            List<SceneAsset> sceneAssets = new();
             for (int i = 0; i < parentScenesP.arraySize; i++)
             {
                 var slot = parentScenesP.GetArrayElementAtIndex(i);
                 var dName = slot.FindPropertyRelative("displayName");
                 var scObj = slot.FindPropertyRelative("scene");
+                SceneAsset scene = scObj.objectReferenceValue
+                    as SceneAsset;
                 string name = dName.stringValue;
-                if (string.IsNullOrEmpty(name)
-                    && scObj.objectReferenceValue != null)
-                    name = ((SceneAsset)scObj.objectReferenceValue)
-                        .name;
+                if (string.IsNullOrEmpty(name) && scene != null)
+                {
+                    name = scene.name;
+                }
+
                 if (string.IsNullOrEmpty(name))
+                {
                     name = $"Scene {i}";
+                }
+
                 sceneNames.Add(name);
+                sceneAssets.Add(scene);
             }
 
             if (sceneNames.Count == 0)
@@ -981,6 +1074,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             for (int j = 0; j < sceneRefsP.arraySize; j++)
             {
                 var refP = sceneRefsP.GetArrayElementAtIndex(j);
+                var sceneP = refP.FindPropertyRelative("scene");
                 var indexP = refP.FindPropertyRelative("sceneIndex");
                 var enP = refP.FindPropertyRelative("enabled");
 
@@ -993,14 +1087,30 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 enP.boolValue = EditorGUILayout.Toggle(
                     enP.boolValue, GUILayout.Width(16));
 
-                indexP.intValue = Mathf.Clamp(
-                    indexP.intValue,
-                    0,
-                    sceneNames.Count - 1
-                );
+                SceneAsset referencedScene =
+                    sceneP.objectReferenceValue as SceneAsset;
+                int selectedIndex = referencedScene != null
+                    ? sceneAssets.IndexOf(referencedScene)
+                    : Mathf.Clamp(
+                        indexP.intValue,
+                        0,
+                        sceneNames.Count - 1);
 
-                indexP.intValue = EditorGUILayout.Popup(
-                    indexP.intValue, nameArray);
+                if (referencedScene != null && selectedIndex < 0)
+                {
+                    EditorGUILayout.LabelField(
+                        $"Missing from set: {referencedScene.name}",
+                        EditorStyles.miniLabel);
+                }
+                else
+                {
+                    int newIndex = EditorGUILayout.Popup(
+                        selectedIndex,
+                        nameArray);
+                    indexP.intValue = newIndex;
+                    sceneP.objectReferenceValue =
+                        sceneAssets[newIndex];
+                }
 
                 Color previousRemoveBackground = GUI.backgroundColor;
                 GUI.backgroundColor = EditorGuiColors.RemoveRed;
@@ -1026,6 +1136,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     sceneRefsP.arraySize - 1);
                 newRef.FindPropertyRelative("enabled").boolValue = true;
                 newRef.FindPropertyRelative("sceneIndex").intValue = 0;
+                newRef.FindPropertyRelative("scene")
+                    .objectReferenceValue = sceneAssets[0];
             }
         }
 
@@ -1073,9 +1185,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
                 {
-                    _defineSets.DeleteArrayElementAtIndex(_selDef); _so.ApplyModifiedProperties();
+                    int removedIndex = _selDef;
+                    _defineSets.DeleteArrayElementAtIndex(removedIndex);
+                    _so.ApplyModifiedProperties();
+                    RemapDefineSetReferencesAfterRemoval(
+                        s,
+                        removedIndex);
                     if (s.activeScriptDefinitionSetIndex == _selDef) s.activeScriptDefinitionSetIndex = -1;
                     if (s.activeScriptDefinitionSetIndex > _selDef) s.activeScriptDefinitionSetIndex--;
+                    NoBuildToolbarState.RequestRepaint();
                     _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return;
                 }
             }
@@ -1098,7 +1216,17 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 en.boolValue = EditorGUILayout.Toggle(en.boolValue, GUILayout.Width(16));
                 def.stringValue = EditorGUILayout.TextField(def.stringValue);
                 if (GUILayout.Button("\u2212", GUILayout.Width(22)))
-                { slotsP.DeleteArrayElementAtIndex(i); break; }
+                {
+                    slotsP.DeleteArrayElementAtIndex(i);
+                    _so.ApplyModifiedProperties();
+                    RemapDefineSlotReferencesAfterRemoval(
+                        s,
+                        _selDef,
+                        i);
+                    EditorUtility.SetDirty(s);
+                    _so.Update();
+                    break;
+                }
                 EditorGUILayout.EndHorizontal();
             }
 
@@ -1225,7 +1353,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             // ── Build Configuration (two-column, one per line) ──
             var platP = cfgP.FindPropertyRelative("platform");
             DrawPlatformSelector(platP);
-            BuildTarget selPlat = (BuildTarget)platP.enumValueIndex;
+            BuildTarget selPlat = (BuildTarget)platP.intValue;
             GUILayout.Space(4);
 
             // General
@@ -1280,9 +1408,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 GUILayout.Space(4);
                 EditorGUILayout.LabelField("Windows", EditorStyles.boldLabel);
-                LblChk("Create VS Solution", cfgP.FindPropertyRelative("windowsCreateVSProject"));
-                LblChk("Copy PDB Files", cfgP.FindPropertyRelative("windowsCopyPDB"));
-                LblChk("Copy References", cfgP.FindPropertyRelative("windowsCopyReferences"));
+                LblChk(
+                    "Create VS Solution",
+                    cfgP.FindPropertyRelative(
+                        "windowsCreateVSProject"));
+                EditorGUILayout.HelpBox(
+                    "Unity 6 no longer exposes the legacy Copy PDB "
+                    + "and Copy References build options. Debug "
+                    + "symbols follow the selected build mode.",
+                    MessageType.None);
             }
 
             // Android
@@ -1501,8 +1635,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 "Manage Android Debug Bridge connections and install builds."
             );
             string adbPath = AdbUtility.AdbPath;
-            bool adbFound = !string.IsNullOrEmpty(adbPath)
-                && System.IO.File.Exists(adbPath);
+            bool adbFound = AdbUtility.IsAvailable;
 
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
             EditorGUILayout.LabelField("Environment", EditorGuiStyles.SectionHeader);
@@ -1544,6 +1677,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (GUILayout.Button("\u21BB Refresh Devices",
                     GUILayout.Height(26)))
             {
+                AdbUtility.RefreshAvailability();
                 RefreshDevices();
             }
             GUI.backgroundColor = previousRefreshBackground;
@@ -1908,6 +2042,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             {
                 GUI.backgroundColor =
                     new Color(0.3f, 0.6f, 0.3f);
+                EditorGUI.BeginDisabledGroup(device.Port <= 0);
                 if (GUILayout.Button("Connect",
                         GUILayout.Width(70),
                         GUILayout.Height(22)))
@@ -1933,11 +2068,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                             "OK");
                     }
                 }
+                EditorGUI.EndDisabledGroup();
                 GUI.backgroundColor = Color.white;
 
                 // Pair button
                 if (!string.IsNullOrEmpty(
-                        _pairingCode))
+                        _pairingCode)
+                    && device.PairingPort > 0)
                 {
                     GUI.backgroundColor =
                         new Color(0.7f, 0.6f, 0.2f);
@@ -1948,16 +2085,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         bool paired =
                             AdbUtility.PairDevice(
                                 device.IpAddress,
-                                device.Port,
+                                device.PairingPort,
                                 _pairingCode);
                         if (paired)
                         {
-                            // After pairing,
-                            // try connecting
-                            AdbUtility
-                                .ConnectWireless(
+                            // After pairing, connect when the
+                            // device advertises a connect endpoint.
+                            if (device.Port > 0)
+                            {
+                                AdbUtility.ConnectWireless(
                                     device.IpAddress,
                                     device.Port);
+                            }
+
                             RefreshDevices();
                             _wirelessDevices =
                                 AdbUtility
@@ -2009,7 +2149,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private void DrawPlatformSelector(SerializedProperty platP)
         {
             BuildTarget currentPlatform =
-                (BuildTarget)platP.enumValueIndex;
+                (BuildTarget)platP.intValue;
             GUIContent icon = PlatformIconUtility.GetPlatformIcon(
                 currentPlatform);
             string displayName = PlatformIconUtility
@@ -2038,7 +2178,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         currentPlatform,
                         newPlatform =>
                         {
-                            platP.enumValueIndex =
+                            platP.intValue =
                                 (int)newPlatform;
                             platP.serializedObject
                                 .ApplyModifiedProperties();
@@ -2195,6 +2335,124 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         // ── Helpers
         // ══════════════════════════════════════════════════
 
+        private static void RemapSceneSetReferencesAfterRemoval(
+            NoBuildSettings settings,
+            int removedIndex)
+        {
+            foreach (BuildProfile profile in settings.buildProfiles)
+            {
+                if (profile.sceneSetIndex == removedIndex)
+                {
+                    profile.sceneSetIndex = -1;
+                }
+                else if (profile.sceneSetIndex > removedIndex)
+                {
+                    profile.sceneSetIndex--;
+                }
+            }
+        }
+
+        private static void RemapSceneSetReferencesAfterInsertion(
+            NoBuildSettings settings,
+            int insertionIndex)
+        {
+            if (settings.activeSceneSetIndex >= insertionIndex)
+            {
+                settings.activeSceneSetIndex++;
+            }
+
+            foreach (BuildProfile profile in settings.buildProfiles)
+            {
+                if (profile.sceneSetIndex >= insertionIndex)
+                {
+                    profile.sceneSetIndex++;
+                }
+            }
+        }
+
+        private static void RemapDefineSetReferencesAfterRemoval(
+            NoBuildSettings settings,
+            int removedIndex)
+        {
+            foreach (BuildProfile profile in settings.buildProfiles)
+            {
+                profile.scriptDefinitionSetIndex =
+                    RemapIndexAfterRemoval(
+                        profile.scriptDefinitionSetIndex,
+                        removedIndex);
+            }
+
+            foreach (FlagDefinition flag in settings.flagDefinitions)
+            {
+                flag.scriptDefinitionSetIndex =
+                    RemapIndexAfterRemoval(
+                        flag.scriptDefinitionSetIndex,
+                        removedIndex);
+                if (flag.scriptDefinitionSetIndex < 0)
+                {
+                    flag.scriptDefinitionSlotIndex = -1;
+                }
+            }
+        }
+
+        private static void RemapDefineSetReferencesAfterInsertion(
+            NoBuildSettings settings,
+            int insertionIndex)
+        {
+            if (settings.activeScriptDefinitionSetIndex
+                >= insertionIndex)
+            {
+                settings.activeScriptDefinitionSetIndex++;
+            }
+
+            foreach (BuildProfile profile in settings.buildProfiles)
+            {
+                if (profile.scriptDefinitionSetIndex
+                    >= insertionIndex)
+                {
+                    profile.scriptDefinitionSetIndex++;
+                }
+            }
+
+            foreach (FlagDefinition flag in settings.flagDefinitions)
+            {
+                if (flag.scriptDefinitionSetIndex
+                    >= insertionIndex)
+                {
+                    flag.scriptDefinitionSetIndex++;
+                }
+            }
+        }
+
+        private static void RemapDefineSlotReferencesAfterRemoval(
+            NoBuildSettings settings,
+            int defineSetIndex,
+            int removedSlotIndex)
+        {
+            foreach (FlagDefinition flag in settings.flagDefinitions)
+            {
+                if (flag.type != FlagDefinitionType.Template
+                    || flag.scriptDefinitionSetIndex
+                    != defineSetIndex)
+                {
+                    continue;
+                }
+
+                flag.scriptDefinitionSlotIndex =
+                    RemapIndexAfterRemoval(
+                        flag.scriptDefinitionSlotIndex,
+                        removedSlotIndex);
+            }
+        }
+
+        private static int RemapIndexAfterRemoval(
+            int value,
+            int removedIndex)
+        {
+            if (value == removedIndex) return -1;
+            return value > removedIndex ? value - 1 : value;
+        }
+
         private void Refresh()
         {
             _so?.Dispose();
@@ -2205,6 +2463,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             _flagDefs = _so.FindProperty("flagDefinitions");
             _activeScene = _so.FindProperty("activeSceneSetIndex");
             _activeDefine = _so.FindProperty("activeScriptDefinitionSetIndex");
+            _toolbarLabelTemplate = _so.FindProperty(
+                "toolbarLabelTemplate");
 
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
             _selSet = Mathf.Min(_selSet, s.sceneSets.Count - 1);

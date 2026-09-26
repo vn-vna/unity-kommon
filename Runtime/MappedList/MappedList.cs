@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.MappedList
+namespace Com.Scheherazade.Common.MappedList
 {
 
     public class MappedList<K, T> : IDictionary<K, T>

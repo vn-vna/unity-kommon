@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Drift audio/haptics — replaces drop-car <c>AudioClipInfo</c>/<c>HapticPattern</c>.

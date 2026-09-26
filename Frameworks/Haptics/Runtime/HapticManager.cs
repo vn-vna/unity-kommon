@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     [AddComponentMenu("Scheherazade/Haptic Manager")]
     [DontDestroyOnLoad]
@@ -234,22 +234,12 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
         private void ResolveProvider()
         {
             _provider = _config != null ? _config.Provider : null;
-
-            if (_provider == null || !_provider.IsAvailable)
+            if (_provider == null)
             {
-                if (_provider == null)
-                {
-                    QuickLog.Warning<HapticManager>(
-                        "No haptic provider configured; falling back to no-op.");
-                }
-                else
-                {
-                    QuickLog.Warning<HapticManager>(
-                        "Provider '{0}' is not available on this device; "
-                        + "falling back to no-op.", _provider.ProviderId);
-                }
-
+                QuickLog.Warning<HapticManager>(
+                    "No haptic provider configured; falling back to no-op.");
                 _provider = ScriptableObject.CreateInstance<NullHapticProvider>();
+                return;
             }
 
             try
@@ -259,9 +249,22 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
             catch (Exception ex)
             {
                 QuickLog.Error<HapticManager>(
-                    "Provider '{0}' failed to initialize: {1}", _provider.ProviderId, ex);
+                    "Provider '{0}' failed to initialize: {1}",
+                    _provider.ProviderId,
+                    ex);
                 _provider = ScriptableObject.CreateInstance<NullHapticProvider>();
+                return;
             }
+
+            if (_provider.IsAvailable)
+            {
+                return;
+            }
+
+            QuickLog.Warning<HapticManager>(
+                "Provider '{0}' is not available on this device; "
+                + "falling back to no-op.", _provider.ProviderId);
+            _provider = ScriptableObject.CreateInstance<NullHapticProvider>();
         }
 
         private void CreateRunner()

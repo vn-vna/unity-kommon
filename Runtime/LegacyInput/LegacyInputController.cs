@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.Common.Extensions;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
 
     /// <summary>

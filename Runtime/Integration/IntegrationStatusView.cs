@@ -4,19 +4,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
-using Com.Hapiga.Scheherazade.Common.Integration.Converter;
-using Com.Hapiga.Scheherazade.Common.Integration.IAR;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
-using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Integration.Ads;
+using Com.Scheherazade.Common.Integration.Converter;
+using Com.Scheherazade.Common.Integration.IAR;
+using Com.Scheherazade.Common.Integration.InAppPurchase;
+using Com.Scheherazade.Common.Integration.RemoteConfig;
+using Com.Scheherazade.Common.Integration.Segmentation;
+using Com.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Singleton;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration
+namespace Com.Scheherazade.Common.Integration
 {
     [DisallowMultipleComponent]
     public sealed class IntegrationStatusView : SingletonBehavior<IntegrationStatusView>

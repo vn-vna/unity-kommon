@@ -5,7 +5,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
+namespace Com.Scheherazade.Common.Editor.Toolkit
 {
     /// <summary>
     /// Extension methods for SerializedProperty to reduce boilerplate.

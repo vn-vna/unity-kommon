@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.ItemDatabase;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.ItemDatabase;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
+namespace Com.Scheherazade.Common.ItemDatabase.Editor
 {
     /// <summary>
     /// Project Settings > Frameworks > Item Database.
@@ -806,7 +806,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
             var configured = new List<string>(_config.MiddlewareTypeNames ?? Array.Empty<string>());
 
             string[] unresolved = configured
-                .Where(typeName => Type.GetType(typeName) == null)
+                .Where(typeName => ScheherazadeTypeNameMigration.ResolveType(typeName) == null)
                 .ToArray();
             if (unresolved.Length > 0)
             {

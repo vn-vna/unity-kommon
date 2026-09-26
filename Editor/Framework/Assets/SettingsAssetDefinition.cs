@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Framework.Assets
+namespace Com.Scheherazade.Common.Editor.Framework.Assets
 {
     public sealed class SettingsAssetDefinition<T>
         where T : ScriptableObject

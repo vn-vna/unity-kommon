@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.Common.DataSync;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Full persistent state of the item database.

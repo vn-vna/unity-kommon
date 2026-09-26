@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.MappedList;
+using Com.Scheherazade.Common.MappedList;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
 
     [CreateAssetMenu(fileName = "NewTransactionDatabase", menuName = "FallAway/Economy/TransactionDatabase")]

@@ -1,0 +1,19 @@
+{
+    "name": "Com.Scheherazade.UserIdentity",
+    "rootNamespace": "",
+    "references": [
+        "Com.Scheherazade.Common",
+        "Google.Play.Games",
+        "Apple.Core",
+        "Apple.GameKit"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

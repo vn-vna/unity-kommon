@@ -4,7 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking.Editor
+namespace Com.Scheherazade.Common.Integration.Tracking.Editor
 {
     [CustomPropertyDrawer(typeof(TrackingFeatureFilterAttribute))]
     public class TrackingFeatureFilterDrawer : PropertyDrawer

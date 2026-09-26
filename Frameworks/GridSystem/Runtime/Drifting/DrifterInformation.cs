@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// State per drifter, owned by <see cref="GridDrifter"/>.
@@ -13,6 +13,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
         public GridCoord SelectedCellRelativePosition { get; set; }
         public Vector2 IntentPointerAnchor { get; set; }
         public DirectionFlag PreferredAxis { get; set; }
+        public float CurrentSpeed { get; set; }
 
         public void UpdatePointerIntent(Vector2 pointer, float threshold)
         {

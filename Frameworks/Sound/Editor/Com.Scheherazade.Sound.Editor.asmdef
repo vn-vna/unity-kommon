@@ -1,0 +1,20 @@
+{
+    "name": "Com.Scheherazade.Sound.Editor",
+    "rootNamespace": "Com.Scheherazade.Common.Sound",
+    "references": [
+        "Com.Scheherazade.Sound",
+        "Com.Scheherazade.Common",
+        "Com.Scheherazade.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

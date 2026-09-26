@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.UserInterface
+namespace Com.Scheherazade.Common.UserInterface
 {
     /// <summary>
     /// Represents one animation without exposing its implementation library.

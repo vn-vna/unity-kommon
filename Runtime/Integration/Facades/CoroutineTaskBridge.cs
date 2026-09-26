@@ -2,9 +2,9 @@ using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Threading;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration
+namespace Com.Scheherazade.Common.Integration
 {
     /// <summary>
     /// Bridges coroutine-based manager APIs to Task-based APIs so facades

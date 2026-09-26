@@ -3,10 +3,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
 {
     public class PuzzleLevelOverrideRegistry : MonoBehaviour
     {

@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// Controls how the tasks inside a single group are executed.

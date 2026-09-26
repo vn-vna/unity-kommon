@@ -1,4 +1,4 @@
-namespace Com.Hapiga.FallAway.Inventory
+namespace Com.Scheherazade.FallAway.Inventory
 {
     public class InventoryQuery
     {}

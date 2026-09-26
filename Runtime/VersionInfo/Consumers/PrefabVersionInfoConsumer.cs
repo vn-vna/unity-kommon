@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
+namespace Com.Scheherazade.Common.VIC.Consumers
 {
     [CreateAssetMenu(
         fileName = "PrefabVersionInfoConsumer",
@@ -33,11 +33,17 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
                 return;
             }
 
-            VersionInfoCanvas canvas = _instance.GetComponent<VersionInfoCanvas>();
+            VersionInfoCanvas canvas = _instance
+                .GetComponentInChildren<VersionInfoCanvas>(true);
             if (canvas != null)
             {
                 canvas.SetVersionInfo(versionInfo);
+                return;
             }
+
+            Debug.LogWarning(
+                $"[VersionInfo] Prefab '{_prefab.name}' has no "
+                + "VersionInfoCanvas component.");
         }
         #endregion
     }

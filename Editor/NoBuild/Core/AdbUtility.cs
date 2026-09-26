@@ -1,20 +1,22 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     internal static class AdbUtility
     {
         private const string Fallback = "unknown";
         private const int Timeout = 10000;
+        private const int AvailabilityTimeout = 2000;
         private static bool _checked;
         private static string _adbPath;
+        private static bool _availabilityChecked;
+        private static bool _isAvailable;
 
         public static string AdbPath
         {
@@ -25,26 +27,84 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
         }
 
+        public static bool IsAvailable
+        {
+            get
+            {
+                if (_availabilityChecked)
+                {
+                    return _isAvailable;
+                }
+
+                _availabilityChecked = true;
+                if (string.IsNullOrEmpty(AdbPath))
+                {
+                    return false;
+                }
+
+                if (File.Exists(AdbPath))
+                {
+                    _isAvailable = true;
+                    return true;
+                }
+
+                try
+                {
+                    ProcessExecutionResult result =
+                        NoBuildProcessRunner.Run(
+                            AdbPath,
+                            "version",
+                            AvailabilityTimeout);
+                    _isAvailable = !result.TimedOut
+                        && result.ExitCode == 0;
+                }
+                catch
+                {
+                    _isAvailable = false;
+                }
+
+                return _isAvailable;
+            }
+        }
+
+        public static void RefreshAvailability()
+        {
+            _checked = false;
+            _adbPath = null;
+            _availabilityChecked = false;
+            _isAvailable = false;
+        }
+
         public static List<AdbDeviceInfo> GetDevices()
         {
             var devices = new List<AdbDeviceInfo>();
-            if (string.IsNullOrEmpty(AdbPath)) return devices;
+            if (!IsAvailable) return devices;
             string output = RunAdb("devices");
             if (string.IsNullOrEmpty(output)) return devices;
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines.Skip(1))
             {
                 var parts = line.Split('\t');
-                if (parts.Length >= 2 && parts[1] == "device")
-                    devices.Add(new AdbDeviceInfo { Serial = parts[0], State = parts[1] });
+                if (parts.Length >= 2)
+                {
+                    devices.Add(new AdbDeviceInfo
+                    {
+                        Serial = parts[0],
+                        State = parts[1]
+                    });
+                }
             }
 
             // Fill in model names
             for (int i = 0; i < devices.Count; i++)
             {
-                var d = devices[i];
-                d.Model = GetDeviceProperty(d.Serial, "ro.product.model");
-                devices[i] = d;
+                AdbDeviceInfo device = devices[i];
+                device.Model = device.State == "device"
+                    ? GetDeviceProperty(
+                        device.Serial,
+                        "ro.product.model")
+                    : device.State;
+                devices[i] = device;
             }
             return devices;
         }
@@ -106,63 +166,70 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// </summary>
         public static List<WirelessDeviceInfo> ScanWirelessDevices()
         {
-            var result = new List<WirelessDeviceInfo>();
-            if (string.IsNullOrEmpty(AdbPath)) return result;
+            if (!IsAvailable)
+            {
+                return new List<WirelessDeviceInfo>();
+            }
 
-            string output = RunAdb("mdns services",
+            string output = RunAdb(
+                "mdns services",
                 timeoutMs: 8000);
-            if (string.IsNullOrEmpty(output)) return result;
+            if (string.IsNullOrEmpty(output))
+            {
+                return new List<WirelessDeviceInfo>();
+            }
 
-            var lines = output.Split(
+            var devices = new Dictionary<
+                string,
+                WirelessDeviceInfo>(
+                    StringComparer.OrdinalIgnoreCase);
+            string[] lines = output.Split(
                 new[] { '\r', '\n' },
                 StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var line in lines)
+            foreach (string line in lines)
             {
-                if (!line.Contains("_adb-tls-connect._tcp"))
-                    continue;
-
-                var parts = line.Split(
-                    new[] { ' ', '\t' },
-                    StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length < 3) continue;
-
-                // Extract serial from instance name:
-                // "adb-<serial>-<random>" → <serial> is
-                // everything after "adb-" and before last "-"
-                string instance = parts[0];
-                string serial = "";
-                if (instance.StartsWith("adb-"))
+                bool isConnectService = line.Contains(
+                    "_adb-tls-connect._tcp");
+                bool isPairingService = line.Contains(
+                    "_adb-tls-pairing._tcp");
+                if (!isConnectService && !isPairingService)
                 {
-                    int lastDash = instance.LastIndexOf('-');
-                    if (lastDash > 4)
-                        serial = instance.Substring(
-                            4, lastDash - 4);
-                    else
-                        serial = instance.Substring(4);
+                    continue;
                 }
 
-                // Parse ip:port
-                string[] ipp = parts[parts.Length - 1]
-                    .Split(':');
-                if (ipp.Length != 2) continue;
-                if (!int.TryParse(ipp[1],
-                        out int port)) continue;
-
-                // Check if already connected
-                bool isConnected = IsDeviceConnected(
-                    serial);
-
-                result.Add(new WirelessDeviceInfo
+                if (!TryParseWirelessService(
+                        line,
+                        out string serial,
+                        out string ipAddress,
+                        out int port))
                 {
-                    Serial = serial,
-                    IpAddress = ipp[0],
-                    Port = port,
-                    IsConnected = isConnected
-                });
+                    continue;
+                }
+
+                devices.TryGetValue(
+                    serial,
+                    out WirelessDeviceInfo device);
+                device.Serial = serial;
+                device.IpAddress = ipAddress;
+                if (isConnectService)
+                {
+                    device.Port = port;
+                    device.IsConnected = IsDeviceConnected(
+                        serial,
+                        $"{ipAddress}:{port}");
+                }
+                else
+                {
+                    device.PairingPort = port;
+                }
+
+                devices[serial] = device;
             }
 
-            return result;
+            return devices.Values
+                .OrderBy(device => device.Serial)
+                .ToList();
         }
 
         /// <summary>
@@ -204,14 +271,72 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             return output.Contains("Successfully");
         }
 
-        private static bool IsDeviceConnected(
-            string serial)
+        private static bool TryParseWirelessService(
+            string line,
+            out string serial,
+            out string ipAddress,
+            out int port)
         {
-            var devices = GetDevices();
-            foreach (var d in devices)
+            serial = string.Empty;
+            ipAddress = string.Empty;
+            port = 0;
+
+            string[] parts = line.Split(
+                new[] { ' ', '\t' },
+                StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 3)
             {
-                if (d.Serial == serial) return true;
+                return false;
             }
+
+            string instance = parts[0];
+            if (!instance.StartsWith(
+                    "adb-",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            int lastDash = instance.LastIndexOf('-');
+            serial = lastDash > 4
+                ? instance.Substring(4, lastDash - 4)
+                : instance.Substring(4);
+
+            string endpoint = parts[parts.Length - 1];
+            int separator = endpoint.LastIndexOf(':');
+            if (separator <= 0
+                || !int.TryParse(
+                    endpoint.Substring(separator + 1),
+                    out port))
+            {
+                return false;
+            }
+
+            ipAddress = endpoint.Substring(0, separator);
+            return !string.IsNullOrEmpty(serial)
+                && !string.IsNullOrEmpty(ipAddress);
+        }
+
+        private static bool IsDeviceConnected(
+            string serial,
+            string endpoint)
+        {
+            List<AdbDeviceInfo> devices = GetDevices();
+            foreach (AdbDeviceInfo device in devices)
+            {
+                if (string.Equals(
+                        device.Serial,
+                        serial,
+                        StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(
+                        device.Serial,
+                        endpoint,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -225,26 +350,43 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             return string.IsNullOrEmpty(output) ? serial : output.Trim();
         }
 
-        private static string RunAdb(string args,
+        private static string RunAdb(
+            string args,
             int timeoutMs = Timeout)
         {
             try
             {
-                var psi = new ProcessStartInfo
+                ProcessExecutionResult result =
+                    NoBuildProcessRunner.Run(
+                        AdbPath,
+                        args,
+                        timeoutMs);
+
+                if (result.TimedOut)
                 {
-                    FileName = AdbPath,
-                    Arguments = args,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                if (p == null) return null;
-                p.WaitForExit(timeoutMs);
-                return p.StandardOutput.ReadToEnd();
+                    Debug.LogError(
+                        $"[NoBuild] adb command timed out after "
+                        + $"{timeoutMs}ms.");
+                    return null;
+                }
+
+                if (result.ExitCode != 0)
+                {
+                    Debug.LogWarning(
+                        $"[NoBuild] adb exited with code "
+                        + $"{result.ExitCode}: "
+                        + $"{result.CombinedOutput}");
+                }
+
+                return result.CombinedOutput;
             }
-            catch { return null; }
+            catch (Exception ex)
+            {
+                Debug.LogError(
+                    $"[NoBuild] Failed to run adb: "
+                    + $"{ex.Message}");
+                return null;
+            }
         }
 
         private static string FindAdb()
@@ -283,8 +425,11 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         public string Serial;
         public string IpAddress;
         public int Port;
+        public int PairingPort;
         public bool IsConnected;
-        public string Endpoint => $"{IpAddress}:{Port}";
+        public string Endpoint => Port > 0
+            ? $"{IpAddress}:{Port}"
+            : $"{IpAddress} (pairing only)";
         public string DisplayName =>
             $"{Serial} ({Endpoint})";
     }

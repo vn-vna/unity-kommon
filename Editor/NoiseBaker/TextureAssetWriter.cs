@@ -1,10 +1,10 @@
 using System.IO;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.NoiseBaker;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.NoiseBaker;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker.Editor
+namespace Com.Scheherazade.Common.NoiseBaker.Editor
 {
     /// <summary>
     /// Writes a baked texture to disk as a PNG asset and applies

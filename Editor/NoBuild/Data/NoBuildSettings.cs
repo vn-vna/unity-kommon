@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     public sealed class NoBuildSettings : ScriptableObject
     {
@@ -33,6 +33,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             "the {flags} placeholder."
         )]
         public List<FlagDefinition> flagDefinitions = new();
+
+        [Header("Toolbar")]
+        [Tooltip(
+            "Toolbar dropdown label. Supported placeholders: "
+            + "{scene-set}, {define-set}, {platform}, "
+            + "{scene-count}, {define-count}.")]
+        public string toolbarLabelTemplate = "NoBuild";
 
         [Header("Active State")]
         [Tooltip("Index of the currently active scene set (-1 = none).")]
@@ -63,6 +70,53 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     || activeScriptDefinitionSetIndex >= scriptDefinitionSets.Count)
                     return null;
                 return scriptDefinitionSets[activeScriptDefinitionSetIndex];
+            }
+        }
+
+        private void OnValidate()
+        {
+            MigrateSceneReferences();
+        }
+
+        private void MigrateSceneReferences()
+        {
+            if (sceneSets == null) return;
+
+            foreach (SceneSet sceneSet in sceneSets)
+            {
+                if (sceneSet?.scenes == null
+                    || sceneSet.combinations == null)
+                {
+                    continue;
+                }
+
+                foreach (SceneCombination combination
+                    in sceneSet.combinations)
+                {
+                    if (combination?.sceneReferences == null)
+                    {
+                        continue;
+                    }
+
+                    for (int i = 0;
+                        i < combination.sceneReferences.Count;
+                        i++)
+                    {
+                        SceneReference reference =
+                            combination.sceneReferences[i];
+                        if (reference.scene != null
+                            || reference.sceneIndex < 0
+                            || reference.sceneIndex
+                            >= sceneSet.scenes.Count)
+                        {
+                            continue;
+                        }
+
+                        reference.scene = sceneSet.scenes[
+                            reference.sceneIndex]?.scene;
+                        combination.sceneReferences[i] = reference;
+                    }
+                }
             }
         }
     }

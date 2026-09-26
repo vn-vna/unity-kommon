@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Logging
+namespace Com.Scheherazade.Common.Logging
 {
     [AddComponentMenu("Scheherazade/Logging/Quick Log")]
     public class QuickLog :

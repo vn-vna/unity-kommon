@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
 {
     [CreateAssetMenu(
         fileName = "EditorSimulatedReceiptValidationStep",

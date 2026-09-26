@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
+namespace Com.Scheherazade.Common.Integration.IAR
 {
     public enum InAppReviewManagerStatus
     {

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     /// <summary>
     /// Data-driven sound definition. Stored as a sub-asset inside SoundConfiguration

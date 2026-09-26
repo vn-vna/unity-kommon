@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
+namespace Com.Scheherazade.Common.AsyncResourceLoader.Editor
 {
     public static class CatalogBuildUtility
     {

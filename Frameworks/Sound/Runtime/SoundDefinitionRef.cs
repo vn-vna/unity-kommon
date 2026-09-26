@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     /// <summary>
     /// Bindable sound cue. Drop one on any MonoBehaviour via [SerializeField],

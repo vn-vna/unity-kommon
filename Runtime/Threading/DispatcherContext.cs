@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Threading
+namespace Com.Scheherazade.Common.Threading
 {
     internal interface IDispatcherContext
     {

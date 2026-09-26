@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
+namespace Com.Scheherazade.Common.ItemDatabase.Editor
 {
     /// <summary>
     /// Shared helpers for managing per-definition TagDefinition sub-assets.

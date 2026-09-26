@@ -2,19 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Editor;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     [InitializeOnLoad]
     internal static class NoBuildToolbarBootstrapper
     {
         private const int MaxAttempts = 300;
         private const string RightZone = "ToolbarZoneRightAlign";
+        private const string ElementName =
+            "Scheherazade.NoBuild.Toolbar";
         private static int _attempts;
         private static bool _done;
 
@@ -40,7 +42,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 if (root == null) { Fail("Root null"); return; }
                 VisualElement zone = Find(root, RightZone);
                 if (zone == null) { if (_attempts >= MaxAttempts) Fail("Zone not found"); return; }
-                var el = new NoBuildToolbarElement();
+                VisualElement existing = zone.Q(
+                    ElementName);
+                existing?.RemoveFromHierarchy();
+
+                var el = new NoBuildToolbarElement
+                {
+                    name = ElementName
+                };
                 zone.Insert(0, el);
                 _done = true; EditorApplication.update -= TryInit;
                 Debug.Log("[NoBuild] Toolbar injected.");
@@ -64,6 +73,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
     public sealed class NoBuildToolbarElement : VisualElement
     {
+        private readonly Button _button;
+
         public NoBuildToolbarElement()
         {
             style.flexDirection = FlexDirection.Row;
@@ -72,16 +83,50 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             style.marginLeft = 4;
             style.marginRight = 4;
 
-            Button btn = new Button(OnClick);
-            btn.text = "NoBuild \u25BC";
-            btn.tooltip = "NoBuild quick-switch menu";
-            btn.AddToClassList("unity-toolbar-button");
-            btn.AddToClassList("unity-editor-toolbar-element");
-            btn.style.height = 22;
-            btn.style.fontSize = 11;
-            btn.style.paddingLeft = 8;
-            btn.style.paddingRight = 8;
-            Add(btn);
+            _button = new Button(OnClick)
+            {
+                tooltip = "NoBuild quick-switch menu"
+            };
+            _button.AddToClassList("unity-toolbar-button");
+            _button.AddToClassList(
+                "unity-editor-toolbar-element");
+            _button.style.height = 22;
+            _button.style.fontSize = 11;
+            _button.style.paddingLeft = 8;
+            _button.style.paddingRight = 8;
+            Add(_button);
+
+            RegisterCallback<AttachToPanelEvent>(
+                _ => HandleAttached());
+            RegisterCallback<DetachFromPanelEvent>(
+                _ => HandleDetached());
+            RefreshLabel();
+        }
+
+        private void HandleAttached()
+        {
+            NoBuildToolbarState.RepaintRequested -=
+                RefreshLabel;
+            NoBuildToolbarState.RepaintRequested +=
+                RefreshLabel;
+            RefreshLabel();
+        }
+
+        private void HandleDetached()
+        {
+            NoBuildToolbarState.RepaintRequested -=
+                RefreshLabel;
+        }
+
+        private void RefreshLabel()
+        {
+            NoBuildSettings settings =
+                NoBuildResourceUtility.GetSettings();
+            string label =
+                NoBuildToolbarLabelResolver.Resolve(settings);
+            _button.text = label + " ▼";
+            _button.tooltip = label
+                + "\nOpen NoBuild quick-switch menu";
         }
 
         private void OnClick()
@@ -160,12 +205,38 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUI.color = Color.white;
                 if (GUILayout.Button(EditorGuiStrings.Truncate(s.setName, LabelMax), EditorGuiStyles.HoverLabel))
                 {
-                    _settings.activeSceneSetIndex = i;
-                    EditorUtility.SetDirty(_settings);
-                    SceneSwitcher.SwitchToSet(s);
-                    editorWindow.Close();
+                    if (SceneSwitcher.SwitchToSet(s))
+                    {
+                        _settings.activeSceneSetIndex = i;
+                        EditorUtility.SetDirty(_settings);
+                        NoBuildToolbarState.RequestRepaint();
+                        editorWindow.Close();
+                    }
                 }
-                int n = s.scenes.Count(sl => sl.enabled && sl.IsValid);
+
+                EditorGUI.BeginDisabledGroup(
+                    EditorApplication.isPlayingOrWillChangePlaymode);
+                if (GUILayout.Button(
+                        new GUIContent(
+                            "▶",
+                            $"Play from scene set '{s.setName}'"),
+                        GUILayout.Width(24),
+                        GUILayout.Height(BtnH)))
+                {
+                    if (SceneSwitcher.PlayFromSet(s))
+                    {
+                        _settings.activeSceneSetIndex = i;
+                        EditorUtility.SetDirty(_settings);
+                        NoBuildToolbarState.RequestRepaint();
+                        editorWindow.Close();
+                    }
+                }
+                EditorGUI.EndDisabledGroup();
+
+                int n = s.scenes.Count(
+                    slot => slot != null
+                        && slot.enabled
+                        && slot.IsValid);
                 GUILayout.Label(n + " scenes", EditorStyles.miniLabel, GUILayout.Width(CountW));
                 EditorGUILayout.EndHorizontal();
             }
@@ -220,7 +291,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     ScriptDefinitionSwitcher.ApplySet(s);
                     editorWindow.Close();
                 }
-                int n = s.slots?.Count(sl => sl.enabled) ?? Zero;
+                int n = s.slots?.Count(
+                    slot => slot != null && slot.enabled) ?? Zero;
                 GUILayout.Label(n + " on", EditorStyles.miniLabel, GUILayout.Width(DefCountW));
                 EditorGUILayout.EndHorizontal();
             }

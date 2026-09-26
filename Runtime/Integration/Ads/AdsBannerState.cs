@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     public enum AdsBannerStatus
     {

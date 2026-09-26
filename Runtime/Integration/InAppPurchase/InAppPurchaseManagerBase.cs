@@ -1,12 +1,12 @@
 using System;
 using System.Collections;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Validation;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
 
     public abstract class InAppPurchaseManagerBase<T> :
@@ -43,6 +43,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         [Header("Receipt Validation")]
         [SerializeField]
+        [HideInInspector]
         private InAppPurchaseReceiptValidationPipeline receiptValidationPipeline;
         #endregion
 
@@ -198,10 +199,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         public InAppPurchaseProductPrice? GetProductPrice(string productId) 
             => Provider?.GetProductPrice(productId);
 
-        public virtual void BuyProduct(string productId)
+        public virtual PurchaseHandle BuyProduct(string productId)
         {
-            if (_processingShuttingDown) return;
-            Provider?.BuyProduct(productId);
+            if (_processingShuttingDown || Provider == null)
+            {
+                var unavailable = new PurchaseHandleSource(productId);
+                unavailable.TryComplete(PurchaseStatus.Unavailable, "The purchase provider is unavailable.");
+                return unavailable.Handle;
+            }
+            return Provider.BuyProduct(productId);
         }
 
         public virtual void RestorePurchases()

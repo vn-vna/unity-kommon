@@ -3,7 +3,7 @@ using System.Linq;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
     public class PathMeshRenderer : MonoBehaviour
     {

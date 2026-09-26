@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.MappedList;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.MappedList;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Com.Hapiga.Scheherazade.Common.UserInterface
+namespace Com.Scheherazade.Common.UserInterface
 {
     public abstract class UIManagerBase<SelfT> :
         SingletonBehavior<SelfT>,

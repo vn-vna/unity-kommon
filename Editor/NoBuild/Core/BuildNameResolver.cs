@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Registry of placeholder → resolver functions for build name templates.
@@ -50,16 +50,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             // ── App Version ───────────────────
             Resolvers["app-version"] = (_, _) => Application.version;
-            Resolvers["app-bundle"]  = (_, _) =>
-            {
-#if UNITY_ANDROID
-                return PlayerSettings.Android.bundleVersionCode.ToString();
-#elif UNITY_IOS
-                return PlayerSettings.iOS.buildNumber;
-#else
-                return PlayerSettings.bundleVersion;
-#endif
-            };
+            Resolvers["app-bundle"] = (profile, _) =>
+                ResolveAppBundle(
+                    profile?.buildConfiguration?.platform
+                    ?? EditorUserBuildSettings.activeBuildTarget);
 
             // ── Profile Names ─────────────────
             Resolvers["profile-name"] = (profile, _) =>
@@ -98,7 +92,10 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     {
                         foreach (ScriptDefinitionSlot slot in set.slots)
                         {
-                            if (slot.enabled && !string.IsNullOrEmpty(slot.defineSymbol))
+                            if (slot != null
+                                && slot.enabled
+                                && !string.IsNullOrEmpty(
+                                    slot.defineSymbol))
                             {
                                 enabled.Add(slot.defineSymbol);
                             }
@@ -237,7 +234,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             foreach (FlagDefinition f in
                 settings.flagDefinitions)
             {
-                if (string.Equals(f.id, id,
+                if (f != null
+                    && string.Equals(f.id, id,
                         StringComparison.OrdinalIgnoreCase))
                     return f;
             }
@@ -384,7 +382,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
             foreach (ScriptDefinitionSlot slot in set.slots)
             {
-                if (string.Equals(
+                if (slot != null
+                    && string.Equals(
                     slot.defineSymbol,
                     symbol,
                     StringComparison.OrdinalIgnoreCase))
@@ -401,6 +400,21 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         // ══════════════════════════════════════════════════
         // ── Helper Methods
         // ══════════════════════════════════════════════════
+
+        internal static string ResolveAppBundle(
+            BuildTarget target)
+        {
+            switch (target)
+            {
+                case BuildTarget.Android:
+                    return PlayerSettings.Android.bundleVersionCode
+                        .ToString();
+                case BuildTarget.iOS:
+                    return PlayerSettings.iOS.buildNumber;
+                default:
+                    return PlayerSettings.bundleVersion;
+            }
+        }
 
         /// <summary>
         /// Replaces characters unsafe for file paths with underscores.

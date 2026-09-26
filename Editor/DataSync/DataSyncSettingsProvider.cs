@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.Common.DataSync;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
+namespace Com.Scheherazade.Common.DataSync.Editor
 {
     internal sealed class DataSyncSettingsProvider : SettingsProvider
     {

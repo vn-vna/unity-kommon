@@ -1,10 +1,10 @@
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem;
+using Com.Scheherazade.Common.Frameworks.GridSystem;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem.Editor
+namespace Com.Scheherazade.Common.Frameworks.GridSystem.Editor
 {
     [CustomEditor(typeof(GridBoard))]
     internal sealed class GridBoardEditor : UnityEditor.Editor

@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Minimal base for model generation (drop-car <c>ModelGenerator</c>).

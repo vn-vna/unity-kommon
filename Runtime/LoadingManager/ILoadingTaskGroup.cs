@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.LoadingManager
+namespace Com.Scheherazade.Common.LoadingManager
 {
     /// <summary>
     /// A named collection of <see cref="ILoadingTask"/> with an execution mode.

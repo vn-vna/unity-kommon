@@ -1,12 +1,12 @@
 using System;
 using System.Collections;
-using Com.Hapiga.Scheherazade.Common.Chrono;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Chrono;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     public enum AdsManagerStatus
     {

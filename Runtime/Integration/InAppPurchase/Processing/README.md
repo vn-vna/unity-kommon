@@ -5,7 +5,7 @@
 ## Enable before initialization
 
 ```csharp
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 
 var options = new InAppPurchaseProcessingOptions(
     verifier,
@@ -31,7 +31,7 @@ Receipt verification can be supplied by `InAppPurchaseReceiptValidationPipeline`
 
 ## Manager-owned receipt validation binding
 
-`InAppPurchaseManagerBase<T>` exposes an inherited **Receipt Validation** inspector section backed by the serialized field `receiptValidationPipeline`. The public `ReceiptValidationPipeline` property is read-only to consumers and has a protected setter; derived managers and fixture subclasses can also call `SetReceiptValidationPipeline(...)`.
+`InAppPurchaseManagerBase<T>` owns the hidden serialized field `receiptValidationPipeline`. Configure it through **Project Settings > Integration > In-App Purchase > Receipt Validation**, which provides platform tabs, ordered step lists, and default asset creation without duplicating the raw field in the Manager inspector. The public `ReceiptValidationPipeline` property is read-only to consumers and has a protected setter; derived managers and fixture subclasses can also call `SetReceiptValidationPipeline(...)`.
 
 This binding is deliberately passive. The base manager does **not** call `ConfigureTransactionProcessing`, construct processing options, or replace a provider's verifier automatically. A derived manager remains responsible for deciding when and how to pass its bound pipeline into `InAppPurchaseProcessingOptions`, after any project recovery/preflight work and before provider initialization.
 
@@ -45,7 +45,7 @@ var options = new InAppPurchaseProcessingOptions(
 ((ITransactionProcessingIapProvider)provider).ConfigureTransactionProcessing(options);
 ```
 
-Projects can keep another configuration asset as the source of truth, but should then copy that reference into the inherited manager binding explicitly and validate that the two do not drift. Assigning a pipeline in the inspector alone never enables validation unless the derived manager supplies it to the provider.
+Projects can keep another configuration asset as the source of truth, but should then copy that reference into the inherited manager binding explicitly and validate that the two do not drift. Assigning a pipeline in the Receipt Validation settings tab alone never enables validation unless the derived manager supplies it to the provider.
 
 ## Responsibilities
 
@@ -71,6 +71,14 @@ raw order -> classify -> verify -> durable fulfillment -> confirm attempt -> pub
 - A purchase and a later restoration may each publish for one transaction. Their durable processing must not replay consumable bundle extras.
 - All policy and notification code runs on the main thread. Native SDK callbacks are queued until the next tick. The pure pipeline rejects reentry and use from a different thread.
 - Pipeline cleanup invalidates future callbacks but cannot undo a durable commit that already happened. An unfinished native purchase can redeliver and must be safely recognized.
+
+## Purchase handles
+
+`BuyProduct` returns a read-only `PurchaseHandle` before opening the native store. Providers retain a separate `PurchaseHandleSource`, so consumers cannot spoof completion or transaction identity. The handle correlates one caller request without requiring consumers to match global product events. `Completion` resolves exactly once with a `PurchaseResult`; `Confirmed` means durable fulfillment completed, while store acknowledgement may still be retrying internally.
+
+The provider registers the handle before `PurchaseProduct`, so synchronous SDK or simulation callbacks cannot be lost. Unity IAP exposes no caller request token, therefore the designated providers permit only one unbound native purchase at a time. Verification/fulfillment retries keep the handle pending. Cancellation, deferral, unavailability, rejection and busy outcomes complete it directly; cleanup completes an unresolved handle as `Pending` without cancelling the underlying store transaction.
+
+A facade timeout stops waiting only. It does not cancel or invalidate the handle, reward recovery, or acknowledgement. Fetched recovery and restoration orders can run without a caller handle and continue to use durable transaction identity.
 
 ## SDK ownership and restoration
 
@@ -100,4 +108,4 @@ Sand now inherits the shared manager base and selects the designated Scheherazad
 
 Product assets, logical/store IDs, journal prefixes/schema, PlayerPrefs keys, build settings and Unity IAP 5.3 remain unchanged. Legacy Sand provider source remains available only as a rollback/reference until Android and iOS sandbox tests pass. The project config currently fails device readiness because its Google public key is blank and iOS minimum is below the verified flow requirement; this migration does not fabricate or weaken those settings.
 
-Editor regression tests: `Com.Hapiga.Scheherazade.InAppPurchase.EditorTests`. They use a fake store transport and do not open a real store or spend money. Device receipt verification and store sandbox tests remain required before project rollout.
+Editor regression tests: `Com.Scheherazade.InAppPurchase.EditorTests`. They use a fake store transport and do not open a real store or spend money. Device receipt verification and store sandbox tests remain required before project rollout.

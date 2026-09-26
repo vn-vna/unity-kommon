@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.Common.Extensions;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     [Serializable]
     public class PlaceableObjectGrid

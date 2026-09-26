@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     /// <summary>
     /// Contract for a sound player provider. Implemented by ScriptableObjects;

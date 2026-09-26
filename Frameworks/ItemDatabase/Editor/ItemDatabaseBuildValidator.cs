@@ -1,11 +1,11 @@
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
+namespace Com.Scheherazade.Common.ItemDatabase.Editor
 {
     internal sealed class ItemDatabaseBuildValidator : IPreprocessBuildWithReport
     {

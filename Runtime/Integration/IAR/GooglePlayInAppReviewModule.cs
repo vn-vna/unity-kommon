@@ -3,7 +3,7 @@ using System.Collections;
 using Google.Play.Review;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
+namespace Com.Scheherazade.Common.Integration.IAR
 {
     public class GooglePlayInAppReviewModule :
         IInAppReviewModule

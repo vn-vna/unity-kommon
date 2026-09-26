@@ -7,7 +7,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
+namespace Com.Scheherazade.Common.Editor.Toolkit
 {
     /// <summary>
     /// Typed wrapper around EditorPrefs with JSON serialization and optional

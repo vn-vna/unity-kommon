@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Achievement
+namespace Com.Scheherazade.Common.Achievement
 {
     public enum AchievementType
     {

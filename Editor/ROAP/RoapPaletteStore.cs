@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ROAP.Editor
+namespace Com.Scheherazade.Common.ROAP.Editor
 {
     public enum RoapParameterType
     {

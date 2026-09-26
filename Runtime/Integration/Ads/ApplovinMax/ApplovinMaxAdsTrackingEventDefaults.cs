@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Integration.Tracking;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     public static class ApplovinMaxAdsTrackingEventDefaults
     {

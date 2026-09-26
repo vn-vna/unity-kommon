@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityEngine.Purchasing;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     // Narrow native boundary: tests drive store events without opening a real store.
     internal interface IUnityIapStore : IDisposable

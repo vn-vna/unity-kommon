@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Drives iOS generator selection and Android waveform choice.

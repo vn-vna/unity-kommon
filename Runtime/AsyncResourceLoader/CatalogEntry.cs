@@ -1,7 +1,7 @@
 using System;
 using Newtonsoft.Json;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     [Serializable]
     public struct CatalogEntry

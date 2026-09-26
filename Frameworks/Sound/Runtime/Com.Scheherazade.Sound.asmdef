@@ -1,0 +1,16 @@
+{
+    "name": "Com.Scheherazade.Sound",
+    "rootNamespace": "Com.Scheherazade.Common.Sound",
+    "references": [
+        "Com.Scheherazade.Common"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

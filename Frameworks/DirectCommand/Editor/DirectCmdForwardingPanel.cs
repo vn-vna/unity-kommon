@@ -4,13 +4,13 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
-using Com.Hapiga.Scheherazade.Common.ROAP.Editor;
+using Com.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.ROAP.Editor;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Editor
+namespace Com.Scheherazade.Editor
 {
     internal sealed partial class DirectCmdSettingsProvider
     {

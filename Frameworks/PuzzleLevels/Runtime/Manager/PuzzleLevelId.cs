@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
 {
     public struct PuzzleLevelId :
         IAsyncResourceId,

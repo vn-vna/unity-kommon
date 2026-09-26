@@ -6,15 +6,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 using UnityEngine.Purchasing;
 using UnityEngine.Purchasing.Security;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     public class UnityPurchaseResult
     {
@@ -67,6 +67,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private HashSet<string> _successfulProductIds = new HashSet<string>();
         private Dictionary<string, int> _productRetryAttempts = new Dictionary<string, int>();
+        private PurchaseHandleSource _legacyPurchaseSource;
 
         public void Initialize()
         {
@@ -191,6 +192,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 return;
             }
             IsInitialized = false;
+            _legacyPurchaseSource?.TryComplete(PurchaseStatus.Pending, "The purchase provider was cleaned up before completion.");
+            _legacyPurchaseSource = null;
             if (_storeController == null) return;
 
             _storeController.OnProductsFetched -= HandleProductsFetched;
@@ -465,16 +468,39 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             }
         }
 
+        private bool IsActiveLegacyOrder(Order order, bool allowBind)
+        {
+            if (_legacyPurchaseSource == null || order?.CartOrdered == null ||
+                !order.CartOrdered.Items().Any(item =>
+                    item?.Product?.definition?.id == _legacyPurchaseSource.Handle.ProductId)) return false;
+            string nativeId = order.Info?.TransactionID;
+            if (string.IsNullOrEmpty(_legacyPurchaseSource.Handle.TransactionId) && allowBind)
+                _legacyPurchaseSource.TryBindTransaction(nativeId);
+            return string.Equals(
+                _legacyPurchaseSource.Handle.TransactionId,
+                nativeId,
+                StringComparison.Ordinal
+            );
+        }
+
         private void HandlePurchasePending(PendingOrder order)
         {
+            IsActiveLegacyOrder(order, true);
             _storeController.ConfirmPurchase(order);
         }
 
         private void HandlePurchaseFailed(FailedOrder order)
         {
+            PurchaseStatus status = order != null && order.FailureReason == PurchaseFailureReason.UserCancelled
+                ? PurchaseStatus.Canceled : PurchaseStatus.Failed;
+            if (IsActiveLegacyOrder(order, true))
+            {
+                _legacyPurchaseSource.TryComplete(status, order?.Details, order?.Info?.TransactionID);
+                _legacyPurchaseSource = null;
+            }
             QuickLog.Warning<UnityInAppPurchaseProvider>(
-                $"Purchase failed for product {order.Info.TransactionID}: " +
-                $"{order.FailureReason}"
+                $"Purchase failed for product {order?.Info?.TransactionID}: " +
+                $"{order?.FailureReason}"
             );
 
             foreach (var product in order.CartOrdered.Items())
@@ -490,6 +516,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         private void HandlePurchaseDeferred(DeferredOrder order)
         {
+            if (IsActiveLegacyOrder(order, true))
+            {
+                _legacyPurchaseSource.TryComplete(
+                    PurchaseStatus.Deferred,
+                    "Store approval is deferred.",
+                    order?.Info?.TransactionID
+                );
+            }
             QuickLog.Info<UnityInAppPurchaseProvider>(
                 "Purchase deferred for product {0}",
                 order.Info.TransactionID
@@ -525,6 +559,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
             if (!isValid)
             {
+                if (IsActiveLegacyOrder(order, false))
+                {
+                    _legacyPurchaseSource.TryComplete(
+                        PurchaseStatus.Failed,
+                        "Purchase verification failed.",
+                        order?.Info?.TransactionID
+                    );
+                    _legacyPurchaseSource = null;
+                }
                 QuickLog.Warning<UnityInAppPurchaseProvider>(
                     "Verification failed for transaction >> Transaction ID: {0}",
                     order.Info.TransactionID
@@ -541,6 +584,14 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 "Verification succeeded for transaction >> Transaction ID: {0}",
                 order.Info.TransactionID
             );
+            if (IsActiveLegacyOrder(order, false))
+            {
+                _legacyPurchaseSource.TryComplete(
+                    PurchaseStatus.Confirmed,
+                    transactionId: order.Info.TransactionID
+                );
+                _legacyPurchaseSource = null;
+            }
 
             foreach (var receipt in receipts)
             {
@@ -642,20 +693,47 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             return price;
         }
 
-        public void BuyProduct(string productId)
+        public PurchaseHandle BuyProduct(string productId)
         {
+            var source = new PurchaseHandleSource(productId);
             if (IsTransactionProcessingEnabled)
             {
-                if (_processingSession != null) _processingSession.BuyProduct(productId);
-                else NotifyProcessingFailure(productId, PurchaseStatus.Failed, "The store has not initialized.");
-                return;
+                if (_processingSession != null) _processingSession.BuyProduct(productId, source);
+                else
+                {
+                    const string reason = "The store has not initialized.";
+                    source.TryComplete(PurchaseStatus.Unavailable, reason);
+                    NotifyProcessingFailure(productId, PurchaseStatus.Unavailable, reason);
+                }
+                return source.Handle;
             }
-            PurchaseInitiated?.Invoke(
-                Manager.ProductDatabase
-                    .Products
-                    .FirstOrDefault(p => p.ProductId == productId)
-            );
-            _storeController.PurchaseProduct(productId);
+
+            IInAppPurchaseProduct product = Manager?.ProductDatabase?.Products?
+                .FirstOrDefault(candidate => candidate.ProductId == productId);
+            if (_storeController == null || product == null)
+            {
+                const string reason = "The product or store is unavailable.";
+                source.TryComplete(PurchaseStatus.Unavailable, reason);
+                PurchaseFailed?.Invoke(product);
+                return source.Handle;
+            }
+            if (_legacyPurchaseSource != null)
+            {
+                source.TryComplete(PurchaseStatus.Busy, "Another purchase is already pending.");
+                PurchaseFailed?.Invoke(product);
+                return source.Handle;
+            }
+
+            _legacyPurchaseSource = source;
+            PurchaseInitiated?.Invoke(product);
+            try { _storeController.PurchaseProduct(productId); }
+            catch (Exception exception)
+            {
+                source.TryComplete(PurchaseStatus.Failed, exception.Message);
+                _legacyPurchaseSource = null;
+                PurchaseFailed?.Invoke(product);
+            }
+            return source.Handle;
         }
 
         public void RestorePurchases()

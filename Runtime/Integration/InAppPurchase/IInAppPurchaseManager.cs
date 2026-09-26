@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     public interface IInAppPurchaseManager
     {
@@ -22,7 +22,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
         void Shutdown();
 
         InAppPurchaseProductPrice? GetProductPrice(string productId);
-        void BuyProduct(string productId);
+        PurchaseHandle BuyProduct(string productId);
         void RestorePurchases();
     }
 }

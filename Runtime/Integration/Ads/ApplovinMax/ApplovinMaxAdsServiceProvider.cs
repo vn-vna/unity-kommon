@@ -3,13 +3,14 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.MappedList;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using System.Threading;
+using Com.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.MappedList;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     [CreateAssetMenu(
         fileName = "ApplovinMaxAdsServiceProvider",
@@ -27,12 +28,20 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         public IAdsManager AdsManager { get; set; }
         public bool IsInitialized { get; private set; }
 
+        private bool HasActiveFullscreenOperation
+        {
+            get
+            {
+                AtomicFullscreenAdOperation active = Volatile.Read(ref _activeFullscreen);
+                return active != null && !active.Handler.IsTerminal;
+            }
+        }
+
         public bool IsInterstitialAvailable
         {
             get
             {
-                if (!IsInitialized || _fullscreenChannelQuarantined ||
-                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
+                if (!IsInitialized || HasActiveFullscreenOperation) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -44,8 +53,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             get
             {
-                if (!IsInitialized || _fullscreenChannelQuarantined ||
-                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
+                if (!IsInitialized || HasActiveFullscreenOperation) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.Rewarded, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -57,8 +65,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         {
             get
             {
-                if (!IsInitialized || _fullscreenChannelQuarantined ||
-                    (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)) return false;
+                if (!IsInitialized || HasActiveFullscreenOperation) return false;
                 if (!UnitIdsMapping.TryGetValue(AdsType.OpenApp, out var unitId)
                     || string.IsNullOrEmpty(unitId.UnitId))
                     return false;
@@ -126,15 +133,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         [SerializeField]
         private bool allowSdkInEditor;
-
-        [SerializeField, Min(1)]
-        private float showStartTimeoutSeconds = 15;
-
-        [SerializeField, Min(1)]
-        private float requestTimeoutSeconds = 300;
-
-        [SerializeField, Min(1)]
-        private float rewardCallbackTimeoutSeconds = 10;
 
         [SerializeField]
         private string[] testDeviceAdvertisingIdentifiers = Array.Empty<string>();
@@ -225,14 +223,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private int _interstitialLoadGen;
         private int _rewardedLoadGen;
         private int _bannerLoadGen;
-        private static bool _fullscreenChannelQuarantined;
-        private FullscreenInvocation _activeFullscreen;
+        private AtomicFullscreenAdOperation _activeFullscreen;
 
         #endregion
 
         #region Public Methods
 
-        public void Initialize()
+public void Initialize()
         {
             CleanUp();
 #if UNITY_EDITOR
@@ -247,17 +244,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             SubscribeCallbacks();
             try
             {
+                if (MaxSdk.IsInitialized())
+                {
+                    HandleMaxSdkInitializedEvents(MaxSdk.GetSdkConfiguration());
+                    return;
+                }
+
                 string[] identifiers = (testDeviceAdvertisingIdentifiers ?? Array.Empty<string>())
                     .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
                     .Select(identifier => identifier.Trim())
                     .Distinct(StringComparer.Ordinal)
                     .ToArray();
-                MaxSdk.SetTestDeviceAdvertisingIdentifiers(identifiers);
+                if (identifiers.Length > 0)
+                {
+                    MaxSdk.SetTestDeviceAdvertisingIdentifiers(identifiers);
+                }
 
-                if (MaxSdk.IsInitialized())
-                    HandleMaxSdkInitializedEvents(MaxSdk.GetSdkConfiguration());
-                else
-                    MaxSdk.InitializeSdk();
+                MaxSdk.InitializeSdk();
             }
             catch (Exception exception)
             {
@@ -276,7 +279,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             IsBannerAvailable = false;
             _bannerVisibleRequested = false;
             BannerState = AdsBannerState.Unavailable("Ads provider was cleaned up.");
-            TerminateActiveInvocationForCleanup();
+            TerminateActiveOperationForCleanup();
             _bannerAutoRefreshing = false;
 
             _openAppHandle?.Cancel();
@@ -293,7 +296,6 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
 
         public void LoadAds()
         {
-            AdvanceFullscreenInvocation(Time.unscaledDeltaTime);
         }
 
         public AdsInvocationHandler ShowAppOpenAds(string placement)
@@ -303,7 +305,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (!UnitIdsMapping.TryGetValue(AdsType.OpenApp, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
                 return AdsInvocationHandler.Failed(AdsType.OpenApp, placement, "App-open ad unit ID is not set.");
 
-            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.OpenApp, placement, unitId.UnitId);
+            AdsInvocationHandler handler = BeginAtomicFullscreenOperation(AdsType.OpenApp, placement, unitId.UnitId);
             if (handler.IsTerminal) return handler;
             try
             {
@@ -313,7 +315,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             catch (Exception exception)
             {
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show app-open ad: {0}", exception.Message);
-                FailInvocationStart(handler, "Failed to start app-open ad: " + exception.Message);
+                FailOperationStart(handler, "Failed to start app-open ad: " + exception.Message);
             }
             return handler;
         }
@@ -383,7 +385,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (!UnitIdsMapping.TryGetValue(AdsType.Interstitial, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
                 return AdsInvocationHandler.Failed(AdsType.Interstitial, placement, "Interstitial ad unit ID is not set.");
 
-            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.Interstitial, placement, unitId.UnitId);
+            AdsInvocationHandler handler = BeginAtomicFullscreenOperation(AdsType.Interstitial, placement, unitId.UnitId);
             if (handler.IsTerminal) return handler;
             try
             {
@@ -393,7 +395,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             catch (Exception exception)
             {
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show interstitial ad: {0}", exception.Message);
-                FailInvocationStart(handler, "Failed to start interstitial ad: " + exception.Message);
+                FailOperationStart(handler, "Failed to start interstitial ad: " + exception.Message);
             }
             return handler;
         }
@@ -405,7 +407,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             if (!UnitIdsMapping.TryGetValue(AdsType.Rewarded, out var unitId) || string.IsNullOrEmpty(unitId.UnitId))
                 return AdsInvocationHandler.Failed(AdsType.Rewarded, placement, "Rewarded ad unit ID is not set.");
 
-            AdsInvocationHandler handler = BeginFullscreenInvocation(AdsType.Rewarded, placement, unitId.UnitId);
+            AdsInvocationHandler handler = BeginAtomicFullscreenOperation(AdsType.Rewarded, placement, unitId.UnitId);
             if (handler.IsTerminal) return handler;
             try
             {
@@ -415,7 +417,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             catch (Exception exception)
             {
                 QuickLog.Error<ApplovinMaxAdsServiceProvider>("Failed to show rewarded ad: {0}", exception.Message);
-                FailInvocationStart(handler, "Failed to start rewarded ad: " + exception.Message);
+                FailOperationStart(handler, "Failed to start rewarded ad: " + exception.Message);
             }
             return handler;
         }
@@ -856,122 +858,141 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
                 _ => MaxSdkBase.AdViewPosition.BottomCenter
             });
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void ResetFullscreenChannel() => _fullscreenChannelQuarantined = false;
-
-        private AdsInvocationHandler BeginFullscreenInvocation(
+        private AdsInvocationHandler BeginAtomicFullscreenOperation(
             AdsType type,
             string placement,
             string unitId)
         {
-            if (_fullscreenChannelQuarantined)
-                return AdsInvocationHandler.Failed(type, placement,
-                    "A previous fullscreen ad did not close safely; restart the app before showing another ad.");
-            if (_activeFullscreen != null && !_activeFullscreen.Handler.IsTerminal)
-            {
-                return AdsInvocationHandler.Failed(
-                    type,
-                    placement,
-                    "Another fullscreen ad invocation is already active."
-                );
-            }
-
             var handler = new AdsInvocationHandler(type, placement);
-            _activeFullscreen = new FullscreenInvocation(handler, unitId);
-            return handler;
+            var operation = new AtomicFullscreenAdOperation(handler, unitId);
+
+            while (true)
+            {
+                AtomicFullscreenAdOperation active = Volatile.Read(ref _activeFullscreen);
+                if (active != null && !active.Handler.IsTerminal)
+                {
+                    return AdsInvocationHandler.Failed(
+                        type,
+                        placement,
+                        "Another fullscreen ad operation is already active."
+                    );
+                }
+
+                if (active != null)
+                {
+                    Interlocked.CompareExchange(ref _activeFullscreen, null, active);
+                    continue;
+                }
+
+                if (Interlocked.CompareExchange(ref _activeFullscreen, operation, null) == null)
+                    return handler;
+            }
         }
 
-        private bool IsCurrentInvocation(AdsInvocationHandler handler) =>
-            handler != null && ReferenceEquals(_activeFullscreen?.Handler, handler) && !handler.IsTerminal;
-
-        private FullscreenInvocation GetActiveInvocation(AdsType type, string unitId, string eventPlacement = null)
+        private bool IsCurrentOperation(AdsInvocationHandler handler)
         {
-            FullscreenInvocation invocation = _activeFullscreen;
-            if (invocation == null || invocation.Handler.IsTerminal || invocation.Handler.AdType != type)
+            AtomicFullscreenAdOperation active = Volatile.Read(ref _activeFullscreen);
+            return handler != null && ReferenceEquals(active?.Handler, handler) && !handler.IsTerminal;
+        }
+
+        private AtomicFullscreenAdOperation GetActiveOperation(
+            AdsType type,
+            string unitId,
+            string eventPlacement = null)
+        {
+            AtomicFullscreenAdOperation operation = Volatile.Read(ref _activeFullscreen);
+            if (operation == null || operation.Handler.IsTerminal || operation.Handler.AdType != type)
                 return null;
             if (!string.IsNullOrEmpty(unitId) &&
-                !string.Equals(invocation.UnitId, unitId, StringComparison.Ordinal))
+                !string.Equals(operation.UnitId, unitId, StringComparison.Ordinal))
                 return null;
             if (!string.IsNullOrEmpty(eventPlacement) &&
-                !string.Equals(invocation.Handler.Placement, eventPlacement, StringComparison.Ordinal))
+                !string.Equals(operation.Handler.Placement, eventPlacement, StringComparison.Ordinal))
                 return null;
-            return invocation;
+            return operation;
         }
 
         private void MarkFullscreenDisplayed(AdsType type, string unitId, string placement)
         {
-            GetActiveInvocation(type, unitId, placement)?.Handler.MarkShowing();
+            GetActiveOperation(type, unitId, placement)?.Handler.MarkShowing();
         }
 
         private void MarkRewardEarned(string unitId, string placement)
         {
-            FullscreenInvocation invocation = GetActiveInvocation(AdsType.Rewarded, unitId, placement);
-            if (invocation == null) return;
-            // Record economic credit before Showing can invoke reentrant user code.
-            invocation.Handler.MarkRewardEarned();
-            if (!invocation.Handler.WasDisplayed) invocation.Handler.MarkShowing();
-            if (invocation.Hidden)
-                CompleteInvocationSucceeded(invocation, "Reward earned after ad close.");
+            AtomicFullscreenAdOperation operation = GetActiveOperation(
+                AdsType.Rewarded,
+                unitId,
+                placement
+            );
+            if (operation == null) return;
+
+            // MAX reward confirmation is authoritative. Keep the operation active
+            // until MAX also confirms that the fullscreen ad was hidden.
+            operation.Handler.MarkRewardEarned();
+            if (!operation.Handler.WasDisplayed) operation.Handler.MarkShowing();
         }
 
         private void MarkFullscreenHidden(AdsType type, string unitId, string placement)
         {
-            FullscreenInvocation invocation = GetActiveInvocation(type, unitId, placement);
-            if (invocation == null) return;
+            AtomicFullscreenAdOperation operation = GetActiveOperation(type, unitId, placement);
+            if (operation == null) return;
 
-            invocation.Hidden = true;
-            invocation.RewardWaitElapsed = 0;
-            invocation.SkipRewardWaitTick = true;
-            invocation.Handler.MarkClosed();
-
-            if (type != AdsType.Rewarded)
+            operation.Handler.MarkClosed();
+            if (type == AdsType.Rewarded && !operation.Handler.RewardEarned)
             {
-                CompleteInvocationSucceeded(invocation, "Fullscreen ad closed.");
+                CancelOperation(operation, "Rewarded ad closed without a MAX reward callback.");
                 return;
             }
 
-            if (invocation.Handler.RewardEarned)
-                CompleteInvocationSucceeded(invocation, "Reward earned and ad closed.");
+            CompleteOperationSucceeded(
+                operation,
+                type == AdsType.Rewarded
+                    ? "Reward earned and ad closed."
+                    : "Fullscreen ad closed."
+            );
         }
 
-        private void FailFullscreenInvocation(AdsType type, string unitId, string placement, string reason)
+        private void FailFullscreenOperation(AdsType type, string unitId, string placement, string reason)
         {
-            FullscreenInvocation invocation = GetActiveInvocation(type, unitId, placement);
-            if (invocation == null) return;
-            if (invocation.Handler.RewardEarned)
-                invocation.Handler.CompleteSucceeded(reason, invocation.Handler.WasClosed);
+            AtomicFullscreenAdOperation operation = GetActiveOperation(type, unitId, placement);
+            if (operation == null) return;
+            if (operation.Handler.RewardEarned)
+                operation.Handler.CompleteSucceeded(reason, operation.Handler.WasClosed);
             else
-                invocation.Handler.CompleteFailed(reason, invocation.Handler.WasClosed);
-            ReleaseInvocation(invocation);
+                operation.Handler.CompleteFailed(reason, operation.Handler.WasClosed);
+            ReleaseOperation(operation);
         }
 
-        private void FailInvocationStart(AdsInvocationHandler handler, string reason)
+        private void FailOperationStart(AdsInvocationHandler handler, string reason)
         {
-            if (!IsCurrentInvocation(handler)) return;
+            if (!IsCurrentOperation(handler)) return;
             handler.CompleteFailed(reason, handler.WasClosed);
-            ReleaseInvocation(_activeFullscreen);
+            ReleaseOperation(_activeFullscreen);
         }
 
-        private void CompleteInvocationSucceeded(FullscreenInvocation invocation, string reason)
+        private void CompleteOperationSucceeded(AtomicFullscreenAdOperation operation, string reason)
         {
-            if (invocation == null || !IsCurrentInvocation(invocation.Handler)) return;
-            invocation.Handler.CompleteSucceeded(reason, invocation.Handler.WasClosed);
-            ReleaseInvocation(invocation);
+            if (operation == null || !IsCurrentOperation(operation.Handler)) return;
+            operation.Handler.CompleteSucceeded(reason, operation.Handler.WasClosed);
+            ReleaseOperation(operation);
         }
 
-        private void CancelInvocation(FullscreenInvocation invocation, string reason)
+        private void CancelOperation(AtomicFullscreenAdOperation operation, string reason)
         {
-            if (invocation == null || !IsCurrentInvocation(invocation.Handler)) return;
-            invocation.Handler.CompleteCancelled(reason, invocation.Handler.WasClosed);
-            ReleaseInvocation(invocation);
+            if (operation == null || !IsCurrentOperation(operation.Handler)) return;
+            operation.Handler.CompleteCancelled(reason, operation.Handler.WasClosed);
+            ReleaseOperation(operation);
         }
 
-        private void ReleaseInvocation(FullscreenInvocation invocation)
+        private void ReleaseOperation(AtomicFullscreenAdOperation operation)
         {
-            if (!ReferenceEquals(_activeFullscreen, invocation)) return;
-            _activeFullscreen = null;
-            if (_fullscreenChannelQuarantined) return;
-            switch (invocation.Handler.AdType)
+            if (!ReferenceEquals(
+                    Interlocked.CompareExchange(ref _activeFullscreen, null, operation),
+                    operation
+                ))
+                return;
+
+            switch (operation.Handler.AdType)
             {
                 case AdsType.Rewarded:
                     _rewardedHandle?.Execute();
@@ -985,71 +1006,21 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
             }
         }
 
-        private void AdvanceFullscreenInvocation(float unscaledDeltaTime)
+        private void TerminateActiveOperationForCleanup()
         {
-            FullscreenInvocation invocation = _activeFullscreen;
-            if (invocation == null || invocation.Handler.IsTerminal)
-            {
-                _activeFullscreen = null;
-                return;
-            }
+            AtomicFullscreenAdOperation operation = Interlocked.Exchange(ref _activeFullscreen, null);
+            if (operation == null) return;
 
-            float delta = float.IsNaN(unscaledDeltaTime) || float.IsInfinity(unscaledDeltaTime)
-                ? 0 : Mathf.Max(0, unscaledDeltaTime);
-            invocation.Elapsed += delta;
-
-            if (invocation.Hidden && invocation.Handler.AdType == AdsType.Rewarded &&
-                !invocation.Handler.RewardEarned)
-            {
-                // The first frame after native close can include the whole video.
-                // Start an independent grace clock on the following provider tick.
-                if (invocation.SkipRewardWaitTick)
-                {
-                    invocation.SkipRewardWaitTick = false;
-                    return;
-                }
-                invocation.RewardWaitElapsed += delta;
-                if (invocation.RewardWaitElapsed >= rewardCallbackTimeoutSeconds)
-                    CancelInvocation(invocation, "Reward callback did not arrive after the ad closed.");
-                return;
-            }
-
-            if (!invocation.Handler.WasDisplayed && !invocation.Hidden &&
-                invocation.Elapsed >= showStartTimeoutSeconds)
-            {
-                _fullscreenChannelQuarantined = true;
-                invocation.Handler.CompleteFailed("The ad did not start before its timeout; native closure is unknown.");
-                ReleaseInvocation(invocation);
-                return;
-            }
-
-            if (invocation.Elapsed < requestTimeoutSeconds) return;
-            if (!invocation.Hidden) _fullscreenChannelQuarantined = true;
-            if (invocation.Handler.RewardEarned)
-                CompleteInvocationSucceeded(invocation, "Reward was earned before the invocation timeout.");
-            else
-                CancelInvocation(invocation, "The fullscreen ad invocation timed out; native closure is unknown.");
-        }
-
-        private void TerminateActiveInvocationForCleanup()
-        {
-            FullscreenInvocation invocation = _activeFullscreen;
-            if (invocation == null)
-                return;
-
-            if (!invocation.Hidden) _fullscreenChannelQuarantined = true;
-            if (invocation.Handler.RewardEarned)
-                invocation.Handler.CompleteSucceeded(
+            if (operation.Handler.RewardEarned)
+                operation.Handler.CompleteSucceeded(
                     "Provider cleanup followed a confirmed reward.",
-                    invocation.Handler.WasClosed
+                    operation.Handler.WasClosed
                 );
             else
-                invocation.Handler.CompleteCancelled(
-                    "Provider was cleaned up before the invocation completed.",
-                    invocation.Handler.WasClosed
+                operation.Handler.CompleteCancelled(
+                    "Provider was cleaned up before the operation completed.",
+                    operation.Handler.WasClosed
                 );
-
-            _activeFullscreen = null;
         }
 
         #region Rewarded Ad Callbacks
@@ -1069,7 +1040,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleRewardedAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.RewardDisplayFailed);
-            FailFullscreenInvocation(AdsType.Rewarded, arg1, info2?.Placement, "Rewarded ad display failed.");
+            FailFullscreenOperation(AdsType.Rewarded, arg1, info2?.Placement, "Rewarded ad display failed.");
         }
 
         private void HandleRewardedAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
@@ -1117,7 +1088,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleInterstitialAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.InterDisplayFailed);
-            FailFullscreenInvocation(AdsType.Interstitial, arg1, info2?.Placement, "Interstitial ad display failed.");
+            FailFullscreenOperation(AdsType.Interstitial, arg1, info2?.Placement, "Interstitial ad display failed.");
         }
 
         private void HandleInterstitialAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
@@ -1202,7 +1173,7 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         private void HandleAppOpenAdDisplayFailed(string arg1, MaxSdkBase.ErrorInfo info1, MaxSdkBase.AdInfo info2)
         {
             SendTrackingEvent(ApplovinMaxAdsTrackingEventType.AppOpenDisplayFailed);
-            FailFullscreenInvocation(AdsType.OpenApp, arg1, info2?.Placement, "App-open ad display failed.");
+            FailFullscreenOperation(AdsType.OpenApp, arg1, info2?.Placement, "App-open ad display failed.");
         }
 
         private void HandleAppOpenAdDisplayed(string arg1, MaxSdkBase.AdInfo info)
@@ -1242,16 +1213,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
         #endregion
 
         #region Nested Types
-        private sealed class FullscreenInvocation
+        private sealed class AtomicFullscreenAdOperation
         {
             internal readonly AdsInvocationHandler Handler;
             internal readonly string UnitId;
-            internal float Elapsed;
-            internal float RewardWaitElapsed;
-            internal bool Hidden;
-            internal bool SkipRewardWaitTick;
 
-            internal FullscreenInvocation(AdsInvocationHandler handler, string unitId)
+            internal AtomicFullscreenAdOperation(AdsInvocationHandler handler, string unitId)
             {
                 Handler = handler;
                 UnitId = unitId ?? string.Empty;

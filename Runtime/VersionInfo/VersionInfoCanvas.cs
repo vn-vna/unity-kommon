@@ -1,7 +1,8 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC
+namespace Com.Scheherazade.Common.VIC
 {
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Canvas))]
@@ -11,8 +12,14 @@ namespace Com.Hapiga.Scheherazade.Common.VIC
         #region Public Methods
         public void SetVersionInfo(string version)
         {
-            Text[] texts = GetComponentsInChildren<Text>(true);
-            foreach (Text text in texts)
+            Text[] legacyTexts = GetComponentsInChildren<Text>(true);
+            foreach (Text text in legacyTexts)
+            {
+                text.text = version;
+            }
+
+            TMP_Text[] tmpTexts = GetComponentsInChildren<TMP_Text>(true);
+            foreach (TMP_Text text in tmpTexts)
             {
                 text.text = version;
             }

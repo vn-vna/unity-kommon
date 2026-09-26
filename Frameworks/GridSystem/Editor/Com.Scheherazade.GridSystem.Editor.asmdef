@@ -1,0 +1,19 @@
+{
+    "name": "Com.Scheherazade.GridSystem.Editor",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.GridSystem.Editor",
+    "references": [
+        "Com.Scheherazade.GridSystem",
+        "Com.Scheherazade.Common"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

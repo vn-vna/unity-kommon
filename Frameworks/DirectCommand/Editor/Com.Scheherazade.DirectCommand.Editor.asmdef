@@ -1,0 +1,20 @@
+{
+    "name": "Com.Scheherazade.DirectCommand.Editor",
+    "rootNamespace": "Com.Scheherazade.Editor",
+    "references": [
+        "Com.Scheherazade.DirectCommand",
+        "Com.Scheherazade.Common",
+        "Com.Scheherazade.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

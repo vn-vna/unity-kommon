@@ -3,12 +3,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.NoiseBaker;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.NoiseBaker;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker.Editor
+namespace Com.Scheherazade.Common.NoiseBaker.Editor
 {
     /// <summary>
     /// Editor window for baking noise / voronoi textures: live preview,

@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Editor;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
-using Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation;
+using Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 {
     [CustomEditor(typeof(PuzzleLevelReferenceTable))]
     internal sealed class PuzzleLevelReferenceTableEditor : UnityEditor.Editor

@@ -1,7 +1,7 @@
 using System;
 using UnityEngine.Scripting;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Marks a class as discoverable Item Database middleware.

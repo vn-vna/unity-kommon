@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
     /// <summary>
     /// Contains information about an input action, including its state and whether it is enabled.

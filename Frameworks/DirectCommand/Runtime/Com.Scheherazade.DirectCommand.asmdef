@@ -1,0 +1,16 @@
+{
+    "name": "Com.Scheherazade.DirectCommand",
+    "rootNamespace": "Com.Scheherazade.Common",
+    "references": [
+        "Com.Scheherazade.Common"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,6 +1,6 @@
 using UnityEngine.Scripting;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     /// <summary>
     /// Marker interface for runtime tag data classes.

@@ -1,0 +1,20 @@
+{
+    "name": "Com.Scheherazade.UserIdentity.Editor",
+    "rootNamespace": "",
+    "references": [
+        "Com.Scheherazade.UserIdentity",
+        "Com.Scheherazade.Common",
+        "Com.Scheherazade.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

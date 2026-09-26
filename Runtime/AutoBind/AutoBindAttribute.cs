@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.AutoBind
+namespace Com.Scheherazade.Common.AutoBind
 {
     [System.Flags]
     public enum AutoBindFromFlag

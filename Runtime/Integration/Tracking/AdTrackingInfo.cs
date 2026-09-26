@@ -1,6 +1,6 @@
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
+using Com.Scheherazade.Common.Integration.Ads;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     public struct AdTrackingInfo : ITrackingData
     {

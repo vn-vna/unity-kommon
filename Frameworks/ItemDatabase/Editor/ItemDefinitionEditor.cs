@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
+namespace Com.Scheherazade.Common.ItemDatabase.Editor
 {
     /// <summary>
     /// Fully custom editor for ItemDefinition.

@@ -2,7 +2,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
+namespace Com.Scheherazade.Common.AsyncResourceLoader.Editor.Tests
 {
     public sealed class CatalogBuildUtilityTests
     {

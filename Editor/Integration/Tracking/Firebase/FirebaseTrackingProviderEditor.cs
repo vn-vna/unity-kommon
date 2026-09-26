@@ -2,11 +2,11 @@
 
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking.Editor
+namespace Com.Scheherazade.Common.Integration.Tracking.Editor
 {
     [CustomEditor(typeof(FirebaseTrackingProvider))]
     internal sealed class FirebaseTrackingProviderEditor : UnityEditor.Editor

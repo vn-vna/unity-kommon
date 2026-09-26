@@ -1,12 +1,12 @@
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Android provider — native VibrationEffect API ladder with
     /// Handheld.Vibrate fallback. Calls
-    /// <c>com.hapiga.scheherazade.android.HapticEngine</c> (mirrors the
+    /// <c>com.scheherazade.android.HapticEngine</c> (mirrors the
     /// NativeDialogue pattern). Requires the VIBRATE permission in
     /// Assets/Plugins/Android/AndroidManifest.xml.
     /// </summary>
@@ -16,7 +16,7 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
         #region Constants
 
         private const string HapticEngineClass =
-            "com.hapiga.scheherazade.android.HapticEngine";
+            "com.scheherazade.android.HapticEngine";
 
         private const int MaxAmplitude = 255;
 

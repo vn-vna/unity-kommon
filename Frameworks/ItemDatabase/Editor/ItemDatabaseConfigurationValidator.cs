@@ -11,7 +11,7 @@ using UnityEngine;
 using CompilationAssembly = UnityEditor.Compilation.Assembly;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
+namespace Com.Scheherazade.Common.ItemDatabase.Editor
 {
     internal enum ItemDatabaseDiagnosticSeverity
     {
@@ -326,7 +326,7 @@ namespace Com.Hapiga.Scheherazade.Common.ItemDatabase.Editor
                     continue;
                 }
 
-                Type type = Type.GetType(typeName);
+                Type type = ScheherazadeTypeNameMigration.ResolveType(typeName);
                 if (type == null)
                 {
                     diagnostics.Add(Error(

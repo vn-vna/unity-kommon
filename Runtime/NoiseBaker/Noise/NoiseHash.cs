@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.NoiseBaker
+namespace Com.Scheherazade.Common.NoiseBaker
 {
     /// <summary>
     /// Deterministic hashing utilities for noise lattice lookups.

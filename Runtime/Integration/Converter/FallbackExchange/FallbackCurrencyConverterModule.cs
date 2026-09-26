@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
+namespace Com.Scheherazade.Common.Integration.Converter
 {
     public class FallbackCurrencyConverterModule :
         ICurrencyConverterModule

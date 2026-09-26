@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     [CreateAssetMenu(fileName = "MockTimeProvider", menuName = "Scheherazade/Chrono/Mock Time Provider")]
     public class MockTimeProvider : TimeProviderBase, ISettableTimeProvider

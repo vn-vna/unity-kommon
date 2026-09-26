@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.EventProxy
+namespace Com.Scheherazade.Common.EventProxy
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public class EventSubscriberAttribute : Attribute

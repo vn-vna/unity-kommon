@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.MappedList;
+using Com.Scheherazade.Common.MappedList;
 using UnityEngine;
 
-namespace Com.Hapiga.Schehrazade.IS
+namespace Com.Scheherazade.IS
 {
     [CreateAssetMenu(fileName = "ItemDatabase", menuName = "Inventory/Item Database")]
     public class ItemDatabase : ScriptableObject

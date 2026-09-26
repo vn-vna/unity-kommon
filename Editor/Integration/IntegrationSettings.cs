@@ -4,21 +4,21 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
-using Com.Hapiga.Scheherazade.Common.Integration;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
-using Com.Hapiga.Scheherazade.Common.Integration.IAR;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
-using Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig;
-using Com.Hapiga.Scheherazade.Common.Integration.Segmentation;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Editor.ScriptGeneration;
+using Com.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Integration;
+using Com.Scheherazade.Common.Integration.Ads;
+using Com.Scheherazade.Common.Integration.IAR;
+using Com.Scheherazade.Common.Integration.InAppPurchase;
+using Com.Scheherazade.Common.Integration.RemoteConfig;
+using Com.Scheherazade.Common.Integration.Segmentation;
+using Com.Scheherazade.Common.Integration.Tracking;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Callbacks;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Integration
+namespace Com.Scheherazade.Integration
 {
     public abstract class BaseIntegrationSettingsProvider<TInterface> : SettingsProvider
         where TInterface : class
@@ -136,10 +136,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "AppLovin MAX",
                         "adServiceProvider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Ads.ApplovinMaxAdsServiceProvider",
+                        "Com.Scheherazade.Common.Integration.Ads.ApplovinMaxAdsServiceProvider",
                         new[] { "APPLOVIN_MAX" },
                         new[] { "MaxSdk" },
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Ads.IAdsServiceProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Ads.IAdsServiceProvider"
                     )
                 }
             ),
@@ -198,31 +198,31 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Firebase Analytics",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
+                        "Com.Scheherazade.Common.Integration.Tracking.FirebaseTrackingProvider",
                         new[] { "FIREBASE_ANALYTICS" },
                         new[] { "Firebase.Analytics.FirebaseAnalytics" },
                         featureFlags: (int)TrackingProviderFeatures.AllFeatures,
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     ),
                     new ProviderDescriptor(
                         "Adjust",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
+                        "Com.Scheherazade.Common.Integration.Tracking.AdjustTrackingProvider",
                         new[] { "TRACKING_ADJUST" },
                         new[] { "AdjustSdk.Adjust" },
                         featureFlags: (int)TrackingProviderFeatures.Revenue,
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     ),
                     new ProviderDescriptor(
                         "AppMetrica",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
+                        "Com.Scheherazade.Common.Integration.Tracking.AppMetricaTrackingProvider",
                         new[] { "TRACKING_APPMETRICA" },
                         new[] { "Io.AppMetrica.AppMetrica" },
                         featureFlags: (int)TrackingProviderFeatures.AllFeatures,
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Tracking.ITrackingProvider"
                     )
                 }
             ),
@@ -1809,19 +1809,23 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Unity IAP",
                         "provider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.UnityInAppPurchaseProvider",
+                        "Com.Scheherazade.Common.Integration.InAppPurchase.UnityInAppPurchaseProvider",
                         new[] { "UNITY_PURCHASING" },
                         new[] { "UnityEngine.Purchasing.StandardPurchasingModule" },
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
                     ),
                     new ProviderDescriptor(
                         "Pseudo Provider",
                         "provider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider",
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
+                        "Com.Scheherazade.Common.Integration.InAppPurchase.PseudoInAppPurchaseProvider",
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.InAppPurchase.IInAppPurchaseProvider"
                     )
                 }
+            ),
+            new SettingsTab(
+                "Receipt Validation",
+                customRenderer: InAppPurchaseReceiptValidationSettingsTab.Draw
             )
         };
 
@@ -1854,10 +1858,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                 "Firebase Remote Config",
                 "initialProviders",
                 ProviderBindingMode.Collection,
-                "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
+                "Com.Scheherazade.Common.Integration.RemoteConfig.FirebaseRemoteConfigProvider",
                 new[] { "FIREBASE_REMOTE" },
                 new[] { "Firebase.RemoteConfig.FirebaseRemoteConfig" },
-                customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig.IRemoteConfigProvider"
+                customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.RemoteConfig.IRemoteConfigProvider"
             )
         };
 
@@ -2308,8 +2312,8 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Open Store",
                         "reviewProvider",
                         ProviderBindingMode.Single,
-                        "Com.Hapiga.Scheherazade.Common.Integration.IAR.OpenStoreInAppReviewModule",
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.IAR.IInAppReviewModule"
+                        "Com.Scheherazade.Common.Integration.IAR.OpenStoreInAppReviewModule",
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.IAR.IInAppReviewModule"
                     )
                 }
             )
@@ -2335,7 +2339,7 @@ namespace Com.Hapiga.Scheherazade.Integration
         private static void DrawGooglePlayModuleStatus()
         {
             Type moduleType = IntegrationSettingsDrawingUtils.ResolveType(
-                "Com.Hapiga.Scheherazade.Common.Integration.IAR.GooglePlayInAppReviewModule");
+                "Com.Scheherazade.Common.Integration.IAR.GooglePlayInAppReviewModule");
             string[] missingDefines = IntegrationSettingsDrawingUtils.GetMissingDefines(
                 new[] { "GOOGLEPLAY_REVIEW" });
 
@@ -2386,17 +2390,17 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Cached",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.CachedSegmentationProvider",
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
+                        "Com.Scheherazade.Common.Integration.Segmentation.CachedSegmentationProvider",
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
                     ),
                     new ProviderDescriptor(
                         "Adjust",
                         "initialProviders",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.AdjustSegmentationProvider",
+                        "Com.Scheherazade.Common.Integration.Segmentation.AdjustSegmentationProvider",
                         new[] { "TRACKING_ADJUST" },
                         new[] { "AdjustSdk.Adjust" },
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Segmentation.IUserSegmentationProvider"
                     )
                 }
             ),
@@ -2408,10 +2412,10 @@ namespace Com.Hapiga.Scheherazade.Integration
                         "Firebase Analytics",
                         "initialTrackers",
                         ProviderBindingMode.Collection,
-                        "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.FirebaseUserSegmentationTracker",
+                        "Com.Scheherazade.Common.Integration.Segmentation.FirebaseUserSegmentationTracker",
                         new[] { "FIREBASE_ANALYTICS" },
                         new[] { "Firebase.Analytics.FirebaseAnalytics" },
-                        customProviderBaseTypeName: "Com.Hapiga.Scheherazade.Common.Integration.Segmentation.IUserSegmentationTracker"
+                        customProviderBaseTypeName: "Com.Scheherazade.Common.Integration.Segmentation.IUserSegmentationTracker"
                     )
                 }
             )
@@ -2510,7 +2514,7 @@ namespace Com.Hapiga.Scheherazade.Integration
 
     internal static class IntegrationSettingsDrawingUtils
     {
-        private const string PendingProviderCreationStateKey = "Com.Hapiga.Scheherazade.Integration.PendingProviderCreationState";
+        private const string PendingProviderCreationStateKey = "Com.Scheherazade.Integration.PendingProviderCreationState";
 
         private const string IntegrationCentreResourcePath = "IntegrationCentre";
         private const string IntegrationCentreAssetPath = "Assets/Resources/IntegrationCentre.asset";

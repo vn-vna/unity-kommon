@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Sound
+namespace Com.Scheherazade.Common.Sound
 {
     /// <summary>
     /// Which mix bus a sound definition belongs to.

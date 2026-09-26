@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     internal readonly struct ItemDatabaseSnapshot
     {

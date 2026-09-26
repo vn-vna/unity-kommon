@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
 
-namespace Com.Hapiga.Scheherazade.Common.ROAP.Editor
+namespace Com.Scheherazade.Common.ROAP.Editor
 {
     public sealed class RoapDeviceInfo
     {

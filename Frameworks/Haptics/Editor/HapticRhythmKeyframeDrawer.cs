@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics.Editor
+namespace Com.Scheherazade.Common.Haptics.Editor
 {
     /// <summary>
     /// Compact inline row for a <see cref="HapticKeyframe"/>:

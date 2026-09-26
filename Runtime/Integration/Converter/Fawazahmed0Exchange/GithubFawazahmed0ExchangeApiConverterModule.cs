@@ -2,12 +2,12 @@
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
+namespace Com.Scheherazade.Common.Integration.Converter
 {
     public class GithubFawazahmed0ExchangeApiConverterModule :
         ICurrencyConverterModule

@@ -4,7 +4,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityObject = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Framework.Assets
+namespace Com.Scheherazade.Common.Editor.Framework.Assets
 {
     public interface IEditorAssetStore
     {

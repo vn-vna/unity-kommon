@@ -4,13 +4,13 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
-using Com.Hapiga.Scheherazade.Common.Integration.Converter;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Integration.Ads;
+using Com.Scheherazade.Common.Integration.Converter;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     [Flags]
     public enum FirebaseRevenueTrackingOptions

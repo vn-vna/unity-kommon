@@ -1,9 +1,9 @@
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.Common.Extensions;
 using UnityEngine;
 using UnityEngine.Events;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
 
     [AddComponentMenu("Scheherazade/Path Controller")]

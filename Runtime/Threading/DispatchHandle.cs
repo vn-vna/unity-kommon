@@ -2,7 +2,7 @@ using System;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Threading
+namespace Com.Scheherazade.Common.Threading
 {
     /// <summary>
     /// Represents the lifecycle of work queued for the Unity main thread.

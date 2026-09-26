@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     /// <summary>
     /// Marker interface for event data payloads that can be queued

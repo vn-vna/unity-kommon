@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     public interface ITimerHandle
     {

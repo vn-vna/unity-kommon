@@ -1,8 +1,8 @@
-using Com.Hapiga.FallAway.Economy;
+using Com.Scheherazade.FallAway.Economy;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     [CreateAssetMenu(fileName = "NewTransaction", menuName = "FallAway/Economy/Transaction")]
     public class Transaction : ScriptableObject

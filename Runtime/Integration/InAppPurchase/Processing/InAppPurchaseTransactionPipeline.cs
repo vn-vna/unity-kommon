@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Processing
 {
     /// <summary>
     /// SDK-independent, synchronous transaction processing. Construct and call on the

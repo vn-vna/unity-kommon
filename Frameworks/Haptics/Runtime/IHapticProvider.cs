@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Contract for a haptic provider. Implemented by ScriptableObjects;

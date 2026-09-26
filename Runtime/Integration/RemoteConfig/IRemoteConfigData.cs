@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
+namespace Com.Scheherazade.Common.Integration.RemoteConfig
 {
     public interface IRemoteConfigData
     { }

@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.AsyncResourceLoader;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor.Validation
 {
     public enum PuzzleLevelValidationSeverity
     {

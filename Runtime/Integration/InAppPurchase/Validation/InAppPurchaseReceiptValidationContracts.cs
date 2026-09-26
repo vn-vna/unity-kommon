@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation
+namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
 {
     public enum InAppPurchaseReceiptValidationOutcome
     {

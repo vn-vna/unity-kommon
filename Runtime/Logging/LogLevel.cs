@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Logging
+namespace Com.Scheherazade.Common.Logging
 {
     public enum LogLevel
     {

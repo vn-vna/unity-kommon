@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
+namespace Com.Scheherazade.Common.Frameworks.GridSystem
 {
     /// <summary>
     /// Drift movement module (drop-car <c>GridDrifter</c> ported to a pure class
@@ -92,6 +92,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             {
                 Drifter = drifter,
                 MovementAbility = DirectionFlag.All,
+                CurrentSpeed = GetDrifterBaseSpeed(),
                 IntentPointerAnchor = _board.PointerPlanePosition,
                 RelativeMousePosition = _board.PointerPlanePosition
                     - _board.Coordinates.Flatten(drifter.ControlledPosition)
@@ -181,6 +182,7 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             {
                 Drifter = drifter,
                 MovementAbility = DirectionFlag.All,
+                CurrentSpeed = GetDrifterBaseSpeed(),
                 IntentPointerAnchor = _board.PointerPlanePosition,
                 RelativeMousePosition = _board.PointerPlanePosition
                     - _board.Coordinates.Flatten(drifter.ControlledPosition)
@@ -301,11 +303,9 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
                 _board.Coordinates.CellToWorld(drifter.HookedCell.GridPosition)
             );
 
-            float distance = Vector2.Distance(desired, current);
-            if (distance > _config.DrifterSpeedLimit)
-            {
-                desired = current + (desired - current).normalized * _config.DrifterSpeedLimit;
-            }
+            DirectionFlag requestedDirection = (desired - hook).ToDirectionFlag();
+            bool hasMovement = requestedDirection != DirectionFlag.None;
+            bool movementBlocked = IsMovementBlocked(requestedDirection);
 
             float nudge = _config.DisableNudgingAfterDisplacement && _hasDisplaced
                 ? 0f : _config.NudgeAmount;
@@ -319,39 +319,94 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.GridSystem
             );
 
             _movementDirection = (desired - hook).ToDirectionFlag();
-            if ((_movementDirection & DirectionFlag.Diagonal & _movementAbility) == 0)
+            DirectionFlag requestedDiagonal = requestedDirection & DirectionFlag.Diagonal;
+            bool blockedDiagonal = requestedDiagonal != DirectionFlag.None
+                && (requestedDiagonal & _movementAbility) == 0;
+            if (blockedDiagonal)
             {
-                // Diagonal is blocked (CheckObjectMovement excludes diagonals whose
-                // orthogonal intermediates are not clear) -> corner through the free
-                // cardinal axis. Free diagonals keep the diagonal bit and slide freely.
+                DirectionFlag horizontalDirection =
+                    requestedDirection & DirectionFlag.Horizontal;
+                DirectionFlag verticalDirection =
+                    requestedDirection & DirectionFlag.Vertical;
+                bool horizontalFree = horizontalDirection != DirectionFlag.None
+                    && (_movementAbility & horizontalDirection) != 0;
+                bool verticalFree = verticalDirection != DirectionFlag.None
+                    && (_movementAbility & verticalDirection) != 0;
+
                 float horizontalDistance = Mathf.Abs(desired.x - hook.x);
                 float verticalDistance = Mathf.Abs(desired.y - hook.y);
-                bool preferHorizontal = horizontalDistance > verticalDistance;
-                // Cell-relative distances approach zero at every center crossing.
-                // Keep meaningful pointer intent in this small band, so residual
-                // off-axis input cannot briefly become a blocked-direction nudge.
-                // Large cornering moves and free diagonals keep their existing rules.
-                if (hysteresis > 0f
+                bool preferHorizontal = horizontalFree != verticalFree
+                    ? horizontalFree
+                    : horizontalDistance > verticalDistance;
+                if (horizontalFree == verticalFree
+                    && hysteresis > 0f
                     && (_movementAbility & DirectionFlag.Diagonal) != DirectionFlag.Diagonal
                     && Mathf.Max(horizontalDistance, verticalDistance) <= hysteresis
                     && data.PreferredAxis != DirectionFlag.None)
                 {
                     preferHorizontal = data.PreferredAxis == DirectionFlag.Horizontal;
                 }
+
                 if (preferHorizontal)
                 {
                     desired.y = hook.y;
-                    _movementDirection = _movementDirection & DirectionFlag.Horizontal;
+                    _movementDirection &= DirectionFlag.Horizontal;
                 }
                 else
                 {
                     desired.x = hook.x;
-                    _movementDirection = _movementDirection & DirectionFlag.Vertical;
+                    _movementDirection &= DirectionFlag.Vertical;
                 }
             }
 
-            return desired;
+            float speed = ResolveDrifterSpeed(data, movementBlocked, hasMovement);
+            return Vector2.MoveTowards(current, desired, speed);
         }
+
+        private bool IsMovementBlocked(DirectionFlag direction)
+        {
+            DirectionFlag diagonal = direction & DirectionFlag.Diagonal;
+            if (diagonal != DirectionFlag.None)
+            {
+                return (_movementAbility & diagonal) == 0;
+            }
+
+            DirectionFlag cardinal = direction & DirectionFlag.Cardinal;
+            return cardinal != DirectionFlag.None
+                && (_movementAbility & cardinal) != cardinal;
+        }
+
+        private float ResolveDrifterSpeed(
+            DrifterInformation data,
+            bool movementBlocked,
+            bool hasMovement
+        )
+        {
+            float baseSpeed = GetDrifterBaseSpeed();
+            float speedLimit = Mathf.Max(0f, _config.DrifterSpeedLimit);
+            if (movementBlocked)
+            {
+                data.CurrentSpeed = baseSpeed;
+                return baseSpeed;
+            }
+
+            float speed = Mathf.Clamp(data.CurrentSpeed, baseSpeed, speedLimit);
+            if (hasMovement)
+            {
+                data.CurrentSpeed = Mathf.Min(
+                    speedLimit,
+                    speed + Mathf.Max(0f, _config.DrifterAcceleration)
+                );
+            }
+
+            return speed;
+        }
+
+        private float GetDrifterBaseSpeed()
+            => Mathf.Min(
+                Mathf.Max(0f, _config.DrifterBaseSpeed),
+                Mathf.Max(0f, _config.DrifterSpeedLimit)
+            );
 
         private float ClampAxis(
             float value, DirectionFlag negDir, DirectionFlag posDir,

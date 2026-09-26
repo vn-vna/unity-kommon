@@ -3,13 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Processing;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
+using Com.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 using UnityEngine.Purchasing;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     public partial class UnityInAppPurchaseProvider
     {
@@ -109,6 +109,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             private readonly Queue<Action> _callbacks = new();
             private readonly object _callbackLock = new();
             private List<ProductDefinition> _definitions;
+            private PurchaseHandleSource _activePurchaseSource;
+            private string _activeNativeTransactionId = string.Empty;
             private IUnityIapStore _store;
             private bool _disposed;
             private bool _connected;
@@ -435,11 +437,19 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             }
 
             private void PurchasePending(PendingOrder order) => Enqueue(() => ProcessOrder(order, InAppPurchaseOrderSource.Direct));
-            private void PurchaseDeferred(DeferredOrder order) => Enqueue(() => NotifyDeferred(order));
-            private void PurchaseFailed(FailedOrder order) => Enqueue(() => NotifyOrderFailure(
-                order, order != null && order.FailureReason == PurchaseFailureReason.UserCancelled ? PurchaseStatus.Canceled : PurchaseStatus.Failed,
-                order?.Details ?? "Purchase failed."
-            ));
+            private void PurchaseDeferred(DeferredOrder order) => Enqueue(() =>
+            {
+                CompleteActivePurchase(order, PurchaseStatus.Deferred, "Store approval is deferred.");
+                NotifyDeferred(order);
+            });
+            private void PurchaseFailed(FailedOrder order) => Enqueue(() =>
+            {
+                PurchaseStatus status = order != null && order.FailureReason == PurchaseFailureReason.UserCancelled
+                    ? PurchaseStatus.Canceled : PurchaseStatus.Failed;
+                string reason = order?.Details ?? "Purchase failed.";
+                CompleteActivePurchase(order, status, reason);
+                NotifyOrderFailure(order, status, reason);
+            });
 
             private InAppPurchaseOrderData Snapshot(Order order, InAppPurchaseOrderSource source)
             {
@@ -470,9 +480,13 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 catch (Exception error)
                 {
                     _recoveryRejected |= !_owner.IsInitialized;
-                    NotifyOrderFailure(order, order is PendingOrder ? PurchaseStatus.Pending : PurchaseStatus.Failed, error.Message);
+                    PurchaseStatus status = order is PendingOrder ? PurchaseStatus.Pending : PurchaseStatus.Failed;
+                    if (source == InAppPurchaseOrderSource.Direct)
+                        CompleteActivePurchase(order, status, error.Message);
+                    NotifyOrderFailure(order, status, error.Message);
                     return false;
                 }
+                bool activeOrder = TryBindActivePurchase(raw, source);
                 if (order is PendingOrder pending) _pendingOrders[raw.NativeTransactionId] = pending;
                 if (order is ConfirmedOrder && raw.Items.Any(item => item.AllowRecover)) HasRestorableProducts = true;
                 _retries.Remove(raw.NativeTransactionId);
@@ -482,6 +496,15 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 switch (result.Outcome)
                 {
                     case InAppPurchasePipelineOutcome.Completed:
+                        if (activeOrder && _activePurchaseSource != null && result.Transaction != null &&
+                            !result.Transaction.IsRestoration)
+                        {
+                            _activePurchaseSource.TryComplete(
+                                PurchaseStatus.Confirmed,
+                                transactionId: result.Transaction.TransactionId
+                            );
+                            ClearActivePurchase();
+                        }
                         if (order is PendingOrder && !result.AcknowledgementPending)
                         {
                             _pendingOrders.Remove(raw.NativeTransactionId);
@@ -500,7 +523,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                             return false;
                         }
                         _recoveryRejected |= !_owner.IsInitialized;
-                        NotifyOrderFailure(order, PurchaseStatus.Pending, "Fetched transaction verification is still unavailable.");
+                        const string unavailableReason = "Fetched transaction verification is still unavailable.";
+                        CompleteActivePurchase(raw, PurchaseStatus.Pending, unavailableReason, result.Transaction?.TransactionId);
+                        NotifyOrderFailure(order, PurchaseStatus.Pending, unavailableReason);
                         if (!_acknowledgements.ContainsKey(raw.NativeTransactionId)) _pendingOrders.Remove(raw.NativeTransactionId);
                         return false;
                     case InAppPurchasePipelineOutcome.Retry:
@@ -511,7 +536,11 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                             Order = order, Source = source, Attempt = attempt,
                             Due = retryAllowed ? _time + FulfillmentRetryInterval : float.PositiveInfinity
                         };
-                        if (!retryAllowed && !_owner.IsInitialized) IsInitializing = false;
+                        if (!retryAllowed)
+                        {
+                            if (!_owner.IsInitialized) IsInitializing = false;
+                            CompleteActivePurchase(raw, PurchaseStatus.Pending, result.Reason, result.Transaction?.TransactionId);
+                        }
                         NotifyOrderFailure(order, PurchaseStatus.Pending, result.Reason);
                         return false;
                     case InAppPurchasePipelineOutcome.Deferred:
@@ -519,7 +548,9 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                         return true;
                     default:
                         _recoveryRejected |= !_owner.IsInitialized;
-                        NotifyOrderFailure(order, order is PendingOrder ? PurchaseStatus.Pending : PurchaseStatus.Failed, result.Reason);
+                        PurchaseStatus rejectedStatus = order is PendingOrder ? PurchaseStatus.Pending : PurchaseStatus.Failed;
+                        CompleteActivePurchase(raw, rejectedStatus, result.Reason, result.Transaction?.TransactionId);
+                        NotifyOrderFailure(order, rejectedStatus, result.Reason);
                         if (!_acknowledgements.ContainsKey(raw.NativeTransactionId)) _pendingOrders.Remove(raw.NativeTransactionId);
                         return false;
                 }
@@ -583,6 +614,68 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 }
             }
 
+            private bool TryBindActivePurchase(
+                InAppPurchaseOrderData order,
+                InAppPurchaseOrderSource source
+            )
+            {
+                if (_activePurchaseSource == null || order == null ||
+                    !order.Items.Any(item => item.ProductId == _activePurchaseSource.Handle.ProductId)) return false;
+                if (source == InAppPurchaseOrderSource.Direct &&
+                    string.IsNullOrEmpty(_activeNativeTransactionId))
+                    _activeNativeTransactionId = order.NativeTransactionId;
+                return string.Equals(
+                    _activeNativeTransactionId,
+                    order.NativeTransactionId,
+                    StringComparison.Ordinal
+                );
+            }
+
+            private void CompleteActivePurchase(
+                Order order,
+                PurchaseStatus status,
+                string reason,
+                string transactionId = null
+            )
+            {
+                if (_activePurchaseSource == null || order?.CartOrdered == null) return;
+                bool matches = order.CartOrdered.Items().Any(item =>
+                    item?.Product?.definition?.id == _activePurchaseSource.Handle.ProductId
+                );
+                if (!matches) return;
+                string nativeId = order.Info?.TransactionID;
+                if (!string.IsNullOrEmpty(_activeNativeTransactionId) &&
+                    !string.Equals(_activeNativeTransactionId, nativeId, StringComparison.Ordinal)) return;
+                if (string.IsNullOrEmpty(_activeNativeTransactionId) && !string.IsNullOrEmpty(nativeId))
+                    _activeNativeTransactionId = nativeId;
+                _activePurchaseSource.TryComplete(status, reason, transactionId);
+                if (ReleasesPurchaseGate(status)) ClearActivePurchase();
+            }
+
+            private void CompleteActivePurchase(
+                InAppPurchaseOrderData order,
+                PurchaseStatus status,
+                string reason,
+                string transactionId = null
+            )
+            {
+                if (_activePurchaseSource == null || order == null ||
+                    !order.Items.Any(item => item.ProductId == _activePurchaseSource.Handle.ProductId) ||
+                    !string.Equals(_activeNativeTransactionId, order.NativeTransactionId, StringComparison.Ordinal)) return;
+                _activePurchaseSource.TryComplete(status, reason, transactionId);
+                if (ReleasesPurchaseGate(status)) ClearActivePurchase();
+            }
+
+            private void ClearActivePurchase()
+            {
+                _activePurchaseSource = null;
+                _activeNativeTransactionId = string.Empty;
+            }
+
+            private static bool ReleasesPurchaseGate(PurchaseStatus status) =>
+                status == PurchaseStatus.Confirmed || status == PurchaseStatus.Failed ||
+                status == PurchaseStatus.Canceled || status == PurchaseStatus.Unavailable;
+
             private void NotifyOrderFailure(Order order, PurchaseStatus status, string reason)
             {
                 if (_disposed) return;
@@ -630,23 +723,48 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
                 };
             }
 
-            internal void BuyProduct(string productId)
+            internal void BuyProduct(string productId, PurchaseHandleSource source)
             {
-                if (_disposed) return;
+                if (source == null) throw new ArgumentNullException(nameof(source));
+                if (_disposed)
+                {
+                    source.TryComplete(PurchaseStatus.Unavailable, "The purchase provider is disposed.");
+                    return;
+                }
                 if (string.IsNullOrEmpty(productId) || !_products.TryGetValue(productId, out var product))
                 {
+                    source.TryComplete(PurchaseStatus.Failed, "Unknown product.");
                     _owner.NotifyProcessingFailure(productId, PurchaseStatus.Failed, "Unknown product.");
+                    return;
+                }
+                if (_activePurchaseSource != null)
+                {
+                    source.TryComplete(PurchaseStatus.Busy, "Another purchase is already pending.");
+                    _owner.NotifyProcessingFailure(productId, PurchaseStatus.Busy, "Another purchase is already pending.");
                     return;
                 }
                 if (!_connected || !_owner.IsInitialized || _store.GetProductById(productId)?.availableToPurchase != true)
                 {
+                    source.TryComplete(PurchaseStatus.Unavailable, "The product is not available from the store.");
                     _owner.NotifyProcessingFailure(productId, PurchaseStatus.Unavailable, "The product is not available from the store.");
                     return;
                 }
+
+                _activePurchaseSource = source;
+                _activeNativeTransactionId = string.Empty;
                 NotifyProcessingListeners(_owner.PurchaseInitiated, product);
-                if (_disposed) return;
+                if (_disposed)
+                {
+                    source.TryComplete(PurchaseStatus.Pending, "The purchase provider stopped before opening the store.");
+                    return;
+                }
                 try { _store.PurchaseProduct(productId); }
-                catch (Exception error) { _owner.NotifyProcessingFailure(productId, PurchaseStatus.Failed, error.Message); }
+                catch (Exception error)
+                {
+                    source.TryComplete(PurchaseStatus.Failed, error.Message);
+                    ClearActivePurchase();
+                    _owner.NotifyProcessingFailure(productId, PurchaseStatus.Failed, error.Message);
+                }
             }
 
             internal void RestorePurchases()
@@ -869,6 +987,8 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             {
                 if (_disposed) return;
                 lock (_callbackLock) { _disposed = true; _callbacks.Clear(); }
+                _activePurchaseSource?.TryComplete(PurchaseStatus.Pending, "The purchase provider was cleaned up before completion.");
+                _activePurchaseSource = null;
                 ++_generation;
                 IsInitializing = false;
                 _pipeline.Dispose();

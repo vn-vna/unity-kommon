@@ -1,11 +1,11 @@
 #if FIREBASE_ANALYTICS
 
 using System;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using Firebase.Analytics;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     [CreateAssetMenu(
         fileName = "FirebaseUserSegmentationTracker",

@@ -1,11 +1,11 @@
 using System;
 
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Scheherazade.Common.Extensions;
+using Com.Scheherazade.FallAway.Inventory;
+using Com.Scheherazade.Common.Extensions;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Schehrazade.IS
+namespace Com.Scheherazade.IS
 {
     [Serializable]
     public class InventoryItem

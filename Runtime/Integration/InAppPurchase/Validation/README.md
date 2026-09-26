@@ -9,7 +9,7 @@ InAppPurchaseReceiptValidationPipeline is a ScriptableObject implementation of I
 3. Set each step's `acceptedPlatforms` explicitly. A step must accept the key of every platform entry that references it; an empty list accepts no platform.
 4. Keep **Require Validation** enabled for production. The pipeline then requires at least one applicable, passed step whose ProvidesAuthenticity is true.
 5. Call ValidateConfiguration(targetPlatform, out reason) in build validation before shipping.
-6. Assign the pipeline in the inherited **Receipt Validation** section on the IAP manager asset. The derived manager explicitly supplies `ReceiptValidationPipeline` as the verifier in `InAppPurchaseProcessingOptions`.
+6. Assign and edit the pipeline in **Project Settings > Integration > In-App Purchase > Receipt Validation**. The raw manager field is hidden; the dedicated tab owns default asset creation and per-platform step ordering. The derived manager explicitly supplies `ReceiptValidationPipeline` as the verifier in `InAppPurchaseProcessingOptions`.
 
 Serialized runtime names are `platformSteps` on the pipeline, `platform` and `steps` on each `InAppPurchaseReceiptValidationPlatformSteps` entry, and `acceptedPlatforms` on every step (`FormerlySerializedAs("platforms")` migrates the old step field only). `StepsByPlatform` exposes the exact runtime dictionary; `Steps` remains a flattened compatibility view.
 
@@ -28,7 +28,7 @@ Even with RequireValidation disabled, a step must establish a nonempty stable tr
 The plugin intentionally performs no reflection or generated-type lookup. Generated tangle code may live outside the plugin assembly. Bind it directly in a project class:
 
 ~~~csharp
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase.Validation;
+using Com.Scheherazade.Common.Integration.InAppPurchase.Validation;
 using UnityEngine;
 using UnityEngine.Purchasing.Security;
 

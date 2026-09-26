@@ -2,10 +2,10 @@ using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Haptics
+namespace Com.Scheherazade.Common.Haptics
 {
     /// <summary>
     /// Static facade over <see cref="HapticManager"/>. All methods are null-safe
@@ -17,7 +17,27 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
     /// </summary>
     public class Haptics
     {
+        private static bool _enabled = true;
+
         private Haptics() { }
+
+        public static bool Enabled
+        {
+            get => _enabled;
+            set
+            {
+                if (_enabled == value)
+                {
+                    return;
+                }
+
+                _enabled = value;
+                if (!_enabled)
+                {
+                    StopAll();
+                }
+            }
+        }
 
         public static bool IsReady => HapticManager.Instance != null;
 
@@ -59,13 +79,21 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
 
         public static HapticHandle PlayRhythm(string rhythmId, float intensityScale = 1f)
         {
-            if (!EnsureReady("PlayRhythm")) return HapticHandle.Invalid;
+            if (!Enabled || !EnsureReady("PlayRhythm"))
+            {
+                return HapticHandle.Invalid;
+            }
+
             return HapticManager.Instance.PlayRhythm(rhythmId, intensityScale);
         }
 
         public static HapticHandle PlayRhythm(HapticRhythm rhythm, float intensityScale = 1f)
         {
-            if (!EnsureReady("PlayRhythm")) return HapticHandle.Invalid;
+            if (!Enabled || !EnsureReady("PlayRhythm"))
+            {
+                return HapticHandle.Invalid;
+            }
+
             return HapticManager.Instance.PlayRhythm(rhythm, intensityScale);
         }
 
@@ -106,7 +134,7 @@ namespace Com.Hapiga.Scheherazade.Common.Haptics
             float intensity = 1f,
             float durationSeconds = 0.05f)
         {
-            if (HapticManager.Instance != null)
+            if (Enabled && HapticManager.Instance != null)
             {
                 HapticManager.Instance.Cue(type, intensity, durationSeconds);
             }

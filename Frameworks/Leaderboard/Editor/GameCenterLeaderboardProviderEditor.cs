@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Leaderboard;
+using Com.Scheherazade.Common.Leaderboard;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
+namespace Com.Scheherazade.Common.Leaderboard.Editor
 {
     [CustomEditor(typeof(GameCenterLeaderboardProvider))]
     internal sealed class GameCenterLeaderboardProviderEditor : UnityEditor.Editor

@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.ItemDatabase
+namespace Com.Scheherazade.Common.ItemDatabase
 {
     [AttributeUsage(AttributeTargets.Class, Inherited = false)]
     public sealed class ItemTagIdAttribute : Attribute

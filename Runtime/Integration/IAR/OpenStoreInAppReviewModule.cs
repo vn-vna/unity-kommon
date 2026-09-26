@@ -1,7 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
+namespace Com.Scheherazade.Common.Integration.IAR
 {
     [CreateAssetMenu(fileName = "OpenStoreInAppReviewModule",
                      menuName = "Scheherazade/Providers/In-App Review/Open Store")]
