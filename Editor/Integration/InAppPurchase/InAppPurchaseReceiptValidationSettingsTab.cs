@@ -89,7 +89,7 @@ namespace Com.Scheherazade.Integration
             {
                 GUILayout.Label("Receipt Validation", _titleStyle);
                 GUILayout.Label(
-                    "Build an ordered, fail-closed validation flow for each target platform. " +
+                    "Build an ordered validation chain for each target platform. The first non-pass stops the chain; an empty chain passes. " +
                     "Drag steps to reorder them and edit each step's accepted platforms in place.",
                     _subtitleStyle
                 );
@@ -170,7 +170,7 @@ namespace Com.Scheherazade.Integration
                 SerializedProperty required = pipelineObject.FindProperty("requireValidation");
                 EditorGUILayout.PropertyField(required, new GUIContent(
                     "Require Validation",
-                    "Require at least one authenticity step to pass before fulfillment."
+                    "Optionally require at least one authenticity step; otherwise an empty validation chain passes."
                 ));
                 pipelineObject.ApplyModifiedProperties();
             }
@@ -213,8 +213,8 @@ namespace Com.Scheherazade.Integration
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
                 EditorGUILayout.HelpBox(
-                    "This platform has no validation group. Purchases for it fail closed.",
-                    MessageType.Warning
+                    "This platform has no validation group. Its empty validation chain passes by default.",
+                    MessageType.Info
                 );
                 if (GUILayout.Button("Add " + PlatformDisplayName(platform) + " Configuration", GUILayout.Height(28)))
                 {
@@ -512,7 +512,7 @@ namespace Com.Scheherazade.Integration
         {
             Undo.RecordObject(pipeline, "Configure Receipt Validation Pipeline");
             var serialized = new SerializedObject(pipeline);
-            serialized.FindProperty("requireValidation").boolValue = true;
+            serialized.FindProperty("requireValidation").boolValue = false;
             SerializedProperty entries = serialized.FindProperty("platformSteps");
             entries.arraySize = Platforms.Length;
             for (int i = 0; i < Platforms.Length; i++)

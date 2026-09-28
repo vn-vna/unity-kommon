@@ -31,7 +31,7 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
         private List<InAppPurchaseReceiptValidationPlatformSteps> platformSteps = new();
 
         [SerializeField]
-        private bool requireValidation = true;
+        private bool requireValidation;
 
         [NonSerialized]
         private Dictionary<RuntimePlatform, IReadOnlyList<InAppPurchaseReceiptValidationStep>> _stepsByPlatform;
@@ -101,11 +101,9 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
                 reason = "No applicable authenticity validation step passed.";
                 return InAppPurchaseVerificationOutcome.Rejected;
             }
-            if (!context.HasStableTransactionId)
-            {
-                reason = "Receipt validation did not establish a stable transaction identity.";
+            if (!context.HasStableTransactionId &&
+                !context.TrySetStableTransactionId(order.NativeTransactionId, out reason))
                 return InAppPurchaseVerificationOutcome.Rejected;
-            }
 
             transaction = new VerifiedInAppPurchaseTransaction(
                 context.StableTransactionId,
@@ -174,10 +172,7 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
                 return false;
             }
             if (!_stepsByPlatform.TryGetValue(platform, out ordered))
-            {
-                reason = "No receipt validation pipeline entry is bound for " + platform + ".";
-                return false;
-            }
+                ordered = Array.Empty<InAppPurchaseReceiptValidationStep>();
             reason = string.Empty;
             return true;
         }

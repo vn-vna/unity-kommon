@@ -1,13 +1,13 @@
 # Ordered receipt validation
 
-InAppPurchaseReceiptValidationPipeline is a ScriptableObject implementation of IInAppPurchaseTransactionVerifier. It resolves one exact platform entry, evaluates that entry's serialized steps in list order, and stops on the first Rejected, Retry, or WaitForStore result. There is no cross-platform fallback.
+InAppPurchaseReceiptValidationPipeline is a ScriptableObject implementation of IInAppPurchaseTransactionVerifier. It evaluates the selected platform's serialized steps in list order and stops on the first Rejected, Retry, or WaitForStore result. A missing platform entry is an empty chain, so it passes by default; there is no cross-platform fallback.
 
 ## Setup
 
 1. Create a pipeline asset from **Scheherazade / IAP Validation / Receipt Validation Pipeline**.
-2. Create one serialized `platformSteps` entry per supported OS and order its `steps` list. Duplicate or missing platform entries fail closed.
+2. Create a serialized `platformSteps` entry for each OS that needs validation and order its `steps` list. Duplicate entries fail closed; a missing entry is an empty, passing chain.
 3. Set each step's `acceptedPlatforms` explicitly. A step must accept the key of every platform entry that references it; an empty list accepts no platform.
-4. Keep **Require Validation** enabled for production. The pipeline then requires at least one applicable, passed step whose ProvidesAuthenticity is true.
+4. **Require Validation** is disabled by default. Enable it only when the platform must have at least one applicable, passed step whose ProvidesAuthenticity is true.
 5. Call ValidateConfiguration(targetPlatform, out reason) in build validation before shipping.
 6. Assign and edit the pipeline in **Project Settings > Integration > In-App Purchase > Receipt Validation**. The raw manager field is hidden; the dedicated tab owns default asset creation and per-platform step ordering. The derived manager explicitly supplies `ReceiptValidationPipeline` as the verifier in `InAppPurchaseProcessingOptions`.
 
@@ -21,7 +21,7 @@ A typical per-platform ordering is:
   - StoreKit2ReceiptValidationStep on IPhonePlayer;
   - EditorSimulatedReceiptValidationStep on Editor platforms only.
 
-Even with RequireValidation disabled, a step must establish a nonempty stable transaction ID or verification fails. The output transaction preserves the exact input line items, platform, and restoration flag. A step can assign the stable transaction identity and effective receipt once; equal reassignment is idempotent, while conflicting assignments reject the order.
+When no step establishes a stable transaction ID, the pipeline uses the order's native transaction ID. The output transaction preserves the exact input line items, platform, and restoration flag. A step can assign the stable transaction identity and effective receipt once; equal reassignment is idempotent, while conflicting assignments reject the order.
 
 ## Google Play generated tangle binding
 

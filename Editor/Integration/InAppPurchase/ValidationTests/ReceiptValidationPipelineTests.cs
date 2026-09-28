@@ -108,20 +108,37 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation.Editor.Te
         }
 
         [Test]
-        public void MissingPlatformEntry_IsRejectedWithoutFallback()
+        public void MissingPlatformEntry_UsesEmptyPassingChain()
         {
             FakeValidationStep android = Step("android", true, context => SetId(context, "android"),
                 RuntimePlatform.Android);
             InAppPurchaseReceiptValidationPipeline pipeline = PipelineWithEntries(
-                true, Entry(RuntimePlatform.Android, android)
+                false, Entry(RuntimePlatform.Android, android)
             );
 
             InAppPurchaseVerificationOutcome outcome = pipeline.Verify(
-                Order(RuntimePlatform.IPhonePlayer), false, out _, out string reason
+                Order(RuntimePlatform.IPhonePlayer, transactionId: "native-ios"), false,
+                out VerifiedInAppPurchaseTransaction transaction, out string reason
             );
 
-            Assert.That(outcome, Is.EqualTo(InAppPurchaseVerificationOutcome.Rejected));
-            StringAssert.Contains("no receipt validation pipeline entry", reason.ToLowerInvariant());
+            Assert.That(outcome, Is.EqualTo(InAppPurchaseVerificationOutcome.Verified), reason);
+            Assert.That(transaction.TransactionId, Is.EqualTo("native-ios"));
+        }
+
+        [Test]
+        public void NewPipeline_WithNoValidators_PassesByDefault()
+        {
+            InAppPurchaseReceiptValidationPipeline pipeline =
+                Create<InAppPurchaseReceiptValidationPipeline>();
+
+            InAppPurchaseVerificationOutcome outcome = pipeline.Verify(
+                Order(transactionId: "native-empty-chain"), false,
+                out VerifiedInAppPurchaseTransaction transaction, out string reason
+            );
+
+            Assert.That(pipeline.RequireValidation, Is.False);
+            Assert.That(outcome, Is.EqualTo(InAppPurchaseVerificationOutcome.Verified), reason);
+            Assert.That(transaction.TransactionId, Is.EqualTo("native-empty-chain"));
         }
 
         [Test]
