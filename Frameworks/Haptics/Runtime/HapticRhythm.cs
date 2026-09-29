@@ -4,6 +4,12 @@ using UnityEngine;
 
 namespace Com.Scheherazade.Common.Haptics
 {
+    public enum HapticRhythmPlatform
+    {
+        Android = 0,
+        Ios = 1
+    }
+
     /// <summary>
     /// Rhythm definition sub-asset stored inside HapticConfiguration.
     /// Keyframes are kept sorted by time; the editor enforces ordering.
@@ -30,8 +36,20 @@ namespace Com.Scheherazade.Common.Haptics
         [Tooltip("When true, the timeline restarts after the last keyframe")]
         [SerializeField] private bool _loop;
 
-        [Tooltip("The timeline; kept sorted by timeSeconds")]
-        [SerializeField] private HapticKeyframe[] _keyframes = Array.Empty<HapticKeyframe>();
+        [Tooltip("Legacy unified timeline retained as a migration fallback")]
+        [SerializeField, HideInInspector]
+        private HapticKeyframe[] _keyframes = Array.Empty<HapticKeyframe>();
+
+        [Tooltip("Android-specific timeline; kept sorted by timeSeconds")]
+        [SerializeField]
+        private HapticKeyframe[] _androidKeyframes = Array.Empty<HapticKeyframe>();
+
+        [Tooltip("iOS-specific timeline; kept sorted by timeSeconds")]
+        [SerializeField]
+        private HapticKeyframe[] _iosKeyframes = Array.Empty<HapticKeyframe>();
+
+        [SerializeField, HideInInspector] private bool _hasAndroidTimeline;
+        [SerializeField, HideInInspector] private bool _hasIosTimeline;
 
         [Tooltip("Seed template this rhythm was created from; cleared when keyframes are edited")]
         [SerializeField] private HapticRhythmTemplate _templateSeed = HapticRhythmTemplate.Custom;
@@ -69,8 +87,48 @@ namespace Com.Scheherazade.Common.Haptics
 
         public HapticKeyframe[] Keyframes
         {
-            get => _keyframes ?? Array.Empty<HapticKeyframe>();
-            set => _keyframes = value ?? Array.Empty<HapticKeyframe>();
+            get => GetKeyframes(ActivePlatform);
+            set
+            {
+                HapticKeyframe[] source = value ?? Array.Empty<HapticKeyframe>();
+                _keyframes = Clone(source);
+                _androidKeyframes = Clone(source);
+                _iosKeyframes = Clone(source);
+                _hasAndroidTimeline = true;
+                _hasIosTimeline = true;
+            }
+        }
+
+        public HapticKeyframe[] AndroidKeyframes
+        {
+            get => GetKeyframes(HapticRhythmPlatform.Android);
+            set
+            {
+                _androidKeyframes = value ?? Array.Empty<HapticKeyframe>();
+                _hasAndroidTimeline = true;
+            }
+        }
+
+        public HapticKeyframe[] IosKeyframes
+        {
+            get => GetKeyframes(HapticRhythmPlatform.Ios);
+            set
+            {
+                _iosKeyframes = value ?? Array.Empty<HapticKeyframe>();
+                _hasIosTimeline = true;
+            }
+        }
+
+        public static HapticRhythmPlatform ActivePlatform
+        {
+            get
+            {
+#if UNITY_IOS
+                return HapticRhythmPlatform.Ios;
+#else
+                return HapticRhythmPlatform.Android;
+#endif
+            }
         }
 
         public HapticRhythmTemplate TemplateSeed => _templateSeed;
@@ -89,16 +147,58 @@ namespace Com.Scheherazade.Common.Haptics
         /// <summary>
         /// Returns the end time of the latest keyframe (or the stored duration hint).
         /// </summary>
-        public float ComputeDuration()
+        public float ComputeDuration() => ComputeDuration(ActivePlatform);
+
+        public float ComputeDuration(HapticRhythmPlatform platform)
         {
             float maxEnd = 0f;
-            HapticKeyframe[] kfs = Keyframes;
-            for (int i = 0; i < kfs.Length; i++)
+            HapticKeyframe[] keyframes = GetKeyframes(platform);
+            for (int index = 0; index < keyframes.Length; index++)
             {
-                float end = kfs[i].DurationEnd;
+                float end = keyframes[index].DurationEnd;
                 if (end > maxEnd) maxEnd = end;
             }
             return maxEnd > 0f ? maxEnd : Mathf.Max(MinDuration, _durationSeconds);
+        }
+
+        public HapticKeyframe[] GetKeyframes(HapticRhythmPlatform platform)
+        {
+            bool isIos = platform == HapticRhythmPlatform.Ios;
+            bool hasPlatformTimeline = isIos
+                ? _hasIosTimeline
+                : _hasAndroidTimeline;
+            if (hasPlatformTimeline)
+            {
+                return (isIos ? _iosKeyframes : _androidKeyframes)
+                    ?? Array.Empty<HapticKeyframe>();
+            }
+
+            return _keyframes ?? Array.Empty<HapticKeyframe>();
+        }
+
+        public bool MigrateLegacyKeyframes()
+        {
+            HapticKeyframe[] legacy = _keyframes ?? Array.Empty<HapticKeyframe>();
+            bool changed = false;
+            if (!_hasAndroidTimeline)
+            {
+                if (_androidKeyframes == null || _androidKeyframes.Length == 0)
+                {
+                    _androidKeyframes = Clone(legacy);
+                }
+                _hasAndroidTimeline = true;
+                changed = true;
+            }
+            if (!_hasIosTimeline)
+            {
+                if (_iosKeyframes == null || _iosKeyframes.Length == 0)
+                {
+                    _iosKeyframes = Clone(legacy);
+                }
+                _hasIosTimeline = true;
+                changed = true;
+            }
+            return changed;
         }
 
         /// <summary>
@@ -114,23 +214,41 @@ namespace Com.Scheherazade.Common.Haptics
         /// </summary>
         public void Validate()
         {
-            HapticKeyframe[] kfs = Keyframes;
-            for (int i = 1; i < kfs.Length; i++)
+            ValidateTimeline(GetKeyframes(HapticRhythmPlatform.Android), "Android");
+            ValidateTimeline(GetKeyframes(HapticRhythmPlatform.Ios), "iOS");
+        }
+
+        private void ValidateTimeline(HapticKeyframe[] keyframes, string platform)
+        {
+            for (int index = 1; index < keyframes.Length; index++)
             {
-                if (kfs[i].TimeSeconds < kfs[i - 1].TimeSeconds)
+                if (keyframes[index].TimeSeconds < keyframes[index - 1].TimeSeconds)
                 {
                     QuickLog.Warning<HapticRhythm>(
-                        "Rhythm '{0}': keyframe {1} is out of time order ({2:F2} after {3:F2}).",
-                        _id, i, kfs[i].TimeSeconds, kfs[i - 1].TimeSeconds);
+                        "Rhythm '{0}' ({1}): keyframe {2} is out of time order ({3:F2} after {4:F2}).",
+                        _id, platform, index, keyframes[index].TimeSeconds,
+                        keyframes[index - 1].TimeSeconds);
                 }
 
-                if (kfs[i].TimeSeconds < kfs[i - 1].DurationEnd)
+                if (keyframes[index].TimeSeconds < keyframes[index - 1].DurationEnd)
                 {
                     QuickLog.Warning<HapticRhythm>(
-                        "Rhythm '{0}': keyframe {1} overlaps the previous keyframe.",
-                        _id, i);
+                        "Rhythm '{0}' ({1}): keyframe {2} overlaps the previous keyframe.",
+                        _id, platform, index);
                 }
             }
+        }
+
+        private static HapticKeyframe[] Clone(HapticKeyframe[] source)
+        {
+            if (source == null || source.Length == 0)
+            {
+                return Array.Empty<HapticKeyframe>();
+            }
+
+            var clone = new HapticKeyframe[source.Length];
+            Array.Copy(source, clone, source.Length);
+            return clone;
         }
 
         /// <summary>

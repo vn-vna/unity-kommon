@@ -47,6 +47,8 @@ namespace Com.Scheherazade.Common.Haptics.Editor
         private static readonly string[] SubtabNames = { "Android", "iOS" };
         private static readonly string[] PlatformFieldNames =
             { "_androidProvider", "_iosProvider" };
+        private static readonly string[] RhythmKeyframeFieldNames =
+            { "_androidKeyframes", "_iosKeyframes" };
 
         private static readonly string[] SortOptions =
             { "id", "name", "duration" };
@@ -405,6 +407,17 @@ namespace Com.Scheherazade.Common.Haptics.Editor
                 + "timeline editor.",
                 MessageType.None);
 
+            int platform = GUILayout.Toolbar(_selectedSubtabIndex, SubtabNames);
+            if (platform != _selectedSubtabIndex)
+            {
+                _selectedSubtabIndex = platform;
+                EditorPrefs.SetInt(ProviderSubtabPrefKey, _selectedSubtabIndex);
+            }
+            EditorGUILayout.HelpBox(
+                "Editing " + SubtabNames[_selectedSubtabIndex]
+                + " keyframes. Each platform timeline is independent.",
+                MessageType.Info);
+
             DrawRhythmToolbar();
 
             SerializedProperty rhythmsProp = _serializedSettings.FindProperty("_rhythms");
@@ -507,7 +520,11 @@ namespace Com.Scheherazade.Common.Haptics.Editor
                 {
                     case 0: return string.Compare(ra.Id, rb.Id, StringComparison.OrdinalIgnoreCase);
                     case 1: return string.Compare(ra.DisplayLabel, rb.DisplayLabel, StringComparison.OrdinalIgnoreCase);
-                    default: return ra.ComputeDuration().CompareTo(rb.ComputeDuration());
+                    default:
+                        HapticRhythmPlatform platform = SelectedRhythmPlatform;
+                        return ra.ComputeDuration(platform).CompareTo(
+                            rb.ComputeDuration(platform)
+                        );
                 }
             });
 
@@ -516,8 +533,9 @@ namespace Com.Scheherazade.Common.Haptics.Editor
 
         private bool MatchesRhythmFilter(HapticRhythm rhythm)
         {
-            if (_rhythmFilter == 1 && rhythm.Keyframes.Length == 0) return false;
-            if (_rhythmFilter == 2 && rhythm.Keyframes.Length > 0) return false;
+            HapticKeyframe[] keyframes = rhythm.GetKeyframes(SelectedRhythmPlatform);
+            if (_rhythmFilter == 1 && keyframes.Length == 0) return false;
+            if (_rhythmFilter == 2 && keyframes.Length > 0) return false;
 
             if (string.IsNullOrEmpty(_searchText)) return true;
             string query = _searchText.Trim();
@@ -536,12 +554,28 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             return false;
         }
 
+        private HapticRhythmPlatform SelectedRhythmPlatform =>
+            _selectedSubtabIndex == 1
+                ? HapticRhythmPlatform.Ios
+                : HapticRhythmPlatform.Android;
+
+        private string SelectedKeyframePropertyName =>
+            RhythmKeyframeFieldNames[_selectedSubtabIndex];
+
+        private string SelectionKey(HapticRhythm rhythm) =>
+            rhythm.Id + "@" + _selectedSubtabIndex;
+
         /// <returns>True when the rhythm was deleted by the header.</returns>
         private bool DrawRhythmCard(SerializedProperty arrayProp, int index)
         {
             SerializedProperty element = arrayProp.GetArrayElementAtIndex(index);
             var rhythm = element.objectReferenceValue as HapticRhythm;
             if (rhythm == null) return false;
+
+            if (rhythm.MigrateLegacyKeyframes())
+            {
+                EditorUtility.SetDirty(rhythm);
+            }
 
             SerializedObject rhythmSo = new SerializedObject(rhythm);
             rhythmSo.Update();
@@ -589,7 +623,8 @@ namespace Com.Scheherazade.Common.Haptics.Editor
 
         private void DrawTimelineArea(HapticRhythm rhythm, SerializedObject rhythmSo)
         {
-            if (!_selectedKeyframeByRhythm.TryGetValue(rhythm.Id, out int selected))
+            string selectionKey = SelectionKey(rhythm);
+            if (!_selectedKeyframeByRhythm.TryGetValue(selectionKey, out int selected))
             {
                 selected = -1;
             }
@@ -597,19 +632,26 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             Rect timelineRect = EditorGUILayout.GetControlRect(
                 false, TimelineHeight, GUILayout.ExpandWidth(true));
             HapticRhythmTimelineDrawer.DrawTimeline(
-                timelineRect, rhythm, rhythmSo, ref selected);
+                timelineRect,
+                rhythm,
+                rhythmSo,
+                SelectedKeyframePropertyName,
+                ref selected
+            );
 
-            _selectedKeyframeByRhythm[rhythm.Id] = selected;
+            _selectedKeyframeByRhythm[selectionKey] = selected;
 
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("+ Add Keyframe", GUILayout.Width(110)))
                 {
-                    SerializedProperty keyframesProp = rhythmSo.FindProperty("_keyframes");
+                    SerializedProperty keyframesProp = rhythmSo.FindProperty(
+                        SelectedKeyframePropertyName
+                    );
                     if (keyframesProp != null)
                     {
-                        float at = rhythm.ComputeDuration();
-                        _selectedKeyframeByRhythm[rhythm.Id] =
+                        float at = rhythm.ComputeDuration(SelectedRhythmPlatform);
+                        _selectedKeyframeByRhythm[selectionKey] =
                             HapticRhythmTimelineDrawer.AddKeyframe(keyframesProp, at);
                         ClearTemplateSeedIfEdited(rhythm, rhythmSo);
                     }
@@ -618,11 +660,13 @@ namespace Com.Scheherazade.Common.Haptics.Editor
                 GUI.backgroundColor = DeleteRed;
                 if (GUILayout.Button("Clear Keyframes", GUILayout.Width(110)))
                 {
-                    SerializedProperty keyframesProp = rhythmSo.FindProperty("_keyframes");
+                    SerializedProperty keyframesProp = rhythmSo.FindProperty(
+                        SelectedKeyframePropertyName
+                    );
                     if (keyframesProp != null)
                     {
                         keyframesProp.ClearArray();
-                        _selectedKeyframeByRhythm[rhythm.Id] = -1;
+                        _selectedKeyframeByRhythm[selectionKey] = -1;
                         rhythmSo.ApplyModifiedProperties();
                         rhythm.ClearTemplateSeed();
                         EditorUtility.SetDirty(rhythm);
@@ -636,13 +680,16 @@ namespace Com.Scheherazade.Common.Haptics.Editor
 
         private void DrawSelectedKeyframePanel(HapticRhythm rhythm, SerializedObject rhythmSo)
         {
-            if (!_selectedKeyframeByRhythm.TryGetValue(rhythm.Id, out int selected)
+            string selectionKey = SelectionKey(rhythm);
+            if (!_selectedKeyframeByRhythm.TryGetValue(selectionKey, out int selected)
                 || selected < 0)
             {
                 return;
             }
 
-            SerializedProperty keyframesProp = rhythmSo.FindProperty("_keyframes");
+            SerializedProperty keyframesProp = rhythmSo.FindProperty(
+                SelectedKeyframePropertyName
+            );
             if (keyframesProp == null || selected >= keyframesProp.arraySize) return;
 
             EditorGUILayout.Space();
@@ -658,7 +705,7 @@ namespace Com.Scheherazade.Common.Haptics.Editor
                 if (GUILayout.Button("Delete Selected", GUILayout.Width(110)))
                 {
                     keyframesProp.DeleteArrayElementAtIndex(selected);
-                    _selectedKeyframeByRhythm[rhythm.Id] = -1;
+                    _selectedKeyframeByRhythm[selectionKey] = -1;
                     rhythmSo.ApplyModifiedProperties();
                     ClearTemplateSeedIfEdited(rhythm, rhythmSo);
                 }
@@ -687,7 +734,9 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             {
                 EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
                 EditorGUILayout.LabelField(
-                    "(" + rhythm.Id + ")  " + rhythm.ComputeDuration().ToString("0.00") + "s",
+                    "(" + rhythm.Id + ")  "
+                    + rhythm.ComputeDuration(SelectedRhythmPlatform).ToString("0.00")
+                    + "s",
                     EditorStyles.miniLabel);
                 GUILayout.FlexibleSpace();
 
@@ -726,13 +775,23 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             return deleted;
         }
 
-        private static void DrawPreviewButtons(HapticRhythm rhythm)
+        private void DrawPreviewButtons(HapticRhythm rhythm)
         {
-            if (GUILayout.Button(
-                    "\u25B6", EditorStyles.miniButton,
-                    GUILayout.Width(ButtonWidth), GUILayout.Height(HeaderHeight)))
+            bool canPreviewSelectedPlatform = !EditorApplication.isPlaying
+                || SelectedRhythmPlatform == HapticRhythm.ActivePlatform;
+            string previewTooltip = canPreviewSelectedPlatform
+                ? "Preview the selected platform timeline"
+                : "Play Mode can preview only the active build platform timeline";
+            using (new EditorGUI.DisabledScope(!canPreviewSelectedPlatform))
             {
-                PreviewRhythm(rhythm);
+                if (GUILayout.Button(
+                        new GUIContent("\u25B6", previewTooltip),
+                        EditorStyles.miniButton,
+                        GUILayout.Width(ButtonWidth),
+                        GUILayout.Height(HeaderHeight)))
+                {
+                    PreviewRhythm(rhythm);
+                }
             }
 
             if (GUILayout.Button(
@@ -746,7 +805,7 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             }
         }
 
-        private static void PreviewRhythm(HapticRhythm rhythm)
+        private void PreviewRhythm(HapticRhythm rhythm)
         {
             if (EditorApplication.isPlaying)
             {
@@ -755,13 +814,16 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             }
 
             // Edit-mode preview: simulate via QuickLog; never touches the runtime manager.
+            HapticKeyframe[] keyframes = rhythm.GetKeyframes(SelectedRhythmPlatform);
             QuickLog.Info<HapticSettingsProvider>(
-                "[Preview] Rhythm '{0}' would fire {1} keyframe(s):",
-                rhythm.DisplayLabel, rhythm.Keyframes.Length);
+                "[Preview] Rhythm '{0}' ({1}) would fire {2} keyframe(s):",
+                rhythm.DisplayLabel,
+                SubtabNames[_selectedSubtabIndex],
+                keyframes.Length);
 
-            for (int i = 0; i < rhythm.Keyframes.Length; i++)
+            for (int i = 0; i < keyframes.Length; i++)
             {
-                HapticKeyframe kf = rhythm.Keyframes[i];
+                HapticKeyframe kf = keyframes[i];
                 QuickLog.Info<HapticSettingsProvider>(
                     "  t={0:F2}s  {1}  int={2:F2}  dur={3:F2}s",
                     kf.TimeSeconds, kf.Waveform, kf.Intensity, kf.DurationSeconds);
@@ -901,7 +963,8 @@ namespace Com.Scheherazade.Common.Haptics.Editor
 
             if (rhythm != null)
             {
-                _selectedKeyframeByRhythm.Remove(rhythm.Id);
+                _selectedKeyframeByRhythm.Remove(rhythm.Id + "@0");
+                _selectedKeyframeByRhythm.Remove(rhythm.Id + "@1");
                 AssetDatabase.RemoveObjectFromAsset(rhythm);
                 UnityEngine.Object.DestroyImmediate(rhythm, true);
                 AssetDatabase.SaveAssets();

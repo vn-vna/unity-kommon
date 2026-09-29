@@ -48,14 +48,17 @@ namespace Com.Scheherazade.Common.Haptics.Editor
             Rect rect,
             HapticRhythm rhythm,
             SerializedObject rhythmSo,
+            string keyframesPropertyName,
             ref int selectedIndex)
         {
             if (rhythm == null || rhythmSo == null) return;
 
-            SerializedProperty keyframesProp = rhythmSo.FindProperty("_keyframes");
+            SerializedProperty keyframesProp = rhythmSo.FindProperty(
+                keyframesPropertyName
+            );
             if (keyframesProp == null || !keyframesProp.isArray) return;
 
-            float duration = Mathf.Max(rhythm.ComputeDuration(), 0.01f);
+            float duration = ComputeDuration(keyframesProp);
 
             Rect rulerRect = new Rect(rect.x, rect.y, rect.width, RulerHeight);
             Rect trackRect = new Rect(
@@ -103,6 +106,19 @@ namespace Com.Scheherazade.Common.Haptics.Editor
         #endregion
 
         #region Private Methods
+
+        private static float ComputeDuration(SerializedProperty keyframesProp)
+        {
+            float duration = 0.01f;
+            for (int index = 0; index < keyframesProp.arraySize; index++)
+            {
+                SerializedProperty keyframe = keyframesProp.GetArrayElementAtIndex(index);
+                float time = keyframe.FindPropertyRelative("_timeSeconds").floatValue;
+                float length = keyframe.FindPropertyRelative("_durationSeconds").floatValue;
+                duration = Mathf.Max(duration, time + length);
+            }
+            return duration;
+        }
 
         private static void DrawRuler(Rect rect, float duration)
         {
