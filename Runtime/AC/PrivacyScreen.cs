@@ -1,4 +1,7 @@
 using System.Collections;
+#if UNITY_IOS && !UNITY_EDITOR
+using System.Runtime.InteropServices;
+#endif
 using Com.Scheherazade.Common.Logging;
 using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
@@ -15,6 +18,14 @@ namespace Com.Scheherazade.FallAway.AC
         const string PrivacyCoverManagerClass = "com.scheherazade.android.PrivacyCoverManager";
         const string ShowCoverMethod = "showCover";
         const string RemoveCoverMethod = "removeCover";
+#endif
+
+#if UNITY_IOS && !UNITY_EDITOR
+        [DllImport("__Internal")]
+        private static extern void scheherazade_privacy_showCover();
+
+        [DllImport("__Internal")]
+        private static extern void scheherazade_privacy_removeCover();
 #endif
 
         protected override void Awake()
@@ -41,9 +52,19 @@ namespace Com.Scheherazade.FallAway.AC
 #endif
 
 #if UNITY_IOS && !UNITY_EDITOR
-            QuickLog.Critical<PrivacyScreen>(
-                "iOS privacy screen is not implemented yet."
-            );
+            try
+            {
+                if (focus)
+                    scheherazade_privacy_removeCover();
+                else
+                    scheherazade_privacy_showCover();
+            }
+            catch (System.Exception e)
+            {
+                QuickLog.Critical<PrivacyScreen>(
+                    $"Error while trying to set the iOS privacy screen: {e}"
+                );
+            }
 #endif
             yield return null; // Wait a frame to
         }

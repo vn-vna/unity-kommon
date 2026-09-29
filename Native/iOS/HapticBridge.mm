@@ -3,9 +3,8 @@
 //  Scheherazade Haptics — iOS native bridge.
 //
 //  Strategies:
-//   - iOS 13+  : CHHapticEngine for continuous + amplitude control; fallback
-//                UIImpact/Notification/Selection generators for discrete impacts.
-//   - Older iOS: legacy AudioServicesPlaySystemSound impact ids 1519/1520/1521.
+//   - iOS 13+ : CHHapticEngine for continuous + amplitude control.
+//   - UIImpact/Notification/Selection generators for discrete impacts.
 //
 //  Simulator has no Taptic Engine: isAvailable() returns false and all other
 //  calls no-op (capability checks never crash).
@@ -13,8 +12,14 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import <CoreHaptics/CoreHaptics.h>
+#import <TargetConditionals.h>
+
+#if __has_feature(objc_arc)
+#define HAPTIC_RELEASE(object)
+#else
+#define HAPTIC_RELEASE(object) [object release]
+#endif
 
 // WaveformType enum (must match HapticWaveformType in C#).
 typedef NS_ENUM(NSInteger, HapticWaveformType) {
@@ -29,21 +34,31 @@ typedef NS_ENUM(NSInteger, HapticWaveformType) {
     Custom = 8
 };
 
-// Legacy AudioServices impact ids.
-static const SystemSoundID kHapticLegacyLight = 1519;
-static const SystemSoundID kHapticLegacyMedium = 1520;
-static const SystemSoundID kHapticLegacyHeavy = 1521;
-
 static UIImpactFeedbackGenerator *_lightGenerator;
 static UIImpactFeedbackGenerator *_mediumGenerator;
 static UIImpactFeedbackGenerator *_heavyGenerator;
 static UINotificationFeedbackGenerator *_notificationGenerator;
 static UISelectionFeedbackGenerator *_selectionGenerator;
 static CHHapticEngine *_engine;
+static NSUInteger _engineGeneration;
 
-static NSMutableDictionary<NSNumber *, CHHapticPatternPlayer *> *_continuousPlayers;
+static NSMutableDictionary<NSNumber *, id<CHHapticPatternPlayer>> *_continuousPlayers;
 
-static BOOL HapticRuntimeIsReady() {
+static void ClearEngine() {
+    ++_engineGeneration;
+    HAPTIC_RELEASE(_engine);
+    _engine = nil;
+}
+
+static BOOL HapticRuntimeIsAvailable() {
+#if TARGET_OS_SIMULATOR
+    return NO;
+#else
+    return YES;
+#endif
+}
+
+static BOOL HapticRuntimeSupportsContinuous() {
     if (@available(iOS 13.0, *)) {
         return [CHHapticEngine capabilitiesForHardware].supportsHaptics;
     }
@@ -68,15 +83,33 @@ static CHHapticEngine *EnsureEngine() {
     if (@available(iOS 13.0, *)) {
         NSError *error = nil;
         _engine = [[CHHapticEngine alloc] initAndReturnError:&error];
-        if (error != nil) {
-            _engine = nil;
+        if (_engine == nil || error != nil) {
+            ClearEngine();
+            return nil;
+        }
+
+        NSUInteger generation = ++_engineGeneration;
+        _engine.stoppedHandler = ^(CHHapticEngineStoppedReason reason) {
+            (void)reason;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (_engineGeneration != generation) return;
+                [_continuousPlayers removeAllObjects];
+                ClearEngine();
+            });
+        };
+        _engine.resetHandler = ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (_engineGeneration != generation) return;
+                [_continuousPlayers removeAllObjects];
+                ClearEngine();
+            });
+        };
+
+        if (![_engine startAndReturnError:&error] || error != nil) {
+            ClearEngine();
         }
     }
     return _engine;
-}
-
-static void PlayLegacy(SystemSoundID soundId) {
-    AudioServicesPlaySystemSound(soundId);
 }
 
 static void PlayDiscreteImpact(HapticWaveformType type, float intensity) {
@@ -122,7 +155,7 @@ static void PlayDiscreteImpact(HapticWaveformType type, float intensity) {
 extern "C" {
 
 bool haptic_isAvailable() {
-    return HapticRuntimeIsReady();
+    return HapticRuntimeIsAvailable();
 }
 
 bool haptic_supportsHeavy() {
@@ -132,53 +165,68 @@ bool haptic_supportsHeavy() {
     return NO;
 }
 
+bool haptic_supportsContinuous() {
+    return HapticRuntimeSupportsContinuous();
+}
+
 void haptic_cue(int type, float intensity) {
-    if (!HapticRuntimeIsReady()) return;
+    if (!HapticRuntimeIsAvailable()) return;
 
     float clamped = intensity < 0 ? 0 : (intensity > 1 ? 1 : intensity);
     PlayDiscreteImpact((HapticWaveformType)type, clamped);
 }
 
 void haptic_beginContinuous(int tokenId, float intensity) {
-    if (!HapticRuntimeIsReady()) return;
+    if (!HapticRuntimeSupportsContinuous()) return;
 
     if (_continuousPlayers == nil) {
-        _continuousPlayers = [NSMutableDictionary dictionary];
+        _continuousPlayers = [[NSMutableDictionary alloc] init];
     }
 
     CHHapticEngine *engine = EnsureEngine();
     if (engine == nil) return;
 
     if (_continuousPlayers[@(tokenId)] != nil) {
-        [_continuousPlayers[@(tokenId)] stopWithCompletionHandler:nil];
+        [_continuousPlayers[@(tokenId)] stopAtTime:0 error:nil];
         [_continuousPlayers removeObjectForKey:@(tokenId)];
     }
 
     float clamped = intensity < 0 ? 0 : (intensity > 1 ? 1 : intensity);
 
+    CHHapticEventParameter *intensityParameter =
+        [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity
+                                                     value:clamped];
+    CHHapticEventParameter *sharpnessParameter =
+        [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness
+                                                     value:0.5f];
     CHHapticEvent *event = [[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticContinuous
-                                                         parameters:@[
-                                                             [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity
-                                                                                                           value:clamped],
-                                                             [[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticSharpness
-                                                                                                           value:0.5f]
-                                                         ]
+                                                         parameters:@[intensityParameter, sharpnessParameter]
                                                            relativeTime:0
-                                                           duration:1000.0];
+                                                               duration:1.0];
+    HAPTIC_RELEASE(intensityParameter);
+    HAPTIC_RELEASE(sharpnessParameter);
 
     NSError *error = nil;
     CHHapticPattern *pattern = [[CHHapticPattern alloc] initWithEvents:@[event] parameters:@[] error:&error];
-    if (error != nil) return;
+    HAPTIC_RELEASE(event);
+    if (pattern == nil || error != nil) {
+        HAPTIC_RELEASE(pattern);
+        return;
+    }
 
-    id<CHHapticPatternPlayer> player = [engine createPlayerWithPattern:pattern error:&error];
-    if (error != nil) return;
+    id<CHHapticAdvancedPatternPlayer> player =
+        [engine createAdvancedPlayerWithPattern:pattern error:&error];
+    HAPTIC_RELEASE(pattern);
+    if (player == nil || error != nil) return;
+
+    player.loopEnabled = YES;
+    if (![player startAtTime:0 error:&error] || error != nil) return;
 
     _continuousPlayers[@(tokenId)] = player;
-    [player startWithCompletionHandler:nil];
 }
 
 void haptic_updateContinuous(int tokenId, float intensity) {
-    if (!HapticRuntimeIsReady() || _continuousPlayers == nil) return;
+    if (!HapticRuntimeSupportsContinuous() || _continuousPlayers == nil) return;
 
     id<CHHapticPatternPlayer> player = _continuousPlayers[@(tokenId)];
     if (player == nil) return;
@@ -190,6 +238,7 @@ void haptic_updateContinuous(int tokenId, float intensity) {
                                                         value:clamped
                                                   relativeTime:0];
     [player sendParameters:@[param] atTime:0 error:nil];
+    HAPTIC_RELEASE(param);
 }
 
 void haptic_endContinuous(int tokenId) {
@@ -198,13 +247,15 @@ void haptic_endContinuous(int tokenId) {
     id<CHHapticPatternPlayer> player = _continuousPlayers[@(tokenId)];
     if (player == nil) return;
 
-    [player stopWithCompletionHandler:nil];
+    [player stopAtTime:0 error:nil];
     [_continuousPlayers removeObjectForKey:@(tokenId)];
 }
 
 void haptic_cancelAll() {
     [_continuousPlayers enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, id<CHHapticPatternPlayer> player, BOOL *stop) {
-        [player stopWithCompletionHandler:nil];
+        (void)key;
+        (void)stop;
+        [player stopAtTime:0 error:nil];
     }];
     [_continuousPlayers removeAllObjects];
 }

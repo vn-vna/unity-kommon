@@ -13,6 +13,9 @@ namespace Com.Scheherazade.Common.Integration.IAR
 
         public bool IsInitialized { get; private set; }
 
+        [SerializeField]
+        private string iosAppStoreId;
+
         private string _storeUrl;
 
         public void Initialize()
@@ -20,7 +23,15 @@ namespace Com.Scheherazade.Common.Integration.IAR
 #if UNITY_ANDROID
             _storeUrl = "market://details?id=" + Application.identifier;
 #elif UNITY_IOS
-            _storeUrl = "https://apps.apple.com/app/id" + Application.identifier;
+            if (ulong.TryParse(iosAppStoreId, out _))
+            {
+                _storeUrl = $"itms-apps://itunes.apple.com/app/id{iosAppStoreId}?action=write-review";
+            }
+            else
+            {
+                _storeUrl = null;
+                Debug.LogWarning("[OpenStoreIAR] Configure the numeric iOS App Store ID before requesting a review.");
+            }
 #endif
             IsInitialized = true;
         }

@@ -31,6 +31,9 @@ namespace Com.Scheherazade.Common.Haptics
 
         public bool SupportsWaveform(HapticWaveformType type)
         {
+            if (type == HapticWaveformType.VibrationBurst)
+                return NativeHapticBridge.haptic_supportsContinuous();
+
             // Heavy may be unsupported on older devices; downgrade handled by the manager.
             return type != HapticWaveformType.HeavyImpact
                 || NativeHapticBridge.haptic_supportsHeavy();
@@ -91,6 +94,8 @@ namespace Com.Scheherazade.Common.Haptics
 
             try
             {
+                if (!NativeHapticBridge.haptic_supportsContinuous()) return;
+
                 tokenId = Random.Range(1, int.MaxValue);
                 NativeHapticBridge.haptic_beginContinuous(tokenId, keyframe.Intensity);
             }
@@ -172,10 +177,16 @@ namespace Com.Scheherazade.Common.Haptics
     {
 #if UNITY_IOS && !UNITY_EDITOR
         [DllImport("__Internal")]
+        [return: MarshalAs(UnmanagedType.I1)]
         public static extern bool haptic_isAvailable();
 
         [DllImport("__Internal")]
+        [return: MarshalAs(UnmanagedType.I1)]
         public static extern bool haptic_supportsHeavy();
+
+        [DllImport("__Internal")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        public static extern bool haptic_supportsContinuous();
 
         [DllImport("__Internal")]
         public static extern void haptic_cue(int type, float intensity);
@@ -194,6 +205,7 @@ namespace Com.Scheherazade.Common.Haptics
 #else
         public static bool haptic_isAvailable() => false;
         public static bool haptic_supportsHeavy() => false;
+        public static bool haptic_supportsContinuous() => false;
         public static void haptic_cue(int type, float intensity) { }
         public static void haptic_beginContinuous(int tokenId, float intensity) { }
         public static void haptic_updateContinuous(int tokenId, float intensity) { }
