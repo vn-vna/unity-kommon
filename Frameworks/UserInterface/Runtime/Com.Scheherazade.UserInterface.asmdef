@@ -2,7 +2,8 @@
     "name": "Com.Scheherazade.UserInterface",
     "rootNamespace": "Com.Scheherazade.Common.UserInterface",
     "references": [
-        "Com.Scheherazade.Common"
+        "Com.Scheherazade.Common",
+        "GUID:110ad297754372a49a01476ec2080e60"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

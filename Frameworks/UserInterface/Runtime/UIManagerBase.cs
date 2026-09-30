@@ -208,6 +208,7 @@ namespace Com.Scheherazade.Common.UserInterface
                 return;
             }
 
+            UIHapticButton.EnsureForHierarchy(newPanelInstance.gameObject);
             newPanelInstance.UIManager = this;
             newPanelInstance.ResetTransform();
             newPanelInstance.RectTransform.localScale = Vector3.one;

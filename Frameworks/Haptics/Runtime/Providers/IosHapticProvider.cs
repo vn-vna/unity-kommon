@@ -13,6 +13,20 @@ namespace Com.Scheherazade.Common.Haptics
     [CreateAssetMenu(menuName = "Scheherazade/Haptics/iOS Haptic Provider")]
     public class IosHapticProvider : ScriptableObject, IHapticProvider
     {
+        #region Constants
+
+        private const float DefaultIntensityMultiplier = 1.35f;
+
+        #endregion
+
+        #region Serialized Fields
+
+        [Tooltip("Global intensity boost applied to iOS haptic output.")]
+        [SerializeField, Range(1f, 2f)]
+        private float intensityMultiplier = DefaultIntensityMultiplier;
+
+        #endregion
+
         #region Private Fields
 
         private bool _isAvailable;
@@ -24,6 +38,15 @@ namespace Com.Scheherazade.Common.Haptics
         public string ProviderId => nameof(IosHapticProvider);
 
         public bool IsAvailable => _isAvailable;
+
+        #endregion
+
+        #region Unity Callbacks
+
+        private void OnValidate()
+        {
+            intensityMultiplier = Mathf.Clamp(intensityMultiplier, 1f, 2f);
+        }
 
         #endregion
 
@@ -67,7 +90,9 @@ namespace Com.Scheherazade.Common.Haptics
 #if UNITY_IOS && !UNITY_EDITOR
             if (!_isAvailable) return;
 
-            float intensity = Mathf.Clamp01(keyframe.Intensity * intensityScale);
+            float intensity = ScaleIntensity(
+                keyframe.Intensity * intensityScale
+            );
             try
             {
                 NativeHapticBridge.haptic_cue((int)keyframe.Waveform, intensity);
@@ -97,7 +122,10 @@ namespace Com.Scheherazade.Common.Haptics
                 if (!NativeHapticBridge.haptic_supportsContinuous()) return;
 
                 tokenId = Random.Range(1, int.MaxValue);
-                NativeHapticBridge.haptic_beginContinuous(tokenId, keyframe.Intensity);
+                NativeHapticBridge.haptic_beginContinuous(
+                    tokenId,
+                    ScaleIntensity(keyframe.Intensity)
+                );
             }
             catch (System.Exception ex)
             {
@@ -119,7 +147,10 @@ namespace Com.Scheherazade.Common.Haptics
 
             try
             {
-                NativeHapticBridge.haptic_updateContinuous(tokenId, keyframe.Intensity);
+                NativeHapticBridge.haptic_updateContinuous(
+                    tokenId,
+                    ScaleIntensity(keyframe.Intensity)
+                );
             }
             catch (System.Exception ex)
             {
@@ -165,6 +196,15 @@ namespace Com.Scheherazade.Common.Haptics
 #else
             // no-op in editor / non-iOS
 #endif
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        private float ScaleIntensity(float intensity)
+        {
+            return Mathf.Clamp01(intensity * intensityMultiplier);
         }
 
         #endregion
