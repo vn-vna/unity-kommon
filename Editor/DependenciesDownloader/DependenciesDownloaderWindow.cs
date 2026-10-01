@@ -13,9 +13,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
     {
         private const string DownloadPathKey = "Scheherazade.DepsDownloader.DownloadPath";
         private const string DefaultDownloadDir = "LocalPackages";
-        private const double AutoFetchCooldownSeconds = 30.0;
-
-        private static double s_lastAutoFetchTime;
+        private const string AdjustPackageId = "com.adjust.sdk";
+        private const string AppLovinPackageId = "com.applovin.mediation.ads";
+        private const string AppMetricaPackageId = "io.appmetrica.analytics";
 
         // ── Shared state ────────────────────────────────────
 
@@ -25,10 +25,21 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         private MessageType _statusType = MessageType.Info;
 
         private Vector2 _summaryScroll;
+        private string _downloadPath;
+        private readonly List<string> _commitWarnings = new List<string>();
+        private readonly Dictionary<string, InstalledDependencyInfo>
+            _installedDependencies = new Dictionary<string, InstalledDependencyInfo>();
+        private string _dependencyConflictMessage = string.Empty;
 
         // ── Tab state ───────────────────────────────────────
 
-        private enum Tab { Google = 0, Adjust = 1, AppLovin = 2 }
+        private enum Tab
+        {
+            Google = 0,
+            Adjust = 1,
+            AppLovin = 2,
+            AppMetrica = 3
+        }
 
         private Tab _activeTab = Tab.Google;
 
@@ -52,19 +63,37 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private enum GitHubAction { None, Install, Remove }
 
+        private sealed class InstalledDependencyInfo
+        {
+            public string PackageName;
+            public string RequiredVersion;
+            public string InstalledVersion;
+        }
+
         private const string AdjustRepoOwner = "adjust";
         private const string AdjustRepoName = "unity_sdk";
         private const string AppLovinRepoOwner = "AppLovin";
         private const string AppLovinRepoName = "AppLovin-MAX-Unity-Plugin";
+        private const string AppMetricaRepoOwner = "appmetrica";
+        private const string AppMetricaRepoName = "appmetrica-unity-plugin";
 
         private GitHubReleaseCache _adjustCache;
         private GitHubReleaseCache _applovinCache;
+        private GitHubReleaseCache _appMetricaCache;
         private GitHubAction _adjustAction = GitHubAction.None;
         private GitHubAction _applovinAction = GitHubAction.None;
+        private GitHubAction _appMetricaAction = GitHubAction.None;
         private int _adjustVersionIdx;
         private int _applovinVersionIdx;
+        private int _appMetricaVersionIdx;
         private string _adjustInstalledVer;
         private string _applovinInstalledVer;
+        private string _appMetricaInstalledVer;
+        private bool _adjustManagedByUpm;
+        private bool _applovinManagedByUpm;
+        private Vector2 _adjustNotesScroll;
+        private Vector2 _applovinNotesScroll;
+        private Vector2 _appMetricaNotesScroll;
 
         // ── Properties ──────────────────────────────────────
 
@@ -84,26 +113,6 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             }
         }
 
-        // ── Auto-refresh ─────────────────────────────────────
-
-        static DependenciesDownloaderWindow()
-        {
-            AssemblyReloadEvents.afterAssemblyReload += TryAutoFetch;
-        }
-
-        private static void TryAutoFetch()
-        {
-            var now = EditorApplication.timeSinceStartup;
-            if (now - s_lastAutoFetchTime < AutoFetchCooldownSeconds) return;
-            s_lastAutoFetchTime = now;
-
-            EditorApplication.delayCall += () =>
-            {
-                if (GoogleArchiveParser.GetCachedArchive() == null)
-                    GoogleArchiveParser.FetchAndParseArchiveAsync();
-            };
-        }
-
         [MenuItem("Dev Menu/Tools/Dependencies Downloader")]
         public static void ShowWindow()
         {
@@ -112,17 +121,42 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private void OnEnable()
         {
+            _downloadPath = EditorPrefs.GetString(
+                DownloadPathKey,
+                GetDefaultDownloadPath()
+            );
+            if (string.IsNullOrWhiteSpace(_downloadPath))
+            {
+                _downloadPath = GetDefaultDownloadPath();
+            }
+
             _archive = GoogleArchiveParser.GetCachedArchive();
-            if (_archive?.Packages != null) RebuildCategories();
-            else TryAutoFetch();
+            if (_archive?.Packages != null && _archive.Packages.Count > 0)
+            {
+                RebuildCategories();
+            }
+            else
+            {
+                _ = FetchGoogleArchiveAsync();
+            }
 
             _adjustCache = GitHubReleaseFetcher.GetCachedRelease(
-                AdjustRepoOwner, AdjustRepoName);
+                AdjustRepoOwner, AdjustRepoName
+            );
             _applovinCache = GitHubReleaseFetcher.GetCachedRelease(
-                AppLovinRepoOwner, AppLovinRepoName);
+                AppLovinRepoOwner, AppLovinRepoName
+            );
+            _appMetricaCache = GitHubReleaseFetcher.GetCachedRelease(
+                AppMetricaRepoOwner, AppMetricaRepoName
+            );
 
             RefreshGitHubInstalledVersions();
             minSize = new Vector2(750f, 500f);
+        }
+
+        private void OnDisable()
+        {
+            EditorUtility.ClearProgressBar();
         }
 
         private void OnGUI()
@@ -131,7 +165,10 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             EditorGUILayout.Space(4f);
             DrawStatusBox();
             EditorGUILayout.Space(4f);
-            DrawBody();
+            using (new EditorGUI.DisabledScope(_isCommitting))
+            {
+                DrawBody();
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -139,50 +176,88 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private void DrawToolbar()
         {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            var downloadPath =
-                EditorPrefs.GetString(DownloadPathKey, string.Empty);
-            if (string.IsNullOrEmpty(downloadPath))
-                downloadPath = Path.GetFullPath(Path.Combine(
-                    Application.dataPath, "..", DefaultDownloadDir));
-
-            using (new EditorGUILayout.HorizontalScope())
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                using (new EditorGUI.DisabledScope(_isFetching))
+                var isBusy = _isFetching || _isCommitting;
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("Refresh Registry",
-                        GUILayout.Width(120f)))
-                        FetchActiveTabAsync();
+                    using (new EditorGUI.DisabledScope(isBusy))
+                    {
+                        var refreshLabel = _activeTab == Tab.Google
+                            ? "Refresh Google Registry"
+                            : "Refresh Releases";
+                        if (GUILayout.Button(
+                                refreshLabel,
+                                GUILayout.Width(155f)
+                            ))
+                        {
+                            FetchActiveTabAsync();
+                        }
+                    }
+
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.LabelField(
+                        "Download folder",
+                        GUILayout.Width(100f)
+                    );
+
+                    using (new EditorGUI.DisabledScope(_isCommitting))
+                    {
+                        EditorGUI.BeginChangeCheck();
+                        _downloadPath = EditorGUILayout.TextField(
+                            _downloadPath ?? string.Empty
+                        );
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            EditorPrefs.SetString(
+                                DownloadPathKey,
+                                _downloadPath
+                            );
+                        }
+
+                        if (GUILayout.Button("Browse", GUILayout.Width(60f)))
+                        {
+                            var initialPath =
+                                PackageManifestHelper.IsPathInsideProject(
+                                    _downloadPath
+                                )
+                                    ? _downloadPath
+                                    : GetDefaultDownloadPath();
+                            var chosen = EditorUtility.OpenFolderPanel(
+                                "Choose Package Download Folder",
+                                initialPath,
+                                string.Empty
+                            );
+                            if (!string.IsNullOrEmpty(chosen))
+                            {
+                                _downloadPath = chosen;
+                                EditorPrefs.SetString(
+                                    DownloadPathKey,
+                                    _downloadPath
+                                );
+                            }
+                        }
+
+                        if (GUILayout.Button("Reset", GUILayout.Width(50f)))
+                        {
+                            _downloadPath = GetDefaultDownloadPath();
+                            EditorPrefs.SetString(
+                                DownloadPathKey,
+                                _downloadPath
+                            );
+                        }
+                    }
                 }
 
-                GUILayout.FlexibleSpace();
-
-                var isPathValid =
-                    PackageManifestHelper.IsPathInsideProject(downloadPath);
-                var pathLabel = isPathValid ? "Download:" : "Download (!):";
-                EditorGUILayout.LabelField(pathLabel, GUILayout.Width(70f));
-                EditorGUI.BeginChangeCheck();
-                downloadPath = EditorGUILayout.TextField(downloadPath);
-                if (EditorGUI.EndChangeCheck())
-                    EditorPrefs.SetString(DownloadPathKey, downloadPath);
-
-                if (GUILayout.Button("Browse", GUILayout.Width(60f)))
+                if (!PackageManifestHelper.IsPathInsideProject(_downloadPath))
                 {
-                    var chosen = EditorUtility.OpenFolderPanel(
-                        "Download Path", downloadPath, string.Empty);
-                    if (!string.IsNullOrEmpty(chosen))
-                        EditorPrefs.SetString(DownloadPathKey, chosen);
+                    EditorGUILayout.HelpBox(
+                        "Choose a valid folder inside this Unity project. " +
+                        "Local package links cannot target an external folder.",
+                        MessageType.Warning
+                    );
                 }
             }
-
-            if (!PackageManifestHelper.IsPathInsideProject(downloadPath))
-                EditorGUILayout.HelpBox(
-                    "Download path must be inside the project folder " +
-                    "for file:../ relative linking.",
-                    MessageType.Warning);
-
-            EditorGUILayout.EndVertical();
         }
 
         // ── Status ───────────────────────────────────────────
@@ -209,19 +284,36 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                         case Tab.Google: DrawGoogleTab(); break;
                         case Tab.Adjust:
                             DrawGitHubTab(
-                                _adjustCache, "Adjust SDK",
-                                AdjustRepoOwner, AdjustRepoName,
-                                ref _adjustAction, ref _adjustVersionIdx,
+                                _adjustCache,
+                                "Adjust SDK",
+                                ref _adjustAction,
+                                ref _adjustVersionIdx,
                                 _adjustInstalledVer,
-                                cacheRef: ref _adjustCache);
+                                _adjustManagedByUpm,
+                                ref _adjustNotesScroll
+                            );
                             break;
                         case Tab.AppLovin:
                             DrawGitHubTab(
-                                _applovinCache, "AppLovin MAX",
-                                AppLovinRepoOwner, AppLovinRepoName,
-                                ref _applovinAction, ref _applovinVersionIdx,
+                                _applovinCache,
+                                "AppLovin MAX",
+                                ref _applovinAction,
+                                ref _applovinVersionIdx,
                                 _applovinInstalledVer,
-                                cacheRef: ref _applovinCache);
+                                _applovinManagedByUpm,
+                                ref _applovinNotesScroll
+                            );
+                            break;
+                        case Tab.AppMetrica:
+                            DrawGitHubTab(
+                                _appMetricaCache,
+                                "AppMetrica SDK",
+                                ref _appMetricaAction,
+                                ref _appMetricaVersionIdx,
+                                _appMetricaInstalledVer,
+                                false,
+                                ref _appMetricaNotesScroll
+                            );
                             break;
                     }
                 }
@@ -240,7 +332,13 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private void DrawTabBar()
         {
-            var tabNames = new[] { "Google Packages", "Adjust", "AppLovin MAX" };
+            var tabNames = new[]
+            {
+                "Google Packages",
+                "Adjust",
+                "AppLovin MAX",
+                "AppMetrica"
+            };
             var tabWidth = (position.width - 20f) / tabNames.Length;
 
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
@@ -461,12 +559,11 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         private void DrawGitHubTab(
             GitHubReleaseCache cache,
             string displayName,
-            string repoOwner,
-            string repoName,
             ref GitHubAction action,
             ref int versionIdx,
             string installedVer,
-            ref GitHubReleaseCache cacheRef)
+            bool managedByUpm,
+            ref Vector2 notesScroll)
         {
             if (cache?.Releases == null || cache.Releases.Count == 0)
             {
@@ -489,6 +586,16 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(displayName, EditorStyles.boldLabel);
 
+            if (managedByUpm)
+            {
+                EditorGUILayout.HelpBox(
+                    $"{displayName} is managed by Unity Package Manager " +
+                    $"({installedVer}). Use Package Manager to update or remove it.",
+                    MessageType.Info
+                );
+                action = GitHubAction.None;
+            }
+
             var versionNames = releases.Select(r => r.Version).ToArray();
             EditorGUI.BeginChangeCheck();
             versionIdx = EditorGUILayout.Popup(
@@ -497,6 +604,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             {
                 if (action == GitHubAction.Install)
                     action = GitHubAction.None;
+                selected = releases[versionIdx];
             }
 
             // status line
@@ -529,23 +637,25 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             EditorGUILayout.Space(6f);
 
             // action buttons
+            using (new EditorGUI.DisabledScope(managedByUpm))
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (action == GitHubAction.None)
                 {
-                    if (!string.IsNullOrEmpty(installedVer) &&
-                        installedVer == selected.Version)
-                    {
-                        if (GUILayout.Button("Remove", GUILayout.Width(100f)))
-                            action = GitHubAction.Remove;
-                    }
-                    else
+                    if (string.IsNullOrEmpty(installedVer) ||
+                        installedVer != selected.Version)
                     {
                         var label = !string.IsNullOrEmpty(installedVer)
                             ? $"Upgrade to {selected.Version}"
                             : $"Install {selected.Version}";
                         if (GUILayout.Button(label))
                             action = GitHubAction.Install;
+                    }
+
+                    if (!string.IsNullOrEmpty(installedVer) &&
+                        GUILayout.Button("Remove", GUILayout.Width(100f)))
+                    {
+                        action = GitHubAction.Remove;
                     }
                 }
                 else
@@ -574,8 +684,10 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             EditorGUILayout.LabelField(
                 "Release Notes", EditorStyles.boldLabel);
             var bodyText = selected.Body ?? string.Empty;
-            var notesScroll = EditorGUILayout.BeginScrollView(
-                Vector2.zero, GUILayout.ExpandHeight(true));
+            notesScroll = EditorGUILayout.BeginScrollView(
+                notesScroll,
+                GUILayout.ExpandHeight(true)
+            );
             EditorGUILayout.HelpBox(bodyText, MessageType.None);
             EditorGUILayout.EndScrollView();
 
@@ -590,14 +702,11 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             _summaryScroll = EditorGUILayout.BeginScrollView(
                 _summaryScroll, GUILayout.ExpandHeight(true));
 
-            var downloadPath =
-                EditorPrefs.GetString(DownloadPathKey, string.Empty);
-            if (string.IsNullOrEmpty(downloadPath))
-                downloadPath = Path.GetFullPath(Path.Combine(
-                    Application.dataPath, "..", DefaultDownloadDir));
-
             var isPathValid =
-                PackageManifestHelper.IsPathInsideProject(downloadPath);
+                PackageManifestHelper.TryGetPathInsideProject(
+                    _downloadPath,
+                    out var downloadPath
+                );
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Changes Pending", EditorStyles.boldLabel);
@@ -629,6 +738,8 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                         EditorStyles.miniLabel);
                     installCount++;
                 }
+
+                DrawInstalledDependencies();
             }
 
             // GitHub installs
@@ -651,6 +762,17 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                     ? r[_applovinVersionIdx].Version : "?";
                 EditorGUILayout.LabelField(
                     $"  + AppLovin MAX {v}", EditorStyles.miniLabel);
+                installCount++;
+            }
+
+            if (_appMetricaAction == GitHubAction.Install)
+            {
+                var r = _appMetricaCache?.Releases;
+                var v = r != null && _appMetricaVersionIdx >= 0 &&
+                        _appMetricaVersionIdx < r.Count
+                    ? r[_appMetricaVersionIdx].Version : "?";
+                EditorGUILayout.LabelField(
+                    $"  + AppMetrica SDK {v}", EditorStyles.miniLabel);
                 installCount++;
             }
 
@@ -685,23 +807,67 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                 removeCount++;
             }
 
+            if (_appMetricaAction == GitHubAction.Remove)
+            {
+                EditorGUILayout.LabelField(
+                    "  - AppMetrica SDK", EditorStyles.miniLabel);
+                removeCount++;
+            }
+
             if (removeCount == 0)
                 EditorGUILayout.LabelField(
                     "  (none)", EditorStyles.miniLabel);
 
             EditorGUILayout.EndVertical();
 
+            if (!string.IsNullOrEmpty(_dependencyConflictMessage))
+            {
+                EditorGUILayout.HelpBox(
+                    _dependencyConflictMessage,
+                    MessageType.Error
+                );
+            }
+
             EditorGUILayout.Space(8f);
 
-            var totalChanges = installCount + removeCount;
-            var canCommit = totalChanges > 0 && !_isCommitting &&
-                            !_isFetching && isPathValid;
+            var queuedChanges = _queuedInstalls.Count +
+                                _queuedRemovals.Count +
+                                (_adjustAction == GitHubAction.None ? 0 : 1) +
+                                (_applovinAction == GitHubAction.None ? 0 : 1) +
+                                 (_appMetricaAction == GitHubAction.None ? 0 : 1);
+            var canCommit = queuedChanges > 0 && !_isCommitting &&
+                            !_isFetching && isPathValid &&
+                            string.IsNullOrEmpty(
+                                _dependencyConflictMessage
+                            );
 
-            using (new EditorGUI.DisabledScope(!canCommit))
+            using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button($"Commit Changes ({totalChanges})",
-                    GUILayout.Height(34f)))
-                    CommitAsync(downloadPath);
+                using (new EditorGUI.DisabledScope(!canCommit))
+                {
+                    if (GUILayout.Button(
+                            $"Apply {queuedChanges} Queued Change(s)",
+                            GUILayout.Height(34f)
+                        ))
+                    {
+                        CommitAsync(downloadPath);
+                    }
+                }
+
+                using (new EditorGUI.DisabledScope(
+                           queuedChanges == 0 || _isCommitting
+                       ))
+                {
+                    if (GUILayout.Button(
+                            "Discard Queue",
+                            GUILayout.Width(105f),
+                            GUILayout.Height(34f)
+                        ))
+                    {
+                        ClearQueue();
+                        SetStatus("Queued changes discarded.", MessageType.Info);
+                    }
+                }
             }
 
             if (!isPathValid)
@@ -712,28 +878,140 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             EditorGUILayout.EndScrollView();
         }
 
+        private void DrawInstalledDependencies()
+        {
+            if (_installedDependencies.Count == 0) return;
+
+            EditorGUILayout.Space(3f);
+            EditorGUILayout.LabelField(
+                "Already Installed (Package Manager)",
+                EditorStyles.miniBoldLabel
+            );
+
+            var originalColor = GUI.contentColor;
+            GUI.contentColor = new Color(0.42f, 0.8f, 0.5f);
+            foreach (var dependency in _installedDependencies.Values.OrderBy(
+                         info => info.PackageName,
+                         StringComparer.Ordinal
+                     ))
+            {
+                var versionLabel = string.IsNullOrEmpty(
+                    dependency.InstalledVersion
+                )
+                    ? "installed"
+                    : $"installed {dependency.InstalledVersion}";
+                var requiredLabel =
+                    dependency.RequiredVersion == dependency.InstalledVersion ||
+                    string.IsNullOrEmpty(dependency.RequiredVersion)
+                        ? string.Empty
+                        : $" (requires {dependency.RequiredVersion})";
+                EditorGUILayout.LabelField(
+                    $"    ✓ {dependency.PackageName} — {versionLabel}" +
+                    requiredLabel,
+                    EditorStyles.miniLabel
+                );
+            }
+
+            GUI.contentColor = originalColor;
+        }
+
+        private void RecordInstalledDependencies(
+            List<DownloadEntry> dependencyTree,
+            Dictionary<string, string> installedPackages)
+        {
+            if (dependencyTree == null || installedPackages == null) return;
+
+            foreach (var dependency in dependencyTree)
+            {
+                if (!dependency.IsTransitive ||
+                    !installedPackages.TryGetValue(
+                        dependency.PackageName,
+                        out var installedValue
+                    ))
+                {
+                    continue;
+                }
+
+                if (_installedDependencies.ContainsKey(
+                        dependency.PackageName
+                    ))
+                {
+                    continue;
+                }
+
+                _installedDependencies[dependency.PackageName] =
+                    new InstalledDependencyInfo
+                    {
+                        PackageName = dependency.PackageName,
+                        RequiredVersion = dependency.Version,
+                        InstalledVersion = ExtractVersionFromManifestEntry(
+                            installedValue
+                        )
+                    };
+            }
+        }
+
         private List<DownloadEntry> ResolveAllEntries()
         {
+            _dependencyConflictMessage = string.Empty;
+            _installedDependencies.Clear();
             if (_archive == null || _queuedInstalls.Count == 0)
                 return new List<DownloadEntry>();
 
             var installed = InstalledPackages;
             var effectiveInstalled =
                 new Dictionary<string, string>(installed);
-            foreach (var r in _queuedRemovals)
-                effectiveInstalled.Remove(r);
+            foreach (var packageName in _queuedRemovals)
+                effectiveInstalled.Remove(packageName);
+            foreach (var packageName in _queuedInstalls)
+                effectiveInstalled.Remove(packageName);
 
             var all = new Dictionary<string, DownloadEntry>();
-            foreach (var pkgName in _queuedInstalls)
+            foreach (var pkgName in _queuedInstalls.OrderBy(
+                         name => name,
+                         StringComparer.Ordinal
+                     ))
             {
                 var version =
                     _packageVersions.TryGetValue(pkgName, out var v) ? v : "?";
+                var dependencyTree = GoogleDependencyResolver
+                    .ResolveFullDependencyTree(
+                        pkgName,
+                        version,
+                        _archive
+                    );
+                RecordInstalledDependencies(
+                    dependencyTree,
+                    effectiveInstalled
+                );
+
                 var entries = GoogleDependencyResolver
                     .ResolveFullDependencyTree(
-                        pkgName, version, _archive, effectiveInstalled);
-                foreach (var e in entries)
-                    if (!all.ContainsKey(e.PackageName))
-                        all[e.PackageName] = e;
+                        pkgName,
+                        version,
+                        _archive,
+                        effectiveInstalled
+                    );
+                foreach (var entry in entries)
+                {
+                    if (!all.TryGetValue(
+                            entry.PackageName,
+                            out var existing
+                        ))
+                    {
+                        all[entry.PackageName] = entry;
+                        continue;
+                    }
+
+                    if (existing.Version != entry.Version)
+                    {
+                        _dependencyConflictMessage =
+                            $"Dependency conflict: {entry.PackageName} is " +
+                            $"required as both {existing.Version} and " +
+                            $"{entry.Version}. Adjust the queued package " +
+                            "versions before applying changes.";
+                    }
+                }
             }
 
             var result = new List<DownloadEntry>(all.Values);
@@ -788,7 +1066,17 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                     break;
                 case Tab.AppLovin:
                     await FetchGitHubTabAsync(
-                        AppLovinRepoOwner, AppLovinRepoName);
+                        AppLovinRepoOwner,
+                        AppLovinRepoName,
+                        GitHubReleaseDelivery.UnityPackageAsset
+                    );
+                    break;
+                case Tab.AppMetrica:
+                    await FetchGitHubTabAsync(
+                        AppMetricaRepoOwner,
+                        AppMetricaRepoName,
+                        GitHubReleaseDelivery.GitPackage
+                    );
                     break;
             }
         }
@@ -800,78 +1088,170 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             try
             {
                 var result = await GoogleArchiveParser.FetchAndParseArchiveAsync();
-                _isFetching = false;
-                if (result?.Packages != null)
+                if (result?.Packages == null || result.Packages.Count == 0)
                 {
-                    _archive = result;
-                    _installedCache = null;
-                    RebuildCategories();
+                    SetStatus(
+                        "Google registry refresh failed and no usable cache is available. " +
+                        GoogleArchiveParser.LastFetchError,
+                        MessageType.Error
+                    );
+                    return;
+                }
+
+                _archive = result;
+                _installedCache = null;
+                RebuildCategories();
+
+                if (GoogleArchiveParser.LastFetchCanceled)
+                {
+                    SetStatus(
+                        "Refresh canceled. Showing the previously cached registry.",
+                        MessageType.Warning
+                    );
+                }
+                else if (GoogleArchiveParser.LastFetchUsedCache)
+                {
+                    SetStatus(
+                        $"Refresh failed ({GoogleArchiveParser.LastFetchError}). " +
+                        $"Showing cached data from {_archive.FetchedAt}.",
+                        MessageType.Warning
+                    );
+                }
+                else
+                {
                     SetStatus(
                         $"Registry loaded. {_archive.Packages.Count} packages " +
                         $"across {_categories.Count - 1} categories.",
-                        MessageType.Info);
+                        MessageType.Info
+                    );
                 }
-                else
-                    SetStatus("Failed to fetch registry.", MessageType.Error);
             }
             catch (Exception ex)
             {
-                _isFetching = false;
-                SetStatus($"Failed: {ex.Message}", MessageType.Error);
+                SetStatus(
+                    $"Google registry refresh failed: {ex.Message}",
+                    MessageType.Error
+                );
             }
-
-            Repaint();
+            finally
+            {
+                _isFetching = false;
+                EditorUtility.ClearProgressBar();
+                Repaint();
+            }
         }
 
         private async Task FetchGitHubTabAsync(
-            string owner, string name)
+            string owner,
+            string name,
+            GitHubReleaseDelivery delivery =
+                GitHubReleaseDelivery.UnityPackageAsset
+        )
         {
             _isFetching = true;
-            SetStatus($"Fetching releases from {owner}/{name}...",
-                MessageType.Info);
+            SetStatus(
+                $"Fetching releases from {owner}/{name}...",
+                MessageType.Info
+            );
             try
             {
                 var cache = await GitHubReleaseFetcher.FetchReleasesAsync(
-                    owner, name);
-                _isFetching = false;
+                    owner,
+                    name,
+                    delivery
+                );
 
                 if (owner == AdjustRepoOwner)
                 {
                     _adjustCache = cache;
                     _adjustVersionIdx = 0;
                 }
-                else
+                else if (owner == AppLovinRepoOwner)
                 {
                     _applovinCache = cache;
                     _applovinVersionIdx = 0;
                 }
+                else
+                {
+                    _appMetricaCache = cache;
+                    _appMetricaVersionIdx = 0;
+                }
 
                 RefreshGitHubInstalledVersions();
 
-                if (cache?.Releases != null && cache.Releases.Count > 0)
+                if (cache?.Releases == null || cache.Releases.Count == 0)
+                {
+                    SetStatus(
+                        "Release refresh failed. " +
+                        GitHubReleaseFetcher.LastFetchError,
+                        MessageType.Error
+                    );
+                }
+                else if (GitHubReleaseFetcher.LastFetchUsedCache)
+                {
+                    SetStatus(
+                        $"Refresh failed ({GitHubReleaseFetcher.LastFetchError}). " +
+                        $"Showing {cache.Releases.Count} cached releases from " +
+                        $"{cache.FetchedAt}.",
+                        MessageType.Warning
+                    );
+                }
+                else
+                {
                     SetStatus(
                         $"Loaded {cache.Releases.Count} releases.",
-                        MessageType.Info);
-                else
-                    SetStatus("Failed to fetch releases.", MessageType.Error);
+                        MessageType.Info
+                    );
+                }
             }
             catch (Exception ex)
             {
-                _isFetching = false;
-                SetStatus($"Failed: {ex.Message}", MessageType.Error);
+                SetStatus(
+                    $"Release refresh failed: {ex.Message}",
+                    MessageType.Error
+                );
             }
-
-            Repaint();
+            finally
+            {
+                _isFetching = false;
+                Repaint();
+            }
         }
 
         private void RefreshGitHubInstalledVersions()
         {
+            var adjustUpmVersion =
+                PackageManifestHelper.GetInstalledPackageVersion(AdjustPackageId);
+            var applovinUpmVersion =
+                PackageManifestHelper.GetInstalledPackageVersion(AppLovinPackageId);
+            var appMetricaManifestValue =
+                PackageManifestHelper.GetInstalledPackageVersion(AppMetricaPackageId);
+
+            _adjustManagedByUpm = !string.IsNullOrEmpty(adjustUpmVersion);
+            _applovinManagedByUpm = !string.IsNullOrEmpty(applovinUpmVersion);
+
+            if (_adjustManagedByUpm)
+                UnityPackageTracker.DeleteTrackingFile("Adjust");
+            if (_applovinManagedByUpm)
+                UnityPackageTracker.DeleteTrackingFile("AppLovin");
+
             var adjustRecord =
                 UnityPackageTracker.GetInstallRecord("Adjust");
             var applovinRecord =
                 UnityPackageTracker.GetInstallRecord("AppLovin");
-            _adjustInstalledVer = adjustRecord?.Version ?? string.Empty;
-            _applovinInstalledVer = applovinRecord?.Version ?? string.Empty;
+
+            _adjustInstalledVer = _adjustManagedByUpm
+                ? adjustUpmVersion
+                : adjustRecord?.Version ?? string.Empty;
+            _applovinInstalledVer = _applovinManagedByUpm
+                ? applovinUpmVersion
+                : applovinRecord?.Version ?? string.Empty;
+            _appMetricaInstalledVer = ExtractVersionFromManifestEntry(
+                appMetricaManifestValue
+            );
+
+            if (_adjustManagedByUpm) _adjustAction = GitHubAction.None;
+            if (_applovinManagedByUpm) _applovinAction = GitHubAction.None;
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -879,253 +1259,582 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private async void CommitAsync(string downloadPath)
         {
+            var confirmed = EditorUtility.DisplayDialog(
+                "Apply Dependency Changes",
+                "Downloads are validated before project files are changed. " +
+                "Unity may recompile after packages are applied. Continue?",
+                "Apply Changes",
+                "Cancel"
+            );
+            if (!confirmed) return;
+
             _isCommitting = true;
-
-            if (!PackageManifestHelper.IsPathInsideProject(downloadPath))
+            _commitWarnings.Clear();
+            try
             {
-                _isCommitting = false;
-                SetStatus("Download path must be inside the project folder.",
-                    MessageType.Error);
-                return;
-            }
-
-            if (!Directory.Exists(downloadPath))
-            {
-                try { Directory.CreateDirectory(downloadPath); }
-                catch (Exception ex)
+                if (!PackageManifestHelper.TryGetPathInsideProject(
+                        downloadPath,
+                        out var normalizedDownloadPath
+                    ))
                 {
-                    _isCommitting = false;
-                    SetStatus($"Cannot create download path: {ex.Message}",
-                        MessageType.Error);
+                    SetStatus(
+                        "Download path must be inside the project folder.",
+                        MessageType.Error
+                    );
                     return;
                 }
+
+                Directory.CreateDirectory(normalizedDownloadPath);
+
+                if (!await CommitInstallsAsync(normalizedDownloadPath))
+                {
+                    return;
+                }
+
+                if (!CommitRemovals())
+                {
+                    return;
+                }
+
+                ClearQueue();
+                _installedCache = null;
+                RefreshGitHubInstalledVersions();
+                if (_commitWarnings.Count > 0)
+                {
+                    SetStatus(
+                        "Changes were applied with warnings: " +
+                        string.Join(" ", _commitWarnings),
+                        MessageType.Warning
+                    );
+                }
+                else
+                {
+                    SetStatus(
+                        "All queued changes were applied.",
+                        MessageType.Info
+                    );
+                }
             }
-
-            // phase 1: removals
-            CommitRemovals();
-
-            // phase 2: installs
-            await CommitInstallsAsync(downloadPath);
-
-            // phase 3: cleanup
-            CommitCleanup();
-            _isCommitting = false;
-            _installedCache = null;
-            RefreshGitHubInstalledVersions();
-            Repaint();
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                SetStatus(
+                    $"Could not apply changes: {ex.Message}",
+                    MessageType.Error
+                );
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+                _isCommitting = false;
+                Repaint();
+            }
         }
 
-        private void CommitRemovals()
+        private bool CommitRemovals()
         {
-            var totalRemovals = _queuedRemovals.Count +
-                                (_adjustAction == GitHubAction.Remove ? 1 : 0) +
-                                (_applovinAction == GitHubAction.Remove ? 1 : 0);
-            if (totalRemovals == 0) return;
+            var totalRemovals =
+                (_adjustAction == GitHubAction.Remove ? 1 : 0) +
+                (_applovinAction == GitHubAction.Remove ? 1 : 0);
+            if (totalRemovals == 0) return true;
 
-            SetStatus($"Removing {totalRemovals} package(s)...",
-                MessageType.Info);
+            SetStatus(
+                $"Removing {totalRemovals} package(s)...",
+                MessageType.Info
+            );
 
-            // Google removals
-            if (_queuedRemovals.Count > 0)
-                PackageManifestHelper.RemoveTarballEntries(_queuedRemovals);
-
-            // GitHub removals
             if (_adjustAction == GitHubAction.Remove)
             {
-                UnityPackageTracker.RemoveTrackedFiles("Adjust");
+                if (!UnityPackageTracker.RemoveTrackedFiles("Adjust"))
+                {
+                    SetStatus(
+                        "Adjust removal failed; its tracking record was preserved.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
                 _adjustAction = GitHubAction.None;
             }
 
             if (_applovinAction == GitHubAction.Remove)
             {
-                UnityPackageTracker.RemoveTrackedFiles("AppLovin");
+                if (!UnityPackageTracker.RemoveTrackedFiles("AppLovin"))
+                {
+                    SetStatus(
+                        "AppLovin removal failed; its tracking record was preserved.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
                 _applovinAction = GitHubAction.None;
             }
+
+            return true;
         }
 
-        private async Task CommitInstallsAsync(string downloadPath)
+        private async Task<bool> CommitInstallsAsync(string downloadPath)
         {
-            // collect all install entries
             var allEntries = new List<DownloadEntry>();
-
-            // Google installs (direct + transitive)
-            var googleResolved = ResolveAllEntries();
-            allEntries.AddRange(googleResolved);
-
-            // GitHub installs — wrap as DownloadEntry
-            if (_adjustAction == GitHubAction.Install &&
-                _adjustCache?.Releases != null &&
-                _adjustVersionIdx >= 0 &&
-                _adjustVersionIdx < _adjustCache.Releases.Count)
+            allEntries.AddRange(ResolveAllEntries());
+            if (!string.IsNullOrEmpty(_dependencyConflictMessage))
             {
-                var r = _adjustCache.Releases[_adjustVersionIdx];
-                allEntries.Add(new DownloadEntry
-                {
-                    PackageName = "Adjust",
-                    Version = r.Version,
-                    TarballUrl = r.DownloadUrl,
-                    IsTransitive = false
-                });
+                SetStatus(
+                    _dependencyConflictMessage,
+                    MessageType.Error
+                );
+                return false;
             }
 
-            if (_applovinAction == GitHubAction.Install &&
-                _applovinCache?.Releases != null &&
-                _applovinVersionIdx >= 0 &&
-                _applovinVersionIdx < _applovinCache.Releases.Count)
+            AddGitHubInstallEntry(
+                allEntries,
+                _adjustAction,
+                _adjustCache,
+                _adjustVersionIdx,
+                "Adjust"
+            );
+            AddGitHubInstallEntry(
+                allEntries,
+                _applovinAction,
+                _applovinCache,
+                _applovinVersionIdx,
+                "AppLovin"
+            );
+
+            var manifestRemovals = new HashSet<string>(_queuedRemovals);
+            var gitAdditions = new Dictionary<string, string>();
+            if (_appMetricaAction == GitHubAction.Install)
             {
-                var r = _applovinCache.Releases[_applovinVersionIdx];
-                allEntries.Add(new DownloadEntry
+                if (!TryGetSelectedAppMetricaGitUrl(out var gitUrl))
                 {
-                    PackageName = "AppLovin",
-                    Version = r.Version,
-                    TarballUrl = r.DownloadUrl,
-                    IsTransitive = false
-                });
+                    SetStatus(
+                        "No Git URL is available for the selected AppMetrica release.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
+                gitAdditions[AppMetricaPackageId] = gitUrl;
+            }
+            else if (_appMetricaAction == GitHubAction.Remove)
+            {
+                manifestRemovals.Add(AppMetricaPackageId);
             }
 
-            if (allEntries.Count == 0) return;
+            if (allEntries.Count == 0)
+            {
+                if (!PackageManifestHelper.ApplyTarballChanges(
+                        new List<DownloadEntry>(),
+                        manifestRemovals,
+                        downloadPath,
+                        gitAdditions
+                    ))
+                {
+                    return false;
+                }
 
-            SetStatus($"Downloading {allEntries.Count} package(s)...",
-                MessageType.Info);
+                _appMetricaAction = GitHubAction.None;
+                return true;
+            }
 
-            var failed = new List<string>();
-            var downloaded = new List<DownloadEntry>();
+            SetStatus(
+                $"Downloading {allEntries.Count} package(s)...",
+                MessageType.Info
+            );
 
+            var packageFiles = new Dictionary<string, string>();
             for (int i = 0; i < allEntries.Count; i++)
             {
                 var entry = allEntries[i];
-                var canceled = EditorUtility.DisplayCancelableProgressBar(
-                    "Committing Packages",
-                    $"({i + 1}/{allEntries.Count}) " +
-                    $"{entry.PackageName} {entry.Version}",
-                    (float)i / allEntries.Count);
-
-                if (canceled)
+                if (string.IsNullOrWhiteSpace(entry.TarballUrl))
                 {
-                    EditorUtility.ClearProgressBar();
-                    _isCommitting = false;
                     SetStatus(
-                        $"Canceled after {i} downloads.",
-                        MessageType.Warning);
-                    Repaint();
-                    return;
+                        $"No download URL is available for {entry.PackageName} " +
+                        $"{entry.Version}.",
+                        MessageType.Error
+                    );
+                    return false;
                 }
 
-                var fileName = entry.PackageName == "Adjust" ||
-                               entry.PackageName == "AppLovin"
-                    ? $"{entry.PackageName}_v{entry.Version}.unitypackage"
-                    : $"{entry.PackageName}-{entry.Version}.tgz";
-
-                var filePath = Path.Combine(downloadPath, fileName);
-
-                if (File.Exists(filePath))
+                if (EditorUtility.DisplayCancelableProgressBar(
+                        "Downloading Dependencies",
+                        $"({i + 1}/{allEntries.Count}) " +
+                        $"{entry.PackageName} {entry.Version}",
+                        (float)i / allEntries.Count
+                    ))
                 {
-                    downloaded.Add(entry);
-                    continue;
+                    SetStatus(
+                        "Download canceled. The queue was preserved.",
+                        MessageType.Warning
+                    );
+                    return false;
                 }
 
-                var success =
-                    await DownloadFileAsync(entry.TarballUrl, filePath);
-                if (success) downloaded.Add(entry);
-                else failed.Add(entry.PackageName);
+                var filePath = Path.Combine(
+                    downloadPath,
+                    GetDownloadFileName(entry)
+                );
+                packageFiles[GetEntryKey(entry)] = filePath;
+
+                if (!IsDownloadedFileUsable(entry, filePath) &&
+                    !await DownloadFileAsync(entry.TarballUrl, filePath))
+                {
+                    SetStatus(
+                        $"Download failed for {entry.PackageName} " +
+                        $"{entry.Version}. No project changes were applied.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
+                if (!IsDownloadedFileUsable(entry, filePath))
+                {
+                    SetStatus(
+                        "Downloaded file validation failed for " +
+                        $"{entry.PackageName} {entry.Version}.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
             }
 
             EditorUtility.ClearProgressBar();
 
-            if (failed.Count > 0)
-                SetStatus($"Commit complete. {downloaded.Count} downloaded, " +
-                          $"{failed.Count} failed: {string.Join(", ", failed)}",
-                    MessageType.Warning);
-            else
-                SetStatus($"Downloaded {downloaded.Count} package(s).",
-                    MessageType.Info);
+            var googleEntries = allEntries.Where(
+                entry => !IsUnityPackageEntry(entry)
+            ).ToList();
+            var unityPackageEntries = allEntries.Where(
+                IsUnityPackageEntry
+            ).ToList();
 
-            // install phase
-            var googleDownloaded = new List<DownloadEntry>();
-            foreach (var e in downloaded)
+            foreach (var entry in unityPackageEntries)
             {
-                if (e.PackageName == "Adjust" || e.PackageName == "AppLovin")
+                var filePath = packageFiles[GetEntryKey(entry)];
+                var trackedFiles =
+                    UnityPackageTracker.EnumerateFilesInPackage(filePath);
+                if (trackedFiles.Count == 0)
                 {
-                    var fileName =
-                        $"{e.PackageName}_v{e.Version}.unitypackage";
-                    var filePath = Path.Combine(downloadPath, fileName);
-
-                    // remove old tracked files before installing new version
-                    UnityPackageTracker.RemoveTrackedFiles(e.PackageName);
-
-                    // parse .unitypackage for tracking
-                    var files =
-                        UnityPackageTracker.EnumerateFilesInPackage(filePath);
-                    UnityPackageTracker.SaveInstallRecord(
-                        e.PackageName, e.Version, files);
-
-                    // import interactively
-                    AssetDatabase.ImportPackage(
-                        filePath, interactive: true);
-
-                    if (e.PackageName == "Adjust")
-                        _adjustAction = GitHubAction.None;
-                    else
-                        _applovinAction = GitHubAction.None;
+                    SetStatus(
+                        $"Could not inspect {entry.PackageName}'s " +
+                        ".unitypackage; import was not started.",
+                        MessageType.Error
+                    );
+                    return false;
                 }
+
+                var previousRecord =
+                    UnityPackageTracker.GetInstallRecord(entry.PackageName);
+
+                SetStatus(
+                    $"Importing {entry.PackageName} {entry.Version}...",
+                    MessageType.Info
+                );
+                var importError = await ImportUnityPackageAsync(filePath);
+                if (!string.IsNullOrEmpty(importError))
+                {
+                    SetStatus(
+                        $"{entry.PackageName} import failed: {importError}",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
+                var recordFiles = new List<string>(trackedFiles);
+                if (previousRecord != null &&
+                    !UnityPackageTracker.RemoveTrackedFiles(
+                        entry.PackageName,
+                        trackedFiles
+                    ))
+                {
+                    var comparer = Path.DirectorySeparatorChar == '\\'
+                        ? StringComparer.OrdinalIgnoreCase
+                        : StringComparer.Ordinal;
+                    var mergedPaths = new HashSet<string>(
+                        recordFiles,
+                        comparer
+                    );
+                    foreach (var oldPath in previousRecord.TrackedFiles)
+                    {
+                        if (mergedPaths.Add(oldPath))
+                            recordFiles.Add(oldPath);
+                    }
+
+                    _commitWarnings.Add(
+                        $"Some stale {entry.PackageName} files could not be " +
+                        "removed and remain tracked for a later cleanup."
+                    );
+                }
+
+                if (!UnityPackageTracker.SaveInstallRecord(
+                        entry.PackageName,
+                        entry.Version,
+                        recordFiles
+                    ))
+                {
+                    SetStatus(
+                        $"{entry.PackageName} imported, but its install " +
+                        "record could not be saved.",
+                        MessageType.Error
+                    );
+                    return false;
+                }
+
+                if (entry.PackageName == "Adjust")
+                    _adjustAction = GitHubAction.None;
                 else
-                {
-                    googleDownloaded.Add(e);
-                }
+                    _applovinAction = GitHubAction.None;
             }
 
-            // Google manifest update
-            if (googleDownloaded.Count > 0)
+            if (!PackageManifestHelper.ApplyTarballChanges(
+                    googleEntries,
+                    manifestRemovals,
+                    downloadPath,
+                    gitAdditions
+                ))
             {
-                var manifestOk = PackageManifestHelper.AddTarballEntries(
-                    googleDownloaded, downloadPath);
-                if (manifestOk)
-                {
-                    var msg = $"Committed {googleDownloaded.Count} google packages.";
-                    if (failed.Count > 0)
-                        msg += $" {failed.Count} failed.";
-                    SetStatus(msg,
-                        failed.Count > 0
-                            ? MessageType.Warning : MessageType.Info);
-                }
-                else
-                    SetStatus("Manifest update failed.", MessageType.Error);
+                SetStatus(
+                    "Downloaded Google packages, but manifest.json could " +
+                    "not be updated. The queue was preserved.",
+                    MessageType.Error
+                );
+                return false;
             }
+
+            _appMetricaAction = GitHubAction.None;
+            return true;
         }
 
-        private void CommitCleanup()
+        private void ClearQueue()
         {
             _queuedInstalls.Clear();
             _queuedRemovals.Clear();
             _packageVersions.Clear();
+            _adjustAction = GitHubAction.None;
+            _applovinAction = GitHubAction.None;
+            _appMetricaAction = GitHubAction.None;
         }
 
         private static async Task<bool> DownloadFileAsync(
-            string url, string filePath)
+            string url,
+            string filePath)
         {
+            var temporaryPath = filePath + ".download";
             try
             {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+
                 using var request = UnityWebRequest.Get(url);
+                request.timeout = 120;
                 var operation = request.SendWebRequest();
                 while (!operation.isDone) await Task.Yield();
 
                 if (request.result != UnityWebRequest.Result.Success)
                 {
                     Debug.LogError(
-                        $"[DependenciesDownloader] Download failed: " +
-                        $"{request.error}");
+                        $"[DependenciesDownloader] Download failed for " +
+                        $"'{url}': {request.error}"
+                    );
                     return false;
                 }
 
-                File.WriteAllBytes(filePath, request.downloadHandler.data);
+                var data = request.downloadHandler.data;
+                if (data == null || data.Length == 0)
+                {
+                    Debug.LogError(
+                        $"[DependenciesDownloader] Download returned no data " +
+                        $"for '{url}'."
+                    );
+                    return false;
+                }
+
+                File.WriteAllBytes(temporaryPath, data);
+                if (File.Exists(filePath)) File.Delete(filePath);
+                File.Move(temporaryPath, filePath);
                 return true;
             }
             catch (Exception ex)
             {
                 Debug.LogError(
-                    $"[DependenciesDownloader] Download exception: " +
-                    $"{ex.Message}");
+                    $"[DependenciesDownloader] Download exception for " +
+                    $"'{url}': {ex.Message}"
+                );
                 return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                        File.Delete(temporaryPath);
+                }
+                catch (Exception)
+                {
+                    // The next download attempt will retry this temporary file.
+                }
+            }
+        }
+
+        private static string GetDefaultDownloadPath()
+        {
+            return Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                DefaultDownloadDir
+            ));
+        }
+
+        private bool TryGetSelectedAppMetricaGitUrl(out string gitUrl)
+        {
+            gitUrl = string.Empty;
+            var releases = _appMetricaCache?.Releases;
+            if (releases == null || _appMetricaVersionIdx < 0 ||
+                _appMetricaVersionIdx >= releases.Count)
+            {
+                return false;
+            }
+
+            gitUrl = releases[_appMetricaVersionIdx].GitUrl;
+            return !string.IsNullOrWhiteSpace(gitUrl);
+        }
+
+        private static void AddGitHubInstallEntry(
+            List<DownloadEntry> entries,
+            GitHubAction action,
+            GitHubReleaseCache cache,
+            int versionIndex,
+            string packageName)
+        {
+            if (action != GitHubAction.Install ||
+                cache?.Releases == null ||
+                versionIndex < 0 ||
+                versionIndex >= cache.Releases.Count)
+            {
+                return;
+            }
+
+            var release = cache.Releases[versionIndex];
+            entries.Add(new DownloadEntry
+            {
+                PackageName = packageName,
+                Version = release.Version,
+                TarballUrl = release.DownloadUrl,
+                IsTransitive = false
+            });
+        }
+
+        private static string GetDownloadFileName(DownloadEntry entry)
+        {
+            return IsUnityPackageEntry(entry)
+                ? $"{entry.PackageName}_v{entry.Version}.unitypackage"
+                : $"{entry.PackageName}-{entry.Version}.tgz";
+        }
+
+        private static string GetEntryKey(DownloadEntry entry)
+        {
+            return $"{entry.PackageName}@{entry.Version}";
+        }
+
+        private static bool IsUnityPackageEntry(DownloadEntry entry)
+        {
+            return entry.PackageName == "Adjust" ||
+                   entry.PackageName == "AppLovin";
+        }
+
+        private static bool IsDownloadedFileUsable(
+            DownloadEntry entry,
+            string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return false;
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Length < 2) return false;
+
+                using var stream = File.OpenRead(filePath);
+                if (stream.ReadByte() != 0x1F || stream.ReadByte() != 0x8B)
+                {
+                    return false;
+                }
+
+                return !IsUnityPackageEntry(entry) ||
+                       UnityPackageTracker
+                           .EnumerateFilesInPackage(filePath)
+                           .Count > 0;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static async Task<string> ImportUnityPackageAsync(
+            string filePath)
+        {
+            var completion = new TaskCompletionSource<string>();
+
+            string NormalizePackageName(string value)
+            {
+                const string packageExtension = ".unitypackage";
+                var fileName = Path.GetFileName(value ?? string.Empty);
+                return fileName.EndsWith(
+                    packageExtension,
+                    StringComparison.OrdinalIgnoreCase
+                )
+                    ? fileName.Substring(
+                        0,
+                        fileName.Length - packageExtension.Length
+                    )
+                    : fileName;
+            }
+
+            var expectedPackageName = NormalizePackageName(filePath);
+
+            bool IsExpectedPackage(string packageName)
+            {
+                return string.Equals(
+                    NormalizePackageName(packageName),
+                    expectedPackageName,
+                    StringComparison.OrdinalIgnoreCase
+                );
+            }
+
+            void HandleCompleted(string packageName)
+            {
+                if (IsExpectedPackage(packageName))
+                    completion.TrySetResult(string.Empty);
+            }
+
+            void HandleCancelled(string packageName)
+            {
+                if (IsExpectedPackage(packageName))
+                    completion.TrySetResult("Import was canceled.");
+            }
+
+            void HandleFailed(string packageName, string error)
+            {
+                if (!IsExpectedPackage(packageName)) return;
+                completion.TrySetResult(
+                    string.IsNullOrWhiteSpace(error)
+                        ? "Unity reported an unknown import error."
+                        : error
+                );
+            }
+
+            AssetDatabase.importPackageCompleted += HandleCompleted;
+            AssetDatabase.importPackageCancelled += HandleCancelled;
+            AssetDatabase.importPackageFailed += HandleFailed;
+
+            try
+            {
+                AssetDatabase.ImportPackage(filePath, interactive: false);
+                return await completion.Task;
+            }
+            finally
+            {
+                AssetDatabase.importPackageCompleted -= HandleCompleted;
+                AssetDatabase.importPackageCancelled -= HandleCancelled;
+                AssetDatabase.importPackageFailed -= HandleFailed;
             }
         }
 
@@ -1144,7 +1853,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         {
             if (string.IsNullOrEmpty(manifestValue)) return string.Empty;
             var match = System.Text.RegularExpressions.Regex.Match(
-                manifestValue, @"-(\d+\.\d+\.\d+(?:\.\d+)?)\.tgz");
+                manifestValue,
+                @"(?<!\d)(\d+\.\d+\.\d+(?:\.\d+)?)(?!\d)"
+            );
             return match.Success ? match.Groups[1].Value : string.Empty;
         }
     }

@@ -11,6 +11,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         public string PublishedAt;
         public string Body;
         public string DownloadUrl;
+        public string GitUrl;
     }
 
     [Serializable]

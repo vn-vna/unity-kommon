@@ -1,0 +1,24 @@
+{
+  "name": "Com.Scheherazade.DebugCaller.EditorTests",
+  "rootNamespace": "Com.Scheherazade.Common.DebugCaller.Editor.Tests",
+  "references": [
+    "Com.Scheherazade.DebugCaller",
+    "Com.Scheherazade.Common"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS",
+    "!DISABLE_SRDEBUGGER"
+  ],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

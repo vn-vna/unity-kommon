@@ -1,0 +1,22 @@
+{
+    "name": "Com.Scheherazade.DependenciesDownloader.EditorTests",
+    "rootNamespace": "Com.Scheherazade.Common.DependenciesDownloader.Editor.Tests",
+    "references": [
+        "Com.Scheherazade.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "noEngineReferences": false,
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

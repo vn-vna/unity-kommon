@@ -14,8 +14,17 @@ using Newtonsoft.Json.Linq;
 
 namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 {
+    public enum GitHubReleaseDelivery
+    {
+        UnityPackageAsset,
+        GitPackage
+    }
+
     public static class GitHubReleaseFetcher
     {
+        public static string LastFetchError { get; private set; }
+        public static bool LastFetchUsedCache { get; private set; }
+
         private static string CacheFilePath(string repoOwner, string repoName) =>
             Path.GetFullPath(Path.Combine(
                 Application.dataPath, "..", "Temp",
@@ -40,11 +49,19 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         }
 
         public static async Task<GitHubReleaseCache> FetchReleasesAsync(
-            string repoOwner, string repoName)
+            string repoOwner,
+            string repoName,
+            GitHubReleaseDelivery delivery =
+                GitHubReleaseDelivery.UnityPackageAsset
+        )
         {
+            LastFetchError = string.Empty;
+            LastFetchUsedCache = false;
+
             var apiUrl =
-                $"https://api.github.com/repos/{repoOwner}/{repoName}/releases";
+                $"https://api.github.com/repos/{repoOwner}/{repoName}/releases?per_page=100";
             using var request = UnityWebRequest.Get(apiUrl);
+            request.timeout = 30;
             request.SetRequestHeader("Accept", "application/vnd.github.v3+json");
             request.SetRequestHeader("User-Agent", "UnityEditor");
 
@@ -56,17 +73,31 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
             if (request.result != UnityWebRequest.Result.Success)
             {
+                LastFetchError = request.error;
+                var fallback = GetCachedRelease(repoOwner, repoName);
+                LastFetchUsedCache = fallback != null;
                 Debug.LogError(
                     $"[DependenciesDownloader] Failed to fetch releases " +
-                    $"for {repoOwner}/{repoName}: {request.error}");
-                return GetCachedRelease(repoOwner, repoName);
+                    $"for {repoOwner}/{repoName}: {request.error}"
+                );
+                return fallback;
             }
 
             var releases = ParseReleaseJson(
-                request.downloadHandler.text);
+                request.downloadHandler.text,
+                repoOwner,
+                repoName,
+                delivery
+            );
             if (releases == null || releases.Count == 0)
             {
-                return GetCachedRelease(repoOwner, repoName);
+                LastFetchError = delivery ==
+                                 GitHubReleaseDelivery.GitPackage
+                    ? "No usable Git package releases were found."
+                    : "No releases with a unique .unitypackage asset were found.";
+                var fallback = GetCachedRelease(repoOwner, repoName);
+                LastFetchUsedCache = fallback != null;
+                return fallback;
             }
 
             var cache = new GitHubReleaseCache
@@ -82,7 +113,12 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             return cache;
         }
 
-        private static List<GitHubReleaseInfo> ParseReleaseJson(string json)
+        private static List<GitHubReleaseInfo> ParseReleaseJson(
+            string json,
+            string repoOwner,
+            string repoName,
+            GitHubReleaseDelivery delivery
+        )
         {
 #if NEWTONSOFT_JSON
             try
@@ -100,15 +136,31 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                     var url = string.Empty;
 
                     var assets = item["assets"] as JArray;
-                    if (assets != null && assets.Count > 0)
+                    var unityPackageCount = 0;
+                    if (assets != null)
                     {
-                        var firstAsset = assets[0];
-                        url = firstAsset["browser_download_url"]?.ToString()
-                              ?? string.Empty;
+                        foreach (var asset in assets)
+                        {
+                            var candidate =
+                                asset["browser_download_url"]?.ToString()
+                                ?? string.Empty;
+                            if (!candidate.EndsWith(
+                                    ".unitypackage",
+                                    StringComparison.OrdinalIgnoreCase
+                                ))
+                            {
+                                continue;
+                            }
+
+                            unityPackageCount++;
+                            url = candidate;
+                        }
                     }
 
-                    if (!string.IsNullOrEmpty(version) &&
-                        !string.IsNullOrEmpty(url))
+                    var hasDownload = delivery ==
+                                      GitHubReleaseDelivery.GitPackage ||
+                                      unityPackageCount == 1;
+                    if (!string.IsNullOrEmpty(version) && hasDownload)
                     {
                         releases.Add(new GitHubReleaseInfo
                         {
@@ -116,7 +168,11 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                             Version = version,
                             PublishedAt = published,
                             Body = body.Trim(),
-                            DownloadUrl = url
+                            DownloadUrl = url,
+                            GitUrl = delivery ==
+                                     GitHubReleaseDelivery.GitPackage
+                                ? $"https://github.com/{repoOwner}/{repoName}.git#{tag}"
+                                : string.Empty
                         });
                     }
                 }
@@ -140,8 +196,21 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         private static string ParseVersionFromTag(string tag)
         {
             var match = Regex.Match(
-                tag, @"(\d+\.\d+\.\d+(?:\.\d+)?)");
-            return match.Success ? match.Groups[1].Value : tag;
+                tag ?? string.Empty,
+                @"(\d+)[._](\d+)[._](\d+)(?:[._](\d+))?"
+            );
+            if (!match.Success) return tag ?? string.Empty;
+
+            var version =
+                $"{match.Groups[1].Value}." +
+                $"{match.Groups[2].Value}." +
+                match.Groups[3].Value;
+            if (match.Groups[4].Success)
+            {
+                version += "." + match.Groups[4].Value;
+            }
+
+            return version;
         }
 
         private static void SaveCache(GitHubReleaseCache cache)

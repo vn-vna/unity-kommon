@@ -13,18 +13,20 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             var resolved = new Dictionary<string, DownloadEntry>();
             var visited = new HashSet<string>();
 
-            var rootKey = MakeKey(packageName, version);
-            CollectDependencies(packageName, version, archive, false, resolved, visited, alreadyInstalled);
+            CollectDependencies(
+                packageName,
+                version,
+                archive,
+                false,
+                resolved,
+                visited,
+                alreadyInstalled
+            );
 
             var entries = new List<DownloadEntry>();
-            foreach (var kv in resolved)
+            foreach (var entry in resolved.Values)
             {
-                if (alreadyInstalled != null && alreadyInstalled.ContainsKey(kv.Value.PackageName))
-                {
-                    continue;
-                }
-
-                entries.Add(kv.Value);
+                entries.Add(entry);
             }
 
             entries.Sort((a, b) => string.CompareOrdinal(a.PackageName, b.PackageName));
@@ -83,15 +85,19 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                     continue;
                 }
 
-                if (alreadyInstalled != null && alreadyInstalled.ContainsKey(dep.Name))
-                {
-                    continue;
-                }
-
                 var depVersion = dep.Version;
                 if (string.IsNullOrEmpty(depVersion))
                 {
                     depVersion = "0.0.0";
+                }
+
+                if (alreadyInstalled != null &&
+                    alreadyInstalled.ContainsKey(dep.Name))
+                {
+                    // UPM has already resolved this dependency, whether it
+                    // came directly from manifest.json or transitively from
+                    // packages-lock.json. Do not replace it with a tarball.
+                    continue;
                 }
 
                 var depKey = MakeKey(dep.Name, depVersion);
@@ -148,7 +154,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                 }
             }
 
-            return package.Versions.Count > 0 ? package.Versions[0] : null;
+            return null;
         }
 
         private static string MakeKey(string name, string version)
