@@ -16,7 +16,6 @@ namespace Com.Scheherazade.Common.Editor
         private const BindingFlags InstanceMembers =
             BindingFlags.Instance | BindingFlags.NonPublic;
 
-        [MenuItem("Scheherazade/Ads/Run MAX Atomic Operation Self Tests")]
         public static void RunAll()
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)

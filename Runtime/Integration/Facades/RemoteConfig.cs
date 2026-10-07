@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,6 +35,23 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
         public static T Get<T>() where T : class, IRemoteConfigData
         {
             return Manager?.Config as T;
+        }
+
+        /// <summary>
+        /// Gets the provider that supplied the currently resolved value for a config key.
+        /// Returns false when the key currently uses its configured default.
+        /// </summary>
+        public static bool TryGetSourceProvider(
+            string key,
+            out IRemoteConfigProvider provider)
+        {
+            if (Manager != null)
+            {
+                return Manager.TryGetSourceProvider(key, out provider);
+            }
+
+            provider = null;
+            return false;
         }
 
         #endregion

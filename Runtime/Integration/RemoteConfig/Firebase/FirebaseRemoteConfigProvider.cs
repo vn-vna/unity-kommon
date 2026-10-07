@@ -1,4 +1,4 @@
-#if FIREBASE_REMOTE
+#if FIREBASE_REMOTE && !CREATIVE_WEBGL
 using System;
 using System.Collections.Generic;
 using System.IO;

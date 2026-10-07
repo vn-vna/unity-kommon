@@ -14,6 +14,7 @@ using Com.Scheherazade.Common.Integration.Tracking;
 using Com.Scheherazade.Common.Singleton;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace Com.Scheherazade.Common.Integration
@@ -23,9 +24,12 @@ namespace Com.Scheherazade.Common.Integration
     {
         private const string CanvasObjectName = "Integration Status Canvas";
         private const string ExpandedPanelObjectName = "Integration Status Panel";
+        private const string ExpandedViewportObjectName = "Integration Status Viewport";
         private const string ExpandedContentObjectName = "Integration Status Content";
+        private const string ExpandedSummaryObjectName = "Integration Status Summary";
         private const string ExpandedToggleButtonObjectName = "Expanded Toggle Button";
         private const string ExpandedHideButtonObjectName = "Expanded Hide Button";
+        private const string ResizeHandleObjectName = "Integration Status Resize Handle";
         private const string MinimizedPanelObjectName = "Integration Status Minimized Panel";
         private const string MinimizedTextObjectName = "Minimized Summary";
 
@@ -51,6 +55,13 @@ namespace Com.Scheherazade.Common.Integration
         [SerializeField] private float minimizedItemSpacing = 12f;
         [SerializeField] private float minimizedTextSize = 24f;
         [SerializeField] private bool minimizedOnEnable;
+
+        [Header("Interaction")]
+        [SerializeField] private bool allowDragging = true;
+        [SerializeField] private bool allowResizing = true;
+        [SerializeField] private Vector2 minimumExpandedPanelSize = new Vector2(420f, 280f);
+        [SerializeField] private float resizeHandleSize = 44f;
+        [SerializeField] private Color resizeHandleColor = new Color(1f, 1f, 1f, 0.28f);
 
         [Header("General")]
         [SerializeField] private int sortingOrder = 1000;
@@ -94,17 +105,21 @@ namespace Com.Scheherazade.Common.Integration
         [SerializeField] private int configMaxStringLength = 60;
 
         private readonly List<ModuleRowView> _moduleRows = new List<ModuleRowView>();
+        private readonly Vector3[] _panelWorldCorners = new Vector3[4];
         private ConfigSectionView _configSection;
 
         private Canvas _canvas;
         private RectTransform _expandedPanelRect;
+        private RectTransform _expandedViewportRect;
         private RectTransform _expandedContentRect;
+        private ScrollRect _expandedScrollRect;
         private RectTransform _minimizedPanelRect;
         private Image _expandedPanelBackground;
         private Image _minimizedPanelBackground;
         private VerticalLayoutGroup _expandedContentLayout;
         private HorizontalLayoutGroup _minimizedPanelLayout;
         private ContentSizeFitter _minimizedPanelFitter;
+        private TextMeshProUGUI _expandedSummaryText;
         private TextMeshProUGUI _minimizedSummaryText;
         private LayoutElement _minimizedSummaryLayout;
         private Button _expandedToggleButton;
@@ -112,13 +127,42 @@ namespace Com.Scheherazade.Common.Integration
         private Button _minimizedPanelButton;
         private TextMeshProUGUI _expandedToggleButtonText;
         private TextMeshProUGUI _expandedHideButtonText;
+        private RectTransform _resizeHandleRect;
+        private RectTransform _interactionPanelRect;
+        private Vector2 _interactionPointerStart;
+        private Vector2 _interactionPositionStart;
+        private Vector2 _interactionSizeStart;
         private float _nextRefreshTime;
         private bool _isPanelVisible = true;
         private bool _isMinimized;
+        private bool _hasUserResized;
 
         public bool IsPanelVisible => _isPanelVisible;
 
         public bool IsMinimized => _isMinimized;
+
+        public static IntegrationStatusView ShowOrCreate(bool minimized = false)
+        {
+            IntegrationStatusView view = Instance;
+            if (view == null)
+            {
+                GameObject owner = new GameObject("[Scheherazade] Integration Status");
+                owner.hideFlags = HideFlags.HideInHierarchy;
+                DontDestroyOnLoad(owner);
+                view = owner.AddComponent<IntegrationStatusView>();
+            }
+
+            view.SetMinimized(minimized);
+            view.ShowPanel();
+            view.RefreshNow();
+            return view;
+        }
+
+        public void RefreshNow()
+        {
+            _nextRefreshTime = Time.unscaledTime + Mathf.Max(0.1f, refreshInterval);
+            RefreshView();
+        }
 
         protected override void Awake()
         {
@@ -167,6 +211,9 @@ namespace Com.Scheherazade.Common.Integration
             statusColumnWidth = Mathf.Max(120f, statusColumnWidth);
             toggleButtonSize.x = Mathf.Max(60f, toggleButtonSize.x);
             toggleButtonSize.y = Mathf.Max(28f, toggleButtonSize.y);
+            resizeHandleSize = Mathf.Max(28f, resizeHandleSize);
+            minimumExpandedPanelSize.x = Mathf.Max(240f, minimumExpandedPanelSize.x);
+            minimumExpandedPanelSize.y = Mathf.Max(160f, minimumExpandedPanelSize.y);
             panelSize.x = Mathf.Max(120f, panelSize.x);
             panelSize.y = Mathf.Max(80f, panelSize.y);
             minimizedPanelSize.x = Mathf.Max(120f, minimizedPanelSize.x);
@@ -209,11 +256,17 @@ namespace Com.Scheherazade.Common.Integration
             _isMinimized = isMinimized;
             ApplyPanelState();
             RefreshView();
+
+            if (!isMinimized && _expandedScrollRect != null)
+            {
+                _expandedScrollRect.horizontalNormalizedPosition = 0f;
+                _expandedScrollRect.verticalNormalizedPosition = 1f;
+            }
         }
 
         private void EnsureCanvas()
         {
-            if (_canvas != null && _expandedPanelRect != null && _expandedContentRect != null && _minimizedPanelRect != null)
+            if (_canvas != null && _expandedPanelRect != null && _expandedViewportRect != null && _expandedContentRect != null && _minimizedPanelRect != null)
             {
                 return;
             }
@@ -247,16 +300,66 @@ namespace Com.Scheherazade.Common.Integration
             _expandedPanelRect = expandedPanelTransform.GetComponent<RectTransform>();
             _expandedPanelBackground = expandedPanelTransform.GetComponent<Image>();
 
-            Transform expandedContentTransform = expandedPanelTransform.Find(ExpandedContentObjectName);
+            Transform viewportTransform = expandedPanelTransform.Find(ExpandedViewportObjectName);
+            if (viewportTransform == null)
+            {
+                GameObject viewportObject = new GameObject(
+                    ExpandedViewportObjectName,
+                    typeof(RectTransform),
+                    typeof(Image),
+                    typeof(RectMask2D),
+                    typeof(ScrollRect));
+                viewportObject.transform.SetParent(expandedPanelTransform, false);
+                viewportTransform = viewportObject.transform;
+            }
+
+            _expandedViewportRect = viewportTransform.GetComponent<RectTransform>();
+            Image viewportImage = viewportTransform.GetComponent<Image>();
+            if (viewportImage == null)
+            {
+                viewportImage = viewportTransform.gameObject.AddComponent<Image>();
+            }
+            viewportImage.color = Color.clear;
+            viewportImage.raycastTarget = true;
+            _expandedScrollRect = viewportTransform.GetComponent<ScrollRect>();
+
+            Transform expandedContentTransform = viewportTransform.Find(ExpandedContentObjectName);
             if (expandedContentTransform == null)
             {
-                GameObject contentObject = new GameObject(ExpandedContentObjectName, typeof(RectTransform), typeof(VerticalLayoutGroup));
-                contentObject.transform.SetParent(expandedPanelTransform, false);
+                expandedContentTransform = expandedPanelTransform.Find(ExpandedContentObjectName);
+                if (expandedContentTransform != null)
+                {
+                    expandedContentTransform.SetParent(viewportTransform, false);
+                }
+            }
+
+            if (expandedContentTransform == null)
+            {
+                GameObject contentObject = new GameObject(
+                    ExpandedContentObjectName,
+                    typeof(RectTransform),
+                    typeof(VerticalLayoutGroup),
+                    typeof(ContentSizeFitter));
+                contentObject.transform.SetParent(viewportTransform, false);
                 expandedContentTransform = contentObject.transform;
             }
 
             _expandedContentRect = expandedContentTransform.GetComponent<RectTransform>();
             _expandedContentLayout = expandedContentTransform.GetComponent<VerticalLayoutGroup>();
+            ContentSizeFitter expandedContentFitter = expandedContentTransform.GetComponent<ContentSizeFitter>();
+            if (expandedContentFitter == null)
+            {
+                expandedContentFitter = expandedContentTransform.gameObject.AddComponent<ContentSizeFitter>();
+            }
+            expandedContentFitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            expandedContentFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            _expandedScrollRect.content = _expandedContentRect;
+            _expandedScrollRect.viewport = _expandedViewportRect;
+            _expandedScrollRect.horizontal = true;
+            _expandedScrollRect.vertical = true;
+            _expandedScrollRect.movementType = ScrollRect.MovementType.Clamped;
+            _expandedScrollRect.scrollSensitivity = 32f;
 
             Transform expandedButtonTransform = expandedPanelTransform.Find(ExpandedToggleButtonObjectName);
             if (expandedButtonTransform == null)
@@ -280,8 +383,27 @@ namespace Com.Scheherazade.Common.Integration
                 _expandedHideButtonText = expandedHideButtonTransform.GetComponentInChildren<TextMeshProUGUI>();
             }
 
-            ConfigureExpandedButton(_expandedToggleButton, _expandedToggleButtonText, "M", ToggleMinimized);
-            ConfigureExpandedButton(_expandedHideButton, _expandedHideButtonText, "H", HidePanel);
+            ConfigureExpandedButton(_expandedToggleButton, _expandedToggleButtonText, "Minimize", ToggleMinimized);
+            ConfigureExpandedButton(_expandedHideButton, _expandedHideButtonText, "Close", HidePanel);
+
+            Transform summaryTransform = expandedPanelTransform.Find(ExpandedSummaryObjectName);
+            if (summaryTransform == null)
+            {
+                _expandedSummaryText = CreateText(
+                    ExpandedSummaryObjectName,
+                    expandedPanelTransform,
+                    moduleFontSize,
+                    FontStyles.Bold,
+                    labelColor);
+            }
+            else
+            {
+                _expandedSummaryText = summaryTransform.GetComponent<TextMeshProUGUI>();
+            }
+
+            ConfigureExpandedSummaryRect();
+            ConfigurePanelDrag(_expandedSummaryText.gameObject, _expandedPanelRect);
+            EnsureResizeHandle(expandedPanelTransform);
 
             Transform minimizedPanelTransform = canvasTransform.Find(MinimizedPanelObjectName);
             if (minimizedPanelTransform == null)
@@ -295,6 +417,7 @@ namespace Com.Scheherazade.Common.Integration
             _minimizedPanelBackground = minimizedPanelTransform.GetComponent<Image>();
             _minimizedPanelButton = minimizedPanelTransform.GetComponent<Button>();
             _minimizedPanelLayout = minimizedPanelTransform.GetComponent<HorizontalLayoutGroup>();
+            ConfigurePanelDrag(minimizedPanelTransform.gameObject, _minimizedPanelRect);
 
             _minimizedPanelFitter = minimizedPanelTransform.GetComponent<ContentSizeFitter>();
 
@@ -317,7 +440,7 @@ namespace Com.Scheherazade.Common.Integration
 
         private void ApplyCanvasSettings()
         {
-            if (_canvas == null || _expandedPanelRect == null || _expandedContentRect == null || _expandedContentLayout == null || _expandedPanelBackground == null || _minimizedPanelRect == null || _minimizedPanelBackground == null || _minimizedPanelLayout == null)
+            if (_canvas == null || _expandedPanelRect == null || _expandedViewportRect == null || _expandedContentRect == null || _expandedContentLayout == null || _expandedPanelBackground == null || _minimizedPanelRect == null || _minimizedPanelBackground == null || _minimizedPanelLayout == null)
             {
                 return;
             }
@@ -332,11 +455,19 @@ namespace Com.Scheherazade.Common.Integration
             _expandedPanelBackground.color = backgroundColor;
 
             float headerHeight = toggleButtonSize.y + 8f;
-            _expandedContentRect.anchorMin = Vector2.zero;
-            _expandedContentRect.anchorMax = Vector2.one;
-            _expandedContentRect.pivot = new Vector2(0.5f, 0.5f);
-            _expandedContentRect.offsetMin = new Vector2(panelPadding.x, panelPadding.w);
-            _expandedContentRect.offsetMax = new Vector2(-panelPadding.z, -(panelPadding.y + headerHeight));
+            _expandedViewportRect.anchorMin = Vector2.zero;
+            _expandedViewportRect.anchorMax = Vector2.one;
+            _expandedViewportRect.pivot = new Vector2(0.5f, 0.5f);
+            _expandedViewportRect.offsetMin = new Vector2(panelPadding.x, panelPadding.w);
+            _expandedViewportRect.offsetMax = new Vector2(
+                -panelPadding.z,
+                -(panelPadding.y + headerHeight));
+
+            _expandedContentRect.anchorMin = new Vector2(0f, 1f);
+            _expandedContentRect.anchorMax = new Vector2(0f, 1f);
+            _expandedContentRect.pivot = new Vector2(0f, 1f);
+            _expandedContentRect.anchoredPosition = Vector2.zero;
+            _expandedContentRect.sizeDelta = new Vector2(0f, _expandedContentRect.sizeDelta.y);
 
             _expandedContentLayout.childAlignment = TextAnchor.UpperLeft;
             _expandedContentLayout.childControlHeight = true;
@@ -347,6 +478,7 @@ namespace Com.Scheherazade.Common.Integration
             _expandedContentLayout.padding = new RectOffset(0, 0, 0, 0);
 
             ConfigureExpandedButtonRects();
+            ConfigureExpandedSummaryRect();
 
             Vector2 minimizedAnchor = new Vector2(GetHorizontalAnchor(minimizedHorizontalAlignment), GetVerticalAnchor(minimizedVerticalAlignment));
             _minimizedPanelRect.anchorMin = minimizedAnchor;
@@ -371,8 +503,8 @@ namespace Com.Scheherazade.Common.Integration
             _minimizedPanelFitter.verticalFit = autoCalculateMinimizedPanelSize ? ContentSizeFitter.FitMode.PreferredSize : ContentSizeFitter.FitMode.Unconstrained;
 
             ApplyTextStyle(_minimizedSummaryText, minimizedTextSize, FontStyles.Normal, labelColor);
-            ConfigureExpandedButton(_expandedToggleButton, _expandedToggleButtonText, "M", ToggleMinimized);
-            ConfigureExpandedButton(_expandedHideButton, _expandedHideButtonText, "H", HidePanel);
+            ConfigureExpandedButton(_expandedToggleButton, _expandedToggleButtonText, "Minimize", ToggleMinimized);
+            ConfigureExpandedButton(_expandedHideButton, _expandedHideButtonText, "Close", HidePanel);
             ConfigureMinimizedPanelButton();
             ApplyPanelSizeSettings();
         }
@@ -419,6 +551,10 @@ namespace Com.Scheherazade.Common.Integration
                 UpdateConfigSection(configEntries);
             }
 
+            if (_expandedSummaryText != null)
+            {
+                _expandedSummaryText.text = BuildExpandedSummary(modules);
+            }
             _minimizedSummaryText.text = BuildMinimizedSummary(modules);
             ApplyPanelSizeSettings();
         }
@@ -875,13 +1011,336 @@ namespace Com.Scheherazade.Common.Integration
 
             if (_expandedToggleButtonText != null)
             {
-                _expandedToggleButtonText.text = "M";
+                _expandedToggleButtonText.text = "Minimize";
             }
 
             if (_expandedHideButtonText != null)
             {
-                _expandedHideButtonText.text = "H";
+                _expandedHideButtonText.text = "Close";
             }
+        }
+
+        private void ConfigurePanelDrag(GameObject target, RectTransform panelRect)
+        {
+            EventTrigger trigger = target.GetComponent<EventTrigger>();
+            if (trigger == null)
+            {
+                trigger = target.AddComponent<EventTrigger>();
+            }
+
+            trigger.triggers ??= new List<EventTrigger.Entry>();
+            trigger.triggers.Clear();
+            if (!allowDragging)
+            {
+                return;
+            }
+
+            AddTrigger(
+                trigger,
+                EventTriggerType.BeginDrag,
+                data => BeginPanelDrag((PointerEventData)data, panelRect));
+            AddTrigger(
+                trigger,
+                EventTriggerType.Drag,
+                data => ContinuePanelDrag((PointerEventData)data));
+            AddTrigger(
+                trigger,
+                EventTriggerType.EndDrag,
+                data => EndPanelInteraction());
+        }
+
+        private void EnsureResizeHandle(Transform expandedPanelTransform)
+        {
+            Transform handleTransform = expandedPanelTransform.Find(ResizeHandleObjectName);
+            if (handleTransform == null)
+            {
+                GameObject handleObject = new GameObject(
+                    ResizeHandleObjectName,
+                    typeof(RectTransform),
+                    typeof(Image),
+                    typeof(EventTrigger));
+                handleObject.transform.SetParent(expandedPanelTransform, false);
+                handleTransform = handleObject.transform;
+            }
+
+            _resizeHandleRect = handleTransform.GetComponent<RectTransform>();
+            _resizeHandleRect.anchorMin = new Vector2(1f, 0f);
+            _resizeHandleRect.anchorMax = new Vector2(1f, 0f);
+            _resizeHandleRect.pivot = new Vector2(1f, 0f);
+            _resizeHandleRect.anchoredPosition = new Vector2(-4f, 4f);
+            _resizeHandleRect.sizeDelta = Vector2.one * resizeHandleSize;
+            _resizeHandleRect.SetAsLastSibling();
+
+            Image handleImage = handleTransform.GetComponent<Image>();
+            handleImage.color = Color.clear;
+            handleImage.raycastTarget = allowResizing;
+            handleTransform.gameObject.SetActive(allowResizing);
+            EnsureResizeHandleLines(handleTransform);
+
+            EventTrigger trigger = handleTransform.GetComponent<EventTrigger>();
+            trigger.triggers ??= new List<EventTrigger.Entry>();
+            trigger.triggers.Clear();
+            if (!allowResizing)
+            {
+                return;
+            }
+
+            AddTrigger(
+                trigger,
+                EventTriggerType.BeginDrag,
+                data => BeginPanelResize((PointerEventData)data));
+            AddTrigger(
+                trigger,
+                EventTriggerType.Drag,
+                data => ContinuePanelResize((PointerEventData)data));
+            AddTrigger(
+                trigger,
+                EventTriggerType.EndDrag,
+                data => EndPanelInteraction());
+        }
+
+        private void EnsureResizeHandleLines(Transform handleTransform)
+        {
+            if (handleTransform.childCount > 0)
+            {
+                for (int i = 0; i < handleTransform.childCount; i++)
+                {
+                    Image lineImage = handleTransform.GetChild(i).GetComponent<Image>();
+                    if (lineImage != null)
+                    {
+                        lineImage.color = resizeHandleColor;
+                        lineImage.raycastTarget = false;
+                    }
+                }
+                return;
+            }
+
+            for (int i = 0; i < 3; i++)
+            {
+                GameObject lineObject = new GameObject(
+                    "Resize Grip " + (i + 1),
+                    typeof(RectTransform),
+                    typeof(Image));
+                lineObject.transform.SetParent(handleTransform, false);
+                RectTransform lineRect = lineObject.GetComponent<RectTransform>();
+                float inset = 9f + (i * 7f);
+                lineRect.anchorMin = new Vector2(1f, 0f);
+                lineRect.anchorMax = new Vector2(1f, 0f);
+                lineRect.pivot = new Vector2(0.5f, 0.5f);
+                lineRect.anchoredPosition = new Vector2(-inset, inset);
+                lineRect.sizeDelta = new Vector2(18f, 2f);
+                lineRect.localRotation = Quaternion.Euler(0f, 0f, -45f);
+
+                Image lineImage = lineObject.GetComponent<Image>();
+                lineImage.color = resizeHandleColor;
+                lineImage.raycastTarget = false;
+            }
+        }
+
+        private static void AddTrigger(
+            EventTrigger trigger,
+            EventTriggerType eventType,
+            UnityEngine.Events.UnityAction<BaseEventData> callback)
+        {
+            EventTrigger.Entry entry = new EventTrigger.Entry
+            {
+                eventID = eventType
+            };
+            entry.callback.AddListener(callback);
+            trigger.triggers.Add(entry);
+        }
+
+        private void BeginPanelDrag(
+            PointerEventData eventData,
+            RectTransform panelRect)
+        {
+            if (!allowDragging || !TryGetCanvasPointer(eventData, out Vector2 pointer))
+            {
+                return;
+            }
+
+            _interactionPanelRect = panelRect;
+            _interactionPointerStart = pointer;
+            _interactionPositionStart = panelRect.anchoredPosition;
+            panelRect.SetAsLastSibling();
+        }
+
+        private void ContinuePanelDrag(PointerEventData eventData)
+        {
+            if (_interactionPanelRect == null
+                || !TryGetCanvasPointer(eventData, out Vector2 pointer))
+            {
+                return;
+            }
+
+            _interactionPanelRect.anchoredPosition = _interactionPositionStart
+                                                      + (pointer - _interactionPointerStart);
+            ClampPanelToCanvas(_interactionPanelRect);
+        }
+
+        private void BeginPanelResize(PointerEventData eventData)
+        {
+            if (!allowResizing || !TryGetCanvasPointer(eventData, out Vector2 pointer))
+            {
+                return;
+            }
+
+            _interactionPanelRect = _expandedPanelRect;
+            _interactionPointerStart = pointer;
+            _interactionPositionStart = _expandedPanelRect.anchoredPosition;
+            _interactionSizeStart = _expandedPanelRect.sizeDelta;
+            _expandedPanelRect.SetAsLastSibling();
+        }
+
+        private void ContinuePanelResize(PointerEventData eventData)
+        {
+            if (_interactionPanelRect != _expandedPanelRect
+                || !TryGetCanvasPointer(eventData, out Vector2 pointer))
+            {
+                return;
+            }
+
+            Vector2 pointerDelta = pointer - _interactionPointerStart;
+            Vector2 requestedSize = new Vector2(
+                _interactionSizeStart.x + pointerDelta.x,
+                _interactionSizeStart.y - pointerDelta.y);
+            requestedSize.x = Mathf.Max(minimumExpandedPanelSize.x, requestedSize.x);
+            requestedSize.y = Mathf.Max(minimumExpandedPanelSize.y, requestedSize.y);
+            Vector2 newSize = ClampExpandedPanelSize(requestedSize);
+            Vector2 sizeDelta = newSize - _interactionSizeStart;
+
+            _hasUserResized = true;
+            _expandedPanelRect.sizeDelta = newSize;
+            _expandedPanelRect.anchoredPosition = _interactionPositionStart
+                + new Vector2(
+                    _expandedPanelRect.pivot.x * sizeDelta.x,
+                    -(1f - _expandedPanelRect.pivot.y) * sizeDelta.y);
+            ClampPanelToCanvas(_expandedPanelRect);
+        }
+
+        private bool TryGetCanvasPointer(
+            PointerEventData eventData,
+            out Vector2 pointer)
+        {
+            RectTransform canvasRect = _canvas != null
+                ? _canvas.transform as RectTransform
+                : null;
+            if (canvasRect == null)
+            {
+                pointer = default;
+                return false;
+            }
+
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRect,
+                eventData.position,
+                eventData.pressEventCamera,
+                out pointer);
+        }
+
+        private void ClampPanelToCanvas(RectTransform panelRect)
+        {
+            RectTransform canvasRect = _canvas != null
+                ? _canvas.transform as RectTransform
+                : null;
+            if (canvasRect == null)
+            {
+                return;
+            }
+
+            panelRect.GetWorldCorners(_panelWorldCorners);
+            Vector2 bottomLeft = canvasRect.InverseTransformPoint(_panelWorldCorners[0]);
+            Vector2 topRight = canvasRect.InverseTransformPoint(_panelWorldCorners[2]);
+            Rect canvasBounds = canvasRect.rect;
+            const float visibleMargin = 12f;
+            Vector2 correction = Vector2.zero;
+
+            if (bottomLeft.x < canvasBounds.xMin + visibleMargin)
+            {
+                correction.x = canvasBounds.xMin + visibleMargin - bottomLeft.x;
+            }
+            else if (topRight.x > canvasBounds.xMax - visibleMargin)
+            {
+                correction.x = canvasBounds.xMax - visibleMargin - topRight.x;
+            }
+
+            if (bottomLeft.y < canvasBounds.yMin + visibleMargin)
+            {
+                correction.y = canvasBounds.yMin + visibleMargin - bottomLeft.y;
+            }
+            else if (topRight.y > canvasBounds.yMax - visibleMargin)
+            {
+                correction.y = canvasBounds.yMax - visibleMargin - topRight.y;
+            }
+
+            panelRect.anchoredPosition += correction;
+        }
+
+        private void EndPanelInteraction()
+        {
+            _interactionPanelRect = null;
+        }
+
+        private void ConfigureExpandedSummaryRect()
+        {
+            if (_expandedSummaryText == null) return;
+
+            RectTransform summaryRect = _expandedSummaryText.rectTransform;
+            float reservedButtonWidth = (toggleButtonSize.x * 2f)
+                                        + minimizedItemSpacing;
+            summaryRect.anchorMin = new Vector2(0f, 1f);
+            summaryRect.anchorMax = new Vector2(1f, 1f);
+            summaryRect.pivot = new Vector2(0f, 1f);
+            summaryRect.offsetMin = new Vector2(
+                panelPadding.x,
+                -(panelPadding.y + toggleButtonSize.y));
+            summaryRect.offsetMax = new Vector2(
+                -(panelPadding.z + reservedButtonWidth + minimizedItemSpacing),
+                -panelPadding.y);
+            _expandedSummaryText.alignment = TextAlignmentOptions.MidlineLeft;
+            _expandedSummaryText.enableWordWrapping = false;
+            _expandedSummaryText.overflowMode = TextOverflowModes.Ellipsis;
+            _expandedSummaryText.raycastTarget = allowDragging;
+        }
+
+        private string BuildExpandedSummary(List<ModuleSnapshot> modules)
+        {
+            int readyCount = 0;
+            int activeCount = 0;
+            int issueCount = 0;
+            int disabledCount = 0;
+
+            for (int i = 0; i < modules.Count; i++)
+            {
+                switch (modules[i].Status)
+                {
+                    case DisplayStatus.Initialized:
+                        readyCount++;
+                        break;
+                    case DisplayStatus.Initializing:
+                    case DisplayStatus.Refreshing:
+                        activeCount++;
+                        break;
+                    case DisplayStatus.Disabled:
+                        disabledCount++;
+                        break;
+                    default:
+                        issueCount++;
+                        break;
+                }
+            }
+
+            return string.Format(
+                "INTEGRATIONS   <color=#{0}>{1} ready</color>  •  "
+                + "<color=#{2}>{3} active</color>  •  "
+                + "<color=#{4}>{5} attention</color>  •  {6} disabled",
+                ColorUtility.ToHtmlStringRGBA(initializedColor),
+                readyCount,
+                ColorUtility.ToHtmlStringRGBA(initializingColor),
+                activeCount,
+                ColorUtility.ToHtmlStringRGBA(failedColor),
+                issueCount,
+                disabledCount);
         }
 
         private string BuildMinimizedSummary(List<ModuleSnapshot> modules)
@@ -985,7 +1444,7 @@ namespace Com.Scheherazade.Common.Integration
                 return;
             }
 
-            if (autoCalculateExpandedPanelSize)
+            if (autoCalculateExpandedPanelSize && !_hasUserResized)
             {
                 Canvas.ForceUpdateCanvases();
                 LayoutRebuilder.ForceRebuildLayoutImmediate(_expandedContentRect);
@@ -999,10 +1458,13 @@ namespace Com.Scheherazade.Common.Integration
                 float height = panelPadding.y + headerHeight + preferredContentHeight + panelPadding.w;
                 _expandedPanelRect.sizeDelta = new Vector2(Mathf.Max(120f, width), Mathf.Max(80f, height));
             }
-            else
+            else if (!_hasUserResized)
             {
                 _expandedPanelRect.sizeDelta = panelSize;
             }
+
+            _expandedPanelRect.sizeDelta = ClampExpandedPanelSize(
+                _expandedPanelRect.sizeDelta);
 
             if (!autoCalculateMinimizedPanelSize)
             {
@@ -1028,6 +1490,42 @@ namespace Com.Scheherazade.Common.Integration
         {
             _minimizedSummaryText.ForceMeshUpdate();
             return _minimizedSummaryText.GetPreferredValues(_minimizedSummaryText.text, Mathf.Infinity, Mathf.Infinity);
+        }
+
+        private Vector2 ClampExpandedPanelSize(Vector2 requestedSize)
+        {
+            RectTransform canvasRect = _canvas != null
+                ? _canvas.transform as RectTransform
+                : null;
+            if (canvasRect == null)
+            {
+                return requestedSize;
+            }
+
+            Vector2 canvasSize = canvasRect.rect.size;
+            if (canvasSize.x <= 0f || canvasSize.y <= 0f)
+            {
+                return requestedSize;
+            }
+
+            Rect safeArea = Screen.safeArea;
+            float safeWidthRatio = Screen.width > 0
+                ? safeArea.width / Screen.width
+                : 1f;
+            float safeHeightRatio = Screen.height > 0
+                ? safeArea.height / Screen.height
+                : 1f;
+            const float safeMargin = 32f;
+            float maximumWidth = Mathf.Max(
+                120f,
+                (canvasSize.x * safeWidthRatio) - safeMargin);
+            float maximumHeight = Mathf.Max(
+                80f,
+                (canvasSize.y * safeHeightRatio) - safeMargin);
+
+            return new Vector2(
+                Mathf.Min(requestedSize.x, maximumWidth),
+                Mathf.Min(requestedSize.y, maximumHeight));
         }
 
         private float GetExpandedContentPreferredWidth()

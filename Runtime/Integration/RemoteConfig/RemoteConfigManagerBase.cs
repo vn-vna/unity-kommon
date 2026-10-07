@@ -24,12 +24,15 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
         object IRemoteConfigManager.Config => _configData;
         public T ConfigData => _configData;
         public RemoteConfigStatus Status { get; private set; } = RemoteConfigStatus.Uninitialized;
+        public IReadOnlyDictionary<string, IRemoteConfigProvider> ResolvedProviders =>
+            _resolvedProviders;
 
         [SerializeField]
         [HideInInspector]
         private ScriptableObject[] initialProviders;
 
         private List<IRemoteConfigProvider> _providers;
+        private readonly Dictionary<string, IRemoteConfigProvider> _resolvedProviders = new();
         private T _configData;
 
         protected override void OnEnable()
@@ -37,6 +40,7 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
             base.OnEnable();
             _configData = new T();
             _providers ??= new List<IRemoteConfigProvider>();
+            _resolvedProviders.Clear();
             Integration.RegisterManager(this);
         }
 
@@ -44,6 +48,7 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
         {
             Status = RemoteConfigStatus.Uninitialized;
             _configData = new T();
+            _resolvedProviders.Clear();
             _providers ??= new List<IRemoteConfigProvider>();
             _providers.Clear();
 
@@ -69,6 +74,13 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
             _providers.Add(provider);
             provider.Manager = this;
             _providers.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+        }
+
+        public bool TryGetSourceProvider(
+            string key,
+            out IRemoteConfigProvider provider)
+        {
+            return _resolvedProviders.TryGetValue(key, out provider);
         }
 
         public void Initialize(float timeOut = float.MaxValue)
@@ -113,6 +125,7 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
 
         public void AcquireRemoteConfig()
         {
+            _resolvedProviders.Clear();
             PropertyInfo[] properties = _configData.GetType().GetProperties();
             foreach (var property in properties)
             {
@@ -122,20 +135,60 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
                 AcquireRemoteConfigProperty(property, attribute);
             }
 
+            LogAppliedPropertySources(properties);
             HandleAcquiredConfigComplete();
         }
 
-        public bool TryAcquireValueFromProvider<V>(string key, out V value, Func<V> defaultValueProvider = null)
+        private void LogAppliedPropertySources(IEnumerable<PropertyInfo> properties)
         {
-            foreach (var provider in Providers)
+            foreach (PropertyInfo property in properties)
+            {
+                RemoteConfigAttribute attribute =
+                    property.GetCustomAttribute<RemoteConfigAttribute>();
+                if (attribute == null || string.IsNullOrEmpty(attribute.Key)) continue;
+
+                string source = TryGetSourceProvider(
+                    attribute.Key,
+                    out IRemoteConfigProvider provider)
+                    ? provider.GetType().Name
+                    : "configured default";
+                QuickLog.Info<RemoteConfigManagerBase<T, Self>>(
+                    "Applied remote config property {0} (key: {1}) from {2}.",
+                    property.Name,
+                    attribute.Key,
+                    source);
+            }
+        }
+
+        public bool TryAcquireValueFromProvider<V>(
+            string key,
+            out V value,
+            Func<V> defaultValueProvider = null)
+        {
+            return TryAcquireValueFromProvider(
+                key,
+                out value,
+                out _,
+                defaultValueProvider);
+        }
+
+        public bool TryAcquireValueFromProvider<V>(
+            string key,
+            out V value,
+            out IRemoteConfigProvider sourceProvider,
+            Func<V> defaultValueProvider = null)
+        {
+            foreach (IRemoteConfigProvider provider in Providers)
             {
                 if (provider.TryGetConfig(key, out value))
                 {
+                    sourceProvider = provider;
                     return true;
                 }
             }
 
             value = defaultValueProvider != null ? defaultValueProvider() : default;
+            sourceProvider = null;
             return false;
         }
 
@@ -215,49 +268,17 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
                 switch (property.PropertyType)
                 {
                     case Type t when t == typeof(int):
-                        if (TryAcquireValueFromProvider(attribute.Key, out int intValue))
-                        {
-                            property.SetValue(_configData, intValue);
-                        }
-                        else
-                        {
-                            property.SetValue(_configData, (int)attribute.DefaultValue);
-                        }
+                        SetScalarProperty<int>(property, attribute);
                         break;
-
                     case Type t when t == typeof(float):
-                        if (TryAcquireValueFromProvider(attribute.Key, out float floatValue))
-                        {
-                            property.SetValue(_configData, floatValue);
-                        }
-                        else
-                        {
-                            property.SetValue(_configData, (float)attribute.DefaultValue);
-                        }
+                        SetScalarProperty<float>(property, attribute);
                         break;
-
                     case Type t when t == typeof(bool):
-                        if (TryAcquireValueFromProvider(attribute.Key, out bool boolValue))
-                        {
-                            property.SetValue(_configData, boolValue);
-                        }
-                        else
-                        {
-                            property.SetValue(_configData, (bool)attribute.DefaultValue);
-                        }
+                        SetScalarProperty<bool>(property, attribute);
                         break;
-
                     case Type t when t == typeof(string):
-                        if (TryAcquireValueFromProvider(attribute.Key, out string stringValue))
-                        {
-                            property.SetValue(_configData, stringValue);
-                        }
-                        else
-                        {
-                            property.SetValue(_configData, (string)attribute.DefaultValue);
-                        }
+                        SetScalarProperty<string>(property, attribute);
                         break;
-
                     default:
                         Debug.LogError($"Unsupported property type {property.PropertyType} for RemoteConfigAttribute on property {property.Name}.");
                         break;
@@ -272,25 +293,85 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
             }
         }
 
+        private void SetScalarProperty<V>(
+            PropertyInfo property,
+            RemoteConfigAttribute attribute)
+        {
+            if (TryAcquireValueFromProvider(
+                    attribute.Key,
+                    out V value,
+                    out IRemoteConfigProvider sourceProvider))
+            {
+                property.SetValue(_configData, value);
+                _resolvedProviders[attribute.Key] = sourceProvider;
+                return;
+            }
+
+            property.SetValue(_configData, (V)attribute.DefaultValue);
+        }
+
         private void HandleParserModuleForProperty(PropertyInfo property, RemoteConfigAttribute attribute)
         {
-            IRemoteConfigParserModule parserModule = Activator.CreateInstance(attribute.ParserModule) as IRemoteConfigParserModule;
+            IRemoteConfigParserModule parserModule;
+            try
+            {
+                parserModule = Activator.CreateInstance(attribute.ParserModule)
+                    as IRemoteConfigParserModule;
+            }
+            catch (Exception exception)
+            {
+                QuickLog.Error<RemoteConfigManagerBase<T, Self>>(
+                    "Failed to create parser {0} for remote config property {1}: {2}",
+                    attribute.ParserModule?.Name ?? "<null>",
+                    property.Name,
+                    exception.Message);
+                return;
+            }
+
             if (parserModule == null)
             {
-                Debug.LogError($"Failed to create parser module for property {property.Name}.");
+                QuickLog.Error<RemoteConfigManagerBase<T, Self>>(
+                    "Remote config parser {0} for property {1} does not implement IRemoteConfigParserModule.",
+                    attribute.ParserModule?.Name ?? "<null>",
+                    property.Name);
+                return;
+            }
+
+            if (TryAcquireValueFromProvider(
+                    attribute.Key,
+                    out string remoteValue,
+                    out IRemoteConfigProvider sourceProvider)
+                && parserModule.TryParse(remoteValue, out object parsedRemoteValue)
+                && parsedRemoteValue != null
+                && property.PropertyType.IsInstanceOfType(parsedRemoteValue))
+            {
+                property.SetValue(_configData, parsedRemoteValue);
+                _resolvedProviders[attribute.Key] = sourceProvider;
+                return;
+            }
+
+            string defaultInput = attribute.DefaultValue as string
+                ?? attribute.DefaultValue?.ToString();
+            if (defaultInput != null
+                && parserModule.TryParse(defaultInput, out object parsedDefaultValue)
+                && parsedDefaultValue != null
+                && property.PropertyType.IsInstanceOfType(parsedDefaultValue))
+            {
+                property.SetValue(_configData, parsedDefaultValue);
+                return;
+            }
+
+            if (attribute.DefaultValue != null
+                && property.PropertyType.IsInstanceOfType(attribute.DefaultValue))
+            {
                 property.SetValue(_configData, attribute.DefaultValue);
                 return;
             }
 
-            string value = TryAcquireValueFromProvider(attribute.Key, out string stringValue) ? stringValue : null;
-            if (parserModule.TryParse(value, out object parsedValue))
-            {
-                property.SetValue(_configData, parsedValue);
-            }
-            else
-            {
-                property.SetValue(_configData, attribute.DefaultValue);
-            }
+            QuickLog.Error<RemoteConfigManagerBase<T, Self>>(
+                "Remote config key {0} for property {1} could not be parsed from either the provider value or its default.",
+                attribute.Key,
+                property.Name);
         }
     }
 }

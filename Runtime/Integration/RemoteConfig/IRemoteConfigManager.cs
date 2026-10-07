@@ -12,7 +12,9 @@ namespace Com.Scheherazade.Common.Integration.RemoteConfig
         Type RemoteConfigType { get; }
         object Config { get; }
         RemoteConfigStatus Status { get; }
+        IReadOnlyDictionary<string, IRemoteConfigProvider> ResolvedProviders { get; }
 
+        bool TryGetSourceProvider(string key, out IRemoteConfigProvider provider);
         void RegisterProvider(IRemoteConfigProvider provider);
         void Initialize(float timeOut = float.MaxValue);
         IEnumerator InitializeCoroutine(float timeOut);
