@@ -46,7 +46,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
             try
             {
-                normalizedPath = Path.GetFullPath(path).Replace('\\', '/');
+                normalizedPath = Path.GetFullPath(
+                    Path.IsPathRooted(path) ? path : Path.Combine(ProjectRoot, path)
+                ).Replace('\\', '/');
                 var comparison = Path.DirectorySeparatorChar == '\\'
                     ? StringComparison.OrdinalIgnoreCase
                     : StringComparison.Ordinal;
@@ -88,6 +90,86 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 #endif
 
             return string.Empty;
+        }
+
+        public static string GetProjectRelativePath(string path)
+        {
+            return TryGetPathInsideProject(path, out var normalized)
+                ? normalized.Substring(ProjectRoot.Length + 1)
+                : path;
+        }
+
+        public static Dictionary<string, InstalledPackageState> GetInstalledPackageStates()
+        {
+            try
+            {
+                return ParseInstalledPackageStates(
+                    File.Exists(ManifestPath) ? File.ReadAllText(ManifestPath) : "{}",
+                    File.Exists(PackagesLockPath) ? File.ReadAllText(PackagesLockPath) : "{}"
+                );
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException("Could not read package state: " + ex.Message, ex);
+            }
+        }
+
+        public static Dictionary<string, InstalledPackageState> ParseInstalledPackageStates(
+            string manifestJson,
+            string lockJson)
+        {
+            var result = new Dictionary<string, InstalledPackageState>();
+#if NEWTONSOFT_JSON
+            var locked = JObject.Parse(lockJson)["dependencies"] as JObject;
+            if (locked != null)
+            {
+                foreach (var property in locked.Properties())
+                {
+                    var info = property.Value as JObject;
+                    if (info == null) continue;
+                    var state = new InstalledPackageState
+                    {
+                        Name = property.Name,
+                        Version = DependencyVersionUtility.Extract(info["version"]?.ToString()),
+                        Source = info["source"]?.ToString() ?? "unknown"
+                    };
+                    if (info["dependencies"] is JObject dependencies)
+                    {
+                        foreach (var dependency in dependencies.Properties())
+                            state.Dependencies[dependency.Name] = dependency.Value.ToString();
+                    }
+                    result[state.Name] = state;
+                }
+            }
+
+            var direct = JObject.Parse(manifestJson)["dependencies"] as JObject;
+            if (direct != null)
+            {
+                foreach (var property in direct.Properties())
+                {
+                    if (!result.TryGetValue(property.Name, out var state))
+                    {
+                        state = new InstalledPackageState { Name = property.Name, Source = "unresolved", IsRegistered = false };
+                        result[state.Name] = state;
+                    }
+                    state.IsDirect = true;
+                    state.ManifestValue = property.Value.ToString();
+                    if (string.IsNullOrEmpty(state.Version))
+                        state.Version = DependencyVersionUtility.Extract(state.ManifestValue);
+                }
+            }
+            foreach (var parent in result.Values)
+            {
+                foreach (var dependency in parent.Dependencies.Keys)
+                {
+                    if (result.TryGetValue(dependency, out var state))
+                        state.RequiredBy.Add(parent.Name);
+                }
+            }
+#else
+            throw new InvalidOperationException("Newtonsoft.Json is required to inspect package state.");
+#endif
+            return result;
         }
 
         public static Dictionary<string, string> ReadAllTarballEntries()

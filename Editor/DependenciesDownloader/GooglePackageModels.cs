@@ -39,6 +39,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         public string Version;
         public string TarballUrl;
         public bool IsTransitive;
+        public bool IsZipArchive;
     }
 
     [Serializable]

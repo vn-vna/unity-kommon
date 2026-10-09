@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +18,8 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
     public enum GitHubReleaseDelivery
     {
         UnityPackageAsset,
-        GitPackage
+        GitPackage,
+        UnityPackageZipAsset
     }
 
     public static class GitHubReleaseFetcher
@@ -40,7 +42,13 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             try
             {
                 var json = File.ReadAllText(cachePath);
-                return JsonUtility.FromJson<GitHubReleaseCache>(json);
+                var cache = JsonUtility.FromJson<GitHubReleaseCache>(json);
+                if (cache?.Releases != null)
+                {
+                    foreach (var release in cache.Releases)
+                        release.IsPrerelease |= release.Version?.Contains("-") == true;
+                }
+                return cache;
             }
             catch
             {
@@ -52,7 +60,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             string repoOwner,
             string repoName,
             GitHubReleaseDelivery delivery =
-                GitHubReleaseDelivery.UnityPackageAsset
+                GitHubReleaseDelivery.UnityPackageAsset,
+            CancellationToken cancellationToken = default,
+            Action<float> reportProgress = null
         )
         {
             LastFetchError = string.Empty;
@@ -68,12 +78,21 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             var operation = request.SendWebRequest();
             while (!operation.isDone)
             {
-                await Task.Yield();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    request.Abort();
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                reportProgress?.Invoke(request.downloadProgress);
+                await Task.Delay(50);
             }
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (request.result != UnityWebRequest.Result.Success)
             {
                 LastFetchError = request.error;
+                if (request.responseCode == 429 || request.GetResponseHeader("X-RateLimit-Remaining") == "0")
+                    LastFetchError = "GitHub rate limit reached. Retry after the limit resets; cached releases remain available.";
                 var fallback = GetCachedRelease(repoOwner, repoName);
                 LastFetchUsedCache = fallback != null;
                 Debug.LogError(
@@ -94,7 +113,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                 LastFetchError = delivery ==
                                  GitHubReleaseDelivery.GitPackage
                     ? "No usable Git package releases were found."
-                    : "No releases with a unique .unitypackage asset were found.";
+                    : delivery == GitHubReleaseDelivery.UnityPackageZipAsset
+                        ? "No releases with a unique Facebook SDK ZIP asset were found."
+                        : "No releases with a unique .unitypackage asset were found.";
                 var fallback = GetCachedRelease(repoOwner, repoName);
                 LastFetchUsedCache = fallback != null;
                 return fallback;
@@ -128,6 +149,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
                 foreach (var item in array)
                 {
+                    if (item["draft"]?.Value<bool>() == true) continue;
                     var tag = item["tag_name"]?.ToString() ?? string.Empty;
                     var version = ParseVersionFromTag(tag);
                     var published =
@@ -144,10 +166,13 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                             var candidate =
                                 asset["browser_download_url"]?.ToString()
                                 ?? string.Empty;
-                            if (!candidate.EndsWith(
-                                    ".unitypackage",
-                                    StringComparison.OrdinalIgnoreCase
-                                ))
+                            var assetName = asset["name"]?.ToString() ?? Path.GetFileName(candidate);
+                            var matches = delivery == GitHubReleaseDelivery.UnityPackageZipAsset
+                                ? assetName.StartsWith("facebook-unity-sdk-", StringComparison.OrdinalIgnoreCase) &&
+                                  assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) &&
+                                  DependencyVersionUtility.Extract(assetName) == version
+                                : candidate.EndsWith(".unitypackage", StringComparison.OrdinalIgnoreCase);
+                            if (!matches)
                             {
                                 continue;
                             }
@@ -168,7 +193,10 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                             Version = version,
                             PublishedAt = published,
                             Body = body.Trim(),
+                            IsPrerelease = item["prerelease"]?.Value<bool>() == true,
+                            ReleaseUrl = item["html_url"]?.ToString() ?? string.Empty,
                             DownloadUrl = url,
+                            IsZipArchive = delivery == GitHubReleaseDelivery.UnityPackageZipAsset,
                             GitUrl = delivery ==
                                      GitHubReleaseDelivery.GitPackage
                                 ? $"https://github.com/{repoOwner}/{repoName}.git#{tag}"
@@ -177,6 +205,13 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                     }
                 }
 
+                releases.Sort((left, right) =>
+                {
+                    if (left.IsPrerelease != right.IsPrerelease)
+                        return left.IsPrerelease ? 1 : -1;
+                    return DependencyVersionUtility.TryCompare(right.Version, left.Version, out var comparison)
+                        ? comparison : string.CompareOrdinal(right.PublishedAt, left.PublishedAt);
+                });
                 return releases;
             }
             catch (Exception ex)
@@ -195,22 +230,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
         private static string ParseVersionFromTag(string tag)
         {
-            var match = Regex.Match(
-                tag ?? string.Empty,
-                @"(\d+)[._](\d+)[._](\d+)(?:[._](\d+))?"
-            );
-            if (!match.Success) return tag ?? string.Empty;
-
-            var version =
-                $"{match.Groups[1].Value}." +
-                $"{match.Groups[2].Value}." +
-                match.Groups[3].Value;
-            if (match.Groups[4].Success)
-            {
-                version += "." + match.Groups[4].Value;
-            }
-
-            return version;
+            return DependencyVersionUtility.Extract(tag);
         }
 
         private static void SaveCache(GitHubReleaseCache cache)

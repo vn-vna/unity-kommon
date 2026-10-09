@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
@@ -45,22 +46,23 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
         {
             var key = MakeKey(packageName, version);
 
+            if (resolved.TryGetValue(packageName, out var previous) && previous.Version != version)
+                throw new InvalidOperationException($"Dependency conflict: {packageName} requires both {previous.Version} and {version}.");
+
             if (!visited.Add(key))
             {
                 return;
             }
 
             var packageInfo = FindPackage(archive, packageName);
-            if (packageInfo == null)
-            {
-                return;
-            }
+            if (packageInfo == null && !isTransitive)
+                throw new InvalidOperationException($"{packageName} is missing from the registry. Refresh the registry.");
+            if (packageInfo == null) return;
 
             var versionInfo = FindVersion(packageInfo, version);
-            if (versionInfo == null)
-            {
-                return;
-            }
+            if (versionInfo == null && !isTransitive)
+                throw new InvalidOperationException($"{packageName} {version} is unavailable. Choose another version.");
+            if (versionInfo == null) return;
 
             if (!resolved.ContainsKey(packageName))
             {
@@ -80,7 +82,7 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
             foreach (var dep in versionInfo.Dependencies)
             {
-                if (string.IsNullOrEmpty(dep.Name) || string.IsNullOrEmpty(dep.TarballUrl))
+                if (string.IsNullOrEmpty(dep.Name))
                 {
                     continue;
                 }
@@ -88,17 +90,40 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
                 var depVersion = dep.Version;
                 if (string.IsNullOrEmpty(depVersion))
                 {
-                    depVersion = "0.0.0";
+                    throw new InvalidOperationException($"{packageName} requires {dep.Name}, but its required version is unknown.");
                 }
 
                 if (alreadyInstalled != null &&
                     alreadyInstalled.ContainsKey(dep.Name))
                 {
-                    // UPM has already resolved this dependency, whether it
-                    // came directly from manifest.json or transitively from
-                    // packages-lock.json. Do not replace it with a tarball.
+                    if (!DependencyVersionUtility.Satisfies(dep.Name, alreadyInstalled[dep.Name], depVersion))
+                        throw new InvalidOperationException(
+                            $"{packageName} {version} requires {dep.Name} {depVersion}, but " +
+                            $"{DependencyVersionUtility.Extract(alreadyInstalled[dep.Name])} is installed. " +
+                            "Queue a compatible update or manage this dependency in Package Manager."
+                        );
                     continue;
                 }
+
+                if (resolved.TryGetValue(dep.Name, out var existing) && existing.Version != depVersion)
+                {
+                    if (dep.Name == "com.google.external-dependency-manager" && existing.IsTransitive &&
+                        DependencyVersionUtility.TryCompare(existing.Version, depVersion, out var comparison))
+                    {
+                        if (comparison >= 0) continue;
+                        existing.Version = depVersion;
+                        existing.TarballUrl = dep.TarballUrl;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            $"Dependency conflict: {packageName} {version} requires {dep.Name} {depVersion}, " +
+                            $"but the same dependency tree also requires {existing.Version}."
+                        );
+                    }
+                }
+                if (string.IsNullOrEmpty(dep.TarballUrl))
+                    throw new InvalidOperationException($"No download URL is available for {dep.Name} {depVersion}.");
 
                 var depKey = MakeKey(dep.Name, depVersion);
                 if (visited.Contains(depKey))

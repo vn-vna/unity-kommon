@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -48,7 +49,9 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
             return _cachedArchive;
         }
 
-        public static async Task<GoogleArchiveCache> FetchAndParseArchiveAsync()
+        public static async Task<GoogleArchiveCache> FetchAndParseArchiveAsync(
+            CancellationToken cancellationToken = default,
+            Action<float> reportProgress = null)
         {
             LastFetchError = string.Empty;
             LastFetchCanceled = false;
@@ -60,22 +63,17 @@ namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 
             while (!operation.isDone)
             {
-                if (EditorUtility.DisplayCancelableProgressBar(
-                    "Fetching Google Archive",
-                    "Downloading package registry...",
-                    operation.progress))
+                reportProgress?.Invoke(request.downloadProgress);
+                if (cancellationToken.IsCancellationRequested)
                 {
                     request.Abort();
-                    EditorUtility.ClearProgressBar();
                     LastFetchCanceled = true;
                     LastFetchUsedCache = _cachedArchive != null;
                     return _cachedArchive;
                 }
 
-                await Task.Yield();
+                await Task.Delay(50);
             }
-
-            EditorUtility.ClearProgressBar();
 
             if (request.result != UnityWebRequest.Result.Success)
             {
