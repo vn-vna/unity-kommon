@@ -112,15 +112,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor.Tests
         [Test]
         public void SceneCombination_StableReferenceSurvivesReorder()
         {
-            const string folder =
-                "Assets/__NoBuildSceneReferenceTests";
+            string folder = "Assets/__NoBuildSceneReferenceTests_" + System.Guid.NewGuid().ToString("N");
             try
             {
-                if (AssetDatabase.IsValidFolder(folder))
-                {
-                    AssetDatabase.DeleteAsset(folder);
-                }
-
                 string[] sceneGuids = AssetDatabase.FindAssets(
                     "t:Scene",
                     new[] { "Assets" });
@@ -132,7 +126,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor.Tests
 
                 AssetDatabase.CreateFolder(
                     "Assets",
-                    "__NoBuildSceneReferenceTests");
+                    System.IO.Path.GetFileName(folder));
                 string sourcePath = AssetDatabase.GUIDToAssetPath(
                     sceneGuids[0]);
                 string firstPath = folder + "/First.unity";

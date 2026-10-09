@@ -101,8 +101,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
             string name = platform switch
             {
-                BuildTarget.StandaloneWindows
-                or BuildTarget.StandaloneWindows64 => "Windows (x64)",
+                BuildTarget.StandaloneWindows => "Windows (x86)",
+                BuildTarget.StandaloneWindows64 => "Windows (x64)",
                 BuildTarget.StandaloneOSX          => "macOS",
                 BuildTarget.StandaloneLinux64      => "Linux (x64)",
                 BuildTarget.iOS                    => "iOS",

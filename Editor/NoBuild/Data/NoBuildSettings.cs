@@ -52,13 +52,37 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         // ── Properties
         // ══════════════════════════════════════════════════
 
+        public int SelectedSceneSetIndex
+        {
+            get => NoBuildEditorState.GetIndex(this, "Scenes", activeSceneSetIndex);
+            set
+            {
+                if (string.IsNullOrEmpty(UnityEditor.AssetDatabase.GetAssetPath(this))) activeSceneSetIndex = value;
+                NoBuildEditorState.SetIndex(this, "Scenes", value);
+            }
+        }
+
+        public int SelectedDefineSetIndex
+        {
+            get => NoBuildEditorState.GetIndex(this,
+                "Defines." + UnityEditor.EditorUserBuildSettings.selectedBuildTargetGroup,
+                activeScriptDefinitionSetIndex);
+            set
+            {
+                if (string.IsNullOrEmpty(UnityEditor.AssetDatabase.GetAssetPath(this))) activeScriptDefinitionSetIndex = value;
+                NoBuildEditorState.SetIndex(this,
+                    "Defines." + UnityEditor.EditorUserBuildSettings.selectedBuildTargetGroup, value);
+            }
+        }
+
         public SceneSet ActiveSceneSet
         {
             get
             {
-                if (activeSceneSetIndex < 0 || activeSceneSetIndex >= sceneSets.Count)
+                int index = SelectedSceneSetIndex;
+                if (index < 0 || index >= sceneSets.Count)
                     return null;
-                return sceneSets[activeSceneSetIndex];
+                return sceneSets[index];
             }
         }
 
@@ -66,10 +90,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         {
             get
             {
-                if (activeScriptDefinitionSetIndex < 0
-                    || activeScriptDefinitionSetIndex >= scriptDefinitionSets.Count)
+                int index = SelectedDefineSetIndex;
+                if (index < 0 || index >= scriptDefinitionSets.Count)
                     return null;
-                return scriptDefinitionSets[activeScriptDefinitionSetIndex];
+                return scriptDefinitionSets[index];
             }
         }
 

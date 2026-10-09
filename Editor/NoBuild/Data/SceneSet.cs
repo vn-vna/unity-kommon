@@ -26,7 +26,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         [Header("Shortcut Combinations")]
         [Tooltip(
             "Per-set shortcut targets. Toolbar buttons [1]..[9] map to " +
-            "enabled combinations in order. Switching to this set also " +
+            "the first nine combination slots; disabled slots keep their number. Switching to this set also " +
             "switches the active combinations context."
         )]
         public List<SceneCombination> combinations = new();

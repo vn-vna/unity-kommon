@@ -144,11 +144,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         /// <summary>
         /// Returns the current set of define symbols for the active build target.
         /// </summary>
-        public static HashSet<string> GetCurrentDefines()
+        public static HashSet<string> GetCurrentDefines(BuildTargetGroup? targetGroup = null)
         {
             string defines = PlayerSettings.GetScriptingDefineSymbols(
                 UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(
-                    EditorUserBuildSettings.selectedBuildTargetGroup));
+                    targetGroup ?? EditorUserBuildSettings.selectedBuildTargetGroup));
             return ParseDefines(defines);
         }
 
@@ -182,13 +182,14 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         // ── Private Methods
         // ══════════════════════════════════════════════════
 
-        private static string ValidateSet(ScriptDefinitionSet set)
+        internal static string ValidateSet(ScriptDefinitionSet set)
         {
-            if (set.slots == null || set.slots.Count == 0)
+            if (set?.slots == null || set.slots.Count == 0)
             {
-                return $"Define set '{set.setName}' has no slots.";
+                return $"Define set '{set?.setName ?? "(missing)"}' has no slots.";
             }
 
+            var states = new Dictionary<string, bool>(StringComparer.Ordinal);
             foreach (ScriptDefinitionSlot slot in set.slots)
             {
                 string error = ValidateSymbol(
@@ -197,6 +198,12 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 {
                     return $"Invalid symbol in set '{set.setName}': {error}";
                 }
+                string symbol = slot.defineSymbol.Trim();
+                if (states.TryGetValue(symbol, out bool enabled) && enabled != slot.enabled)
+                {
+                    return $"Define set '{set.setName}' has conflicting entries for '{symbol}'.";
+                }
+                states[symbol] = slot.enabled;
             }
 
             return null;
@@ -239,6 +246,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         private static void FireFailed(string message)
         {
             Debug.LogError($"[NoBuild] {message}");
+            NoBuildEditorState.SetResult(message, failed: true);
             try
             {
                 ScriptDefinitionsFailed?.Invoke(message);

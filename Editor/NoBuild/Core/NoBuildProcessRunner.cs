@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Com.Scheherazade.Common.NoBuild.Editor
 {
@@ -33,7 +35,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             string fileName,
             string arguments,
             int timeoutMs,
-            string workingDirectory = null)
+            string workingDirectory = null,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(fileName))
             {
@@ -65,7 +68,23 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            if (!process.WaitForExit(timeoutMs))
+            var stopwatch = Stopwatch.StartNew();
+            bool exited = false;
+            try
+            {
+                while (!(exited = process.WaitForExit(Math.Min(100, Math.Max(1, timeoutMs)))))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (stopwatch.ElapsedMilliseconds >= timeoutMs) break;
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException)
+            {
+                StopTimedOutProcess(process);
+                throw;
+            }
+            if (!exited)
             {
                 StopTimedOutProcess(process);
                 return new ProcessExecutionResult(
@@ -81,6 +100,12 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 standardOutput.ToString().TrimEnd(),
                 standardError.ToString().TrimEnd(),
                 false);
+        }
+
+        public static Task<ProcessExecutionResult> RunAsync(string fileName, string arguments,
+            int timeoutMs, string workingDirectory = null, CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() => Run(fileName, arguments, timeoutMs, workingDirectory, cancellationToken), cancellationToken);
         }
 
         private static Process CreateProcess(

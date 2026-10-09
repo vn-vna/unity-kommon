@@ -48,6 +48,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 .Replace(
                     "{define-count}",
                     CountDefines(defineSet).ToString())
+                .Replace("{scene-status}", NoBuildEditorState.ScenesMatch(sceneSet) ? "Open" : "Custom")
+                .Replace("{define-status}", NoBuildEditorState.DefinesMatch(defineSet) ? "Applied" : "Modified")
                 .Replace(
                     "{project-name}",
                     projectName);

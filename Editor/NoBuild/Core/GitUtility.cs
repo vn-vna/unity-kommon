@@ -4,6 +4,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -14,6 +17,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
     /// Results are cached for 30 seconds. Gracefully returns <c>"unknown"</c>
     /// if git is unavailable or the project is not a git repository.
     /// </summary>
+    [InitializeOnLoad]
     internal static class GitUtility
     {
         // ══════════════════════════════════════════════════
@@ -36,7 +40,63 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         private static readonly Dictionary<string, SubmoduleGitInfo>
             _submoduleCache = new(StringComparer.OrdinalIgnoreCase);
 
-        private static readonly object _lock = new();
+        private static Task<string[]> _rootFetch;
+        private static readonly Dictionary<string, Task<SubmoduleGitInfo>> _submoduleFetches = new();
+        private static readonly CancellationTokenSource _lifetime = new();
+        public static bool IsRefreshing => _rootFetch != null || _submoduleFetches.Count > 0;
+
+        static GitUtility()
+        {
+            EditorApplication.update += HandleFetches;
+            AssemblyReloadEvents.beforeAssemblyReload += () => _lifetime.Cancel();
+            EditorApplication.quitting += () => _lifetime.Cancel();
+        }
+
+        private static void HandleFetches()
+        {
+            if (_rootFetch == null && _submoduleFetches.Count == 0) return;
+            bool changed = false;
+            if (_rootFetch?.IsCompleted == true)
+            {
+                try
+                {
+                    string[] values = _rootFetch.GetAwaiter().GetResult();
+                    _cachedShortHash = values[0]; _cachedFullHash = values[1]; _cachedBranch = values[2];
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception exception)
+                {
+                    SetAllToFallback();
+                    Debug.LogWarning("[NoBuild] Git metadata unavailable: " + exception.Message);
+                }
+                _rootFetch = null;
+                changed = true;
+            }
+            foreach (string key in new List<string>(_submoduleFetches.Keys))
+            {
+                Task<SubmoduleGitInfo> task = _submoduleFetches[key];
+                if (!task.IsCompleted) continue;
+                try
+                {
+                    _submoduleCache[key] = task.GetAwaiter().GetResult() ?? new SubmoduleGitInfo
+                    {
+                        shortHash = FallbackValue, fullHash = FallbackValue, fetchTime = DateTime.UtcNow
+                    };
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception exception)
+                {
+                    _submoduleCache[key] = new SubmoduleGitInfo
+                    {
+                        shortHash = FallbackValue, fullHash = FallbackValue, fetchTime = DateTime.UtcNow
+                    };
+                    Debug.LogWarning($"[NoBuild] Submodule '{key}' unavailable: {exception.Message}");
+                }
+                _submoduleFetches.Remove(key);
+                changed = true;
+            }
+            if (changed) NoBuildToolbarState.RequestRepaint();
+        }
 
         // ══════════════════════════════════════════════════
         // ── Properties
@@ -47,7 +107,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedShortHash;
+                return _cachedShortHash ?? FallbackValue;
             }
         }
 
@@ -56,7 +116,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedFullHash;
+                return _cachedFullHash ?? FallbackValue;
             }
         }
 
@@ -65,7 +125,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedBranch;
+                return _cachedBranch ?? FallbackValue;
             }
         }
 
@@ -120,37 +180,16 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         private static void RefreshCacheIfNeeded()
         {
-            lock (_lock)
+            if (_rootFetch != null || (DateTime.UtcNow - _lastFetchTime).TotalMilliseconds < CacheTtlMs) return;
+            _lastFetchTime = DateTime.UtcNow;
+            string projectPath = System.IO.Path.GetDirectoryName(Application.dataPath);
+            if (string.IsNullOrEmpty(projectPath)) { SetAllToFallback(); return; }
+            _rootFetch = Task.Run(() => new[]
             {
-                if ((DateTime.UtcNow - _lastFetchTime).TotalMilliseconds < CacheTtlMs)
-                {
-                    return;
-                }
-
-                _lastFetchTime = DateTime.UtcNow;
-
-                // Project root is one level above Application.dataPath (Assets/)
-                string projectPath = System.IO.Path.GetDirectoryName(Application.dataPath);
-                if (string.IsNullOrEmpty(projectPath))
-                {
-                    SetAllToFallback();
-                    return;
-                }
-
-                try
-                {
-                    _cachedShortHash = RunGitCommand(projectPath, "rev-parse --short HEAD");
-                    _cachedFullHash  = RunGitCommand(projectPath, "rev-parse HEAD");
-                    _cachedBranch    = RunGitCommand(projectPath, "rev-parse --abbrev-ref HEAD");
-                }
-                catch (Exception ex)
-                {
-                    SetAllToFallback();
-                    Debug.LogWarning(
-                        $"[NoBuild] GitUtility failed to retrieve git info: {ex.Message}"
-                    );
-                }
-            }
+                RunGitCommand(projectPath, "rev-parse --short HEAD"),
+                RunGitCommand(projectPath, "rev-parse HEAD"),
+                RunGitCommand(projectPath, "rev-parse --abbrev-ref HEAD")
+            }, _lifetime.Token);
         }
 
         private static void SetAllToFallback()
@@ -169,7 +208,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     "git",
                     arguments,
                     ProcessTimeoutMs,
-                    workingDirectory);
+                    workingDirectory, _lifetime.Token);
             if (result.TimedOut)
             {
                 throw new TimeoutException(
@@ -207,24 +246,21 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             if (string.IsNullOrEmpty(submoduleName))
                 return null;
 
-            lock (_lock)
-            {
-                if (_submoduleCache.TryGetValue(
-                        submoduleName,
-                        out SubmoduleGitInfo cached)
-                    && (DateTime.UtcNow - cached.fetchTime)
-                        .TotalMilliseconds < CacheTtlMs)
-                {
-                    return cached;
-                }
-            }
-
-            // Find the submodule path via .gitmodules
+            _submoduleCache.TryGetValue(submoduleName, out SubmoduleGitInfo cached);
+            if (cached != null && (DateTime.UtcNow - cached.fetchTime).TotalMilliseconds < CacheTtlMs) return cached;
+            if (_submoduleFetches.ContainsKey(submoduleName)) return cached;
             string projectRoot =
                 System.IO.Path.GetDirectoryName(
                     Application.dataPath);
             if (string.IsNullOrEmpty(projectRoot))
                 return null;
+
+            _submoduleFetches[submoduleName] = Task.Run(() => FetchSubmodule(submoduleName, projectRoot), _lifetime.Token);
+            return cached;
+        }
+
+        private static SubmoduleGitInfo FetchSubmodule(string submoduleName, string projectRoot)
+        {
 
             string subPath = RunGitCommand(
                 projectRoot,
@@ -251,11 +287,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 fullHash  = fullHash,
                 fetchTime = DateTime.UtcNow
             };
-
-            lock (_lock)
-            {
-                _submoduleCache[submoduleName] = info;
-            }
 
             return info;
         }

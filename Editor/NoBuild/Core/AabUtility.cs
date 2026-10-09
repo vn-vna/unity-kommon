@@ -5,7 +5,10 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -890,6 +893,102 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         {
             public string tagName;
             public string jarUrl;
+        }
+
+        public static async Task<string> GetPackageNameAsync(string path, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                $"-jar \"{bundletool}\" dump manifest --bundle=\"{path}\" --xpath=\"/manifest/@package\"",
+                ProcessTimeout, cancellationToken: cancellationToken);
+            string package = result.StandardOutput.Trim().Trim('"', '\'');
+            if (result.TimedOut || result.ExitCode != 0 || !AdbUtility.IsValidPackageName(package))
+                throw new InvalidOperationException("Cannot read AAB package: " + result.StandardError);
+            return package;
+        }
+
+        public static async Task<string> BuildApksAsync(string path, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            string output = Path.Combine(Path.GetTempPath(), "NoBuild", Guid.NewGuid().ToString("N") + ".apks");
+            Directory.CreateDirectory(Path.GetDirectoryName(output));
+            string args = BuildApksCommandArgs(path, output);
+            try
+            {
+                ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                    $"-jar \"{bundletool}\" {args}", ProcessTimeout, cancellationToken: cancellationToken);
+                if (result.TimedOut || result.ExitCode != 0 || !File.Exists(output))
+                    throw new InvalidOperationException("AAB conversion failed: " + result.CombinedOutput);
+                return output;
+            }
+            catch
+            {
+                Cleanup(output);
+                throw;
+            }
+        }
+
+        public static async Task<InstallResult> InstallApksAsync(string path, string serial, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                $"-jar \"{bundletool}\" install-apks --apks=\"{path}\" --device-id=\"{serial}\" --adb=\"{AdbUtility.AdbPath}\"",
+                ProcessTimeout, cancellationToken: cancellationToken);
+            return AdbUtility.ToInstallResult(result);
+        }
+
+        private static async Task<(string java, string bundletool)> ResolveToolsAsync(CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrEmpty(CustomJavaPath) && !File.Exists(CustomJavaPath))
+                throw new FileNotFoundException("Custom Java path is invalid. Update the Devices environment settings.");
+            if (!string.IsNullOrEmpty(CustomBundletoolPath) && !File.Exists(CustomBundletoolPath))
+                throw new FileNotFoundException("Custom bundletool path is invalid. Update the Devices environment settings.");
+            string java = ResolveJava();
+            string tool = string.IsNullOrEmpty(CustomBundletoolPath)
+                ? FindCachedBundletool() ?? FindBundletoolInSdk() : CustomBundletoolPath;
+            if (tool != null) return (java, tool);
+
+            string cacheDirectory = GetNoBuildCacheDir();
+            Directory.CreateDirectory(cacheDirectory);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(WebTimeout) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("NoBuild-Unity");
+            string url = FallbackDownloadUrl;
+            string version = FallbackVersion;
+            try
+            {
+                using HttpResponseMessage releaseResponse = await client.GetAsync(GithubApiUrl, cancellationToken);
+                releaseResponse.EnsureSuccessStatusCode();
+                GitHubRelease release = ParseGitHubRelease(await releaseResponse.Content.ReadAsStringAsync());
+                if (!string.IsNullOrEmpty(release?.jarUrl))
+                {
+                    url = release.jarUrl;
+                    version = release.tagName;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception) { /* The pinned release also works when the release API is unavailable. */ }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            string destination = Path.Combine(cacheDirectory, "bundletool-all-" + Path.GetFileName(version) + ".jar");
+            if (File.Exists(destination)) return (java, destination);
+            string partial = destination + "." + Guid.NewGuid().ToString("N") + ".download";
+            try
+            {
+                using HttpResponseMessage response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                using (Stream input = await response.Content.ReadAsStreamAsync())
+                using (var output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                {
+                    await input.CopyToAsync(output, 81920, cancellationToken);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!File.Exists(destination)) File.Move(partial, destination);
+                return (java, destination);
+            }
+            finally
+            {
+                if (File.Exists(partial)) File.Delete(partial);
+            }
         }
     }
 }

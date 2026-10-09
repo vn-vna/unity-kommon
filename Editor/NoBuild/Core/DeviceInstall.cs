@@ -3,6 +3,8 @@
 // ═══════════════════════════════════════════════════════════
 
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -40,6 +42,38 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
     /// </summary>
     internal static class DeviceInstaller
     {
+        public static async Task<bool> InstallWithRecoveryAsync(string serial, string displayName, string package,
+            Func<Task<InstallResult>> tryInstall, CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                InstallResult result = await tryInstall();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (result.Success) return true;
+                if (!CanUninstall(result.FailureKind, package))
+                {
+                    if (!EditorUtility.DisplayDialog("NoBuild — Install Failed",
+                        BuildFailureMessage(displayName, result), "Retry", "Cancel")) return false;
+                    continue;
+                }
+                int choice = EditorUtility.DisplayDialogComplex("NoBuild — Install Failed",
+                    BuildFailureMessage(displayName, result) + $"\n\nUninstalling '{package}' removes its local app data.",
+                    "Retry", "Cancel", "Uninstall & Reinstall");
+                if (choice == 1) return false;
+                if (choice == 2)
+                {
+                    ProcessExecutionResult uninstall = await AdbUtility.RunAsync(
+                        $"-s \"{serial}\" uninstall \"{package}\"", cancellationToken: cancellationToken);
+                    if (uninstall.TimedOut || uninstall.ExitCode != 0)
+                        throw new InvalidOperationException("Uninstall failed: " + uninstall.CombinedOutput);
+                }
+            }
+        }
+
+        internal static bool CanUninstall(InstallFailureKind failure, string package) =>
+            AdbUtility.IsValidPackageName(package) && (failure == InstallFailureKind.VersionDowngrade
+                || failure == InstallFailureKind.UpdateIncompatible || failure == InstallFailureKind.AlreadyExists);
         // ══════════════════════════════════════════════════
         // ── Public Methods
         // ══════════════════════════════════════════════════
@@ -66,15 +100,22 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     return true;
                 }
 
+                if (!CanUninstall(result.FailureKind, packageName))
+                {
+                    if (EditorUtility.DisplayDialog("NoBuild — Install Failed",
+                        BuildFailureMessage(deviceDisplayName, result), "Retry", "Cancel")) continue;
+                    return false;
+                }
+
                 int choice = EditorUtility.DisplayDialogComplex(
                     "NoBuild — Install Failed",
                     BuildFailureMessage(
-                        deviceDisplayName, result),
-                    "Force Install",
+                        deviceDisplayName, result) + $"\n\nUninstalling '{packageName}' removes its local app data.",
+                    "Retry",
                     "Cancel",
-                    "Retry");
+                    "Uninstall & Reinstall");
 
-                if (choice == 0)
+                if (choice == 2)
                 {
                     // Force Install: remove the current version
                     // first, then re-attempt.
@@ -92,7 +133,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     continue;
                 }
 
-                if (choice == 2)
+                if (choice == 0)
                 {
                     // Retry: re-attempt the install as-is.
                     continue;
@@ -161,12 +202,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 message += $"\n\n{snippet}";
             }
 
-            message +=
-                "\n\nWhat would you like to do?"
-                + "\n• Force Install — uninstalls the "
-                + "current version, then installs."
-                + "\n• Retry — tries the install again."
-                + "\n• Cancel — aborts the action.";
+            if (result.FailureKind == InstallFailureKind.UserCancelled)
+                message += "\n\nUnlock the device and accept the installation prompt before retrying.";
 
             return message;
         }

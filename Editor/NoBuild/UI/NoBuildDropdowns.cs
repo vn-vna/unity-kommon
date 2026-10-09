@@ -112,7 +112,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     for (int i = 0; i < _s.sceneSets.Count; i++)
                     {
                         SceneSet set = _s.sceneSets[i];
-                        bool isActive = _s.activeSceneSetIndex == i;
+                        bool isActive = NoBuildEditorState.ScenesMatch(set);
 
                         EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
 
@@ -126,10 +126,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         if (GUILayout.Button(EditorGuiStrings.Truncate(set.setName, 32),
                                 EditorGuiStyles.HoverLabel))
                         {
-                            _s.activeSceneSetIndex = i;
-                            EditorUtility.SetDirty(_s);
-                            _onSet?.Invoke(set);
-                            editorWindow.Close();
+                            if (NoBuildEditorState.OpenSet(_s, i))
+                            {
+                                _onSet?.Invoke(set);
+                                editorWindow.Close();
+                            }
                         }
 
                         EditorGUI.BeginDisabledGroup(
@@ -143,11 +144,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                                 GUILayout.Width(24),
                                 GUILayout.Height(20)))
                         {
-                            if (SceneSwitcher.PlayFromSet(set))
+                            if (NoBuildEditorState.OpenSet(_s, i, play: true))
                             {
-                                _s.activeSceneSetIndex = i;
-                                EditorUtility.SetDirty(_s);
-                                NoBuildToolbarState.RequestRepaint();
                                 editorWindow.Close();
                             }
                         }
@@ -256,6 +254,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 if (_s.scriptDefinitionSets.Count == 0)
                 {
                     EditorGuiLayout.DrawEmptyState("No define sets.", "Create one in Project Settings \u2192 NoBuild.");
+                    if (GUILayout.Button("Create Define Set…"))
+                    {
+                        SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
+                        editorWindow.Close();
+                    }
                     return;
                 }
 
@@ -263,7 +266,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 for (int i = 0; i < _s.scriptDefinitionSets.Count; i++)
                 {
                     var set = _s.scriptDefinitionSets[i];
-                    bool active = _s.activeScriptDefinitionSetIndex == i;
+                    bool active = NoBuildEditorState.DefinesMatch(set);
 
                     EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
                     GUI.color = active
@@ -275,11 +278,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     if (GUILayout.Button(EditorGuiStrings.Truncate(set.setName, 30),
                             EditorGuiStyles.HoverLabel))
                     {
-                        _s.activeScriptDefinitionSetIndex = i;
-                        EditorUtility.SetDirty(_s);
-                        ScriptDefinitionSwitcher.ApplySet(set);
-                        _onSet?.Invoke(set);
-                        editorWindow.Close();
+                        if (NoBuildEditorState.ApplyDefines(_s, i))
+                        {
+                            _onSet?.Invoke(set);
+                            editorWindow.Close();
+                        }
                     }
 
                     int n = set.slots?.Count(
@@ -331,6 +334,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 {
                     EditorGuiLayout.DrawEmptyState("No build profiles.",
                         "Create one in Project Settings \u2192 NoBuild.");
+                    if (GUILayout.Button("Create Build Profile…"))
+                    {
+                        SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
+                        editorWindow.Close();
+                    }
                     return;
                 }
 
@@ -374,8 +382,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                                 GUILayout.Height(22)
                             ))
                         {
-                            _onBuild?.Invoke(p);
-                            editorWindow.Close();
+                            NoBuildBuildUI.ShowConfirmationFromPopup(GUILayoutUtility.GetLastRect(), p, _s, editorWindow);
                         }
 
                         GUI.backgroundColor = old;
@@ -509,14 +516,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 };
                 GUI.Label(labelRect, displayName, labelStyle);
 
-                // Click detection on the whole tile
-                if (Event.current.type == EventType.MouseDown
-                    && bgRect.Contains(
-                        Event.current.mousePosition))
+                GUI.SetNextControlName("NoBuild.Platform." + platform);
+                if (GUI.Button(bgRect, new GUIContent("", displayName), GUIStyle.none))
                 {
                     _onPlatformSelected?.Invoke(platform);
                     editorWindow.Close();
-                    Event.current.Use();
                 }
             }
         }
@@ -530,42 +534,61 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             private readonly Action<
                 BuildExecutor.DeviceOption, string> _onSelected;
             private List<AdbDeviceInfo> _devices;
+            private Vector2 _scroll;
 
             public DeviceSelectContent(
                 Action<BuildExecutor.DeviceOption, string>
                     onSelected)
             {
                 _onSelected = onSelected;
-                _devices = AdbUtility.GetDevices()
-                    .Where(device => device.State == "device")
-                    .ToList();
+                _devices = new List<AdbDeviceInfo>();
+                AdbDeviceCache.Refresh();
             }
+
+            public override void OnOpen() => NoBuildToolbarState.RepaintRequested += RepaintPopup;
+            public override void OnClose() => NoBuildToolbarState.RepaintRequested -= RepaintPopup;
+            private void RepaintPopup() => editorWindow?.Repaint();
 
             public override Vector2 GetWindowSize()
             {
                 int rows = 2 // First Device + All Devices
                     + _devices.Count;
                 float h = HeaderH + rows * RowH + FooterH + Pad;
-                return new Vector2(MinW, ClampH(h));
+                return new Vector2(MinW, 360);
             }
 
             public override void OnGUI(Rect rect)
             {
                 EditorGuiLayout.DrawHeaderBox("Build & Run", "Select target device(s).");
+                _devices = AdbDeviceCache.Devices.Where(device => device.State == "device").ToList();
+                using (new EditorGUI.DisabledScope(AdbDeviceCache.IsRefreshing))
+                    if (GUILayout.Button(AdbDeviceCache.IsRefreshing ? "Refreshing…" : "Refresh Devices")) AdbDeviceCache.Refresh();
+                if (!string.IsNullOrEmpty(AdbDeviceCache.Error))
+                    EditorGUILayout.HelpBox(AdbDeviceCache.Error, MessageType.Error);
 
                 if (_devices.Count == 0)
                 {
-                    EditorGuiLayout.DrawEmptyState("No devices connected.", "Connect via USB or start an emulator.");
+                    EditorGuiLayout.DrawEmptyState(AdbDeviceCache.IsRefreshing ? "Refreshing devices…" : "No authorized devices connected.",
+                        "Connect via USB and accept authorization, or open Devices in NoBuild settings.");
+                    if (GUILayout.Button("Open Device Settings…"))
+                    {
+                        SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path);
+                        editorWindow.Close();
+                    }
                     return;
                 }
+                _scroll = EditorGUILayout.BeginScrollView(_scroll);
+                string remembered = EditorPrefs.GetString(NoBuildDeviceOperations.RememberedDeviceKey, "");
+                AdbDeviceInfo last = _devices.Find(device => device.Serial == remembered);
+                if (!string.IsNullOrEmpty(last.Serial) && GUILayout.Button("Last Used: " + last.DisplayName))
+                    SelectDevice(BuildExecutor.DeviceOption.SpecificDevice, last.Serial);
 
                 // ── First Device ──
                 EditorGUILayout.BeginHorizontal(
                     EditorStyles.helpBox);
-                if (GUILayout.Button("First Device", EditorGuiStyles.HoverLabel))
+                if (GUILayout.Button("First Device: " + _devices[0].DisplayName, EditorGuiStyles.HoverLabel))
                 {
-                    _onSelected?.Invoke(BuildExecutor.DeviceOption.FirstDevice, null);
-                    editorWindow.Close();
+                    SelectDevice(BuildExecutor.DeviceOption.SpecificDevice, _devices[0].Serial);
                 }
                 EditorGUILayout.EndHorizontal();
 
@@ -573,8 +596,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
                 if (GUILayout.Button($"All Devices [{_devices.Count} device(s)]", EditorGuiStyles.HoverLabel))
                 {
-                    _onSelected?.Invoke(BuildExecutor.DeviceOption.AllDevices, null);
-                    editorWindow.Close();
+                    SelectDevice(BuildExecutor.DeviceOption.AllDevices, null);
                 }
                 EditorGUILayout.EndHorizontal();
                 GUILayout.Space(2);
@@ -585,13 +607,19 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 {
                     var d = _devices[i];
                     EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-                    if (GUILayout.Button(EditorGuiStrings.Truncate(d.DisplayName, 40), EditorGuiStyles.HoverLabel))
+                    if (GUILayout.Button(new GUIContent(EditorGuiStrings.Truncate(d.DisplayName, 40), d.DisplayName), EditorGuiStyles.HoverLabel))
                     {
-                        _onSelected?.Invoke(BuildExecutor.DeviceOption.SpecificDevice, d.Serial);
-                        editorWindow.Close();
+                        SelectDevice(BuildExecutor.DeviceOption.SpecificDevice, d.Serial);
                     }
                     EditorGUILayout.EndHorizontal();
                 }
+                EditorGUILayout.EndScrollView();
+            }
+
+            private void SelectDevice(BuildExecutor.DeviceOption option, string serial)
+            {
+                editorWindow.Close();
+                EditorApplication.delayCall += () => _onSelected?.Invoke(option, serial);
             }
         }
 
@@ -605,6 +633,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             private readonly NoBuildSettings _settings;
             private readonly Action _onBuild;
             private readonly Action<BuildExecutor.DeviceOption, string> _onBuildAndRun;
+            private Vector2 _scroll;
 
             public BuildConfirmContent(
                 BuildProfile profile, NoBuildSettings settings,
@@ -621,13 +650,15 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             {
                 bool hasRun = _profile.buildConfiguration.platform
                     == BuildTarget.Android;
-                return new Vector2(340f, hasRun ? 220f : 170f);
+                return new Vector2(460f, hasRun ? 470f : 440f);
             }
 
             public override void OnGUI(Rect rect)
             {
                 EditorGuiLayout.DrawHeaderBox(
                     "Build", "Confirm build settings.");
+                BuildPreflightResult preflight = BuildPreflight.Evaluate(_profile, _settings);
+                _scroll = EditorGUILayout.BeginScrollView(_scroll);
                 GUILayout.Space(4);
 
                 EditorGUILayout.LabelField(
@@ -637,29 +668,37 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     EditorStyles.wordWrappedLabel);
                 GUILayout.Space(4);
 
-                string folder = BuildNameResolver.Resolve(
-                    _profile.buildFolder?.template ?? "",
-                    _profile, _settings);
-                string fileName = BuildNameResolver.Resolve(
-                    _profile.buildNameTemplate?.template
-                    ?? "{app-version}", _profile, _settings);
+                BuildConfiguration config = _profile.buildConfiguration;
+                EditorGUILayout.LabelField("Target", config.platform + " · " + config.scriptingBackend);
+                EditorGUILayout.LabelField("Mode", config.developmentBuild ? "Development" : "Release");
+                if (config.platform == BuildTarget.Android)
+                    EditorGUILayout.LabelField("Artifact", (config.androidExportProject ? "Gradle project" : config.androidBuildAppBundle ? "AAB" : "APK")
+                        + " · " + config.androidTargetArchitecture);
+                string defineSet = _profile.HasValidDefineSet(_settings)
+                    ? _settings.scriptDefinitionSets[_profile.scriptDefinitionSetIndex].setName
+                    : _profile.scriptDefinitionSetIndex == -1 ? "None (keep existing symbols)" : "Missing reference";
+                EditorGUILayout.LabelField("Defines", defineSet);
+                EditorGUILayout.LabelField("Scenes (first is startup)", EditorStyles.boldLabel);
+                foreach (string scene in preflight.ScenePaths)
+                    EditorGUILayout.LabelField(System.IO.Path.GetFileNameWithoutExtension(scene), EditorStyles.miniLabel);
 
                 EditorGUILayout.LabelField(
                     "Output", EditorStyles.boldLabel);
-                EditorGUILayout.LabelField(
-                    "  " + folder + "/" + fileName,
-                    EditorStyles.miniLabel);
+                EditorGUILayout.SelectableLabel(preflight.OutputPath, EditorStyles.wordWrappedMiniLabel, GUILayout.Height(42));
+                NoBuildBuildUI.DrawReadiness(_profile, _settings, preflight);
+                EditorGUILayout.EndScrollView();
                 GUILayout.Space(8);
 
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
                 GUI.backgroundColor = EditorGuiColors.BuildGreen;
+                using (new EditorGUI.DisabledScope(!preflight.CanBuild || NoBuildDeviceOperations.IsBusy))
                 if (GUILayout.Button(
                         PlatformIconUtility.BuildActionIcon,
                         GUILayout.Height(28)))
                 {
-                    _onBuild?.Invoke();
                     editorWindow.Close();
+                    EditorApplication.delayCall += () => _onBuild?.Invoke();
                 }
                 GUI.backgroundColor = Color.white;
 
@@ -668,19 +707,21 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 {
                     GUILayout.Space(6);
                     GUI.backgroundColor = EditorGuiColors.RunBlue;
+                    using (new EditorGUI.DisabledScope(!preflight.CanBuild || config.androidExportProject || NoBuildDeviceOperations.IsBusy))
                     if (GUILayout.Button(
                             PlatformIconUtility.BuildAndRunActionIcon,
                             GUILayout.Height(28)))
                     {
-                        CustomPopupDropdown.ShowLastRect(
-                            CreateDeviceSelectPopup(_onBuildAndRun)
-                        );
+                        Rect screenRect = GUIUtility.GUIToScreenRect(GUILayoutUtility.GetLastRect());
                         editorWindow.Close();
+                        EditorApplication.delayCall += () => CustomPopupDropdown.Show(screenRect,
+                            CreateDeviceSelectPopup(_onBuildAndRun));
                     }
                     GUI.backgroundColor = Color.white;
                 }
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.EndHorizontal();
+                if (GUILayout.Button("Cancel")) editorWindow.Close();
             }
         }
 

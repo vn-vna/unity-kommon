@@ -218,7 +218,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         // ── Flag Helpers
         // ══════════════════════════════════════════════════
 
-        private static FlagDefinition FindFlagById(
+        internal static FlagDefinition FindFlagById(
             string id, NoBuildSettings settings)
         {
             if (settings?.flagDefinitions == null)
@@ -293,32 +293,20 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     ScriptDefinitionSet profileSet =
                         settings.scriptDefinitionSets[
                             profile.scriptDefinitionSetIndex];
-                    isActive = LookupSymbolInSet(
-                        profileSet,
-                        flag.customDefineSymbol,
-                        fallbackEnabled: false);
-                    if (!isActive)
-                    {
-                        // Not found in profile's set — fall
-                        // back to current PlayerSettings
-                        HashSet<string> currentDefines =
-                            ScriptDefinitionSwitcher
-                                .GetCurrentDefines();
-                        isActive = !string.IsNullOrEmpty(
-                            flag.customDefineSymbol)
-                            && currentDefines.Contains(
-                                flag.customDefineSymbol);
-                    }
+                    isActive = ResolveCustomFlagState(profileSet, flag.customDefineSymbol,
+                        () => ScriptDefinitionSwitcher.GetCurrentDefines(BuildPipeline.GetBuildTargetGroup(profile.buildConfiguration.platform))
+                            .Contains(flag.customDefineSymbol?.Trim() ?? ""));
                 }
                 else
                 {
                     HashSet<string> currentDefines =
                         ScriptDefinitionSwitcher
-                            .GetCurrentDefines();
+                            .GetCurrentDefines(profile?.buildConfiguration != null
+                                ? BuildPipeline.GetBuildTargetGroup(profile.buildConfiguration.platform) : (BuildTargetGroup?)null);
                     isActive = !string.IsNullOrEmpty(
                         flag.customDefineSymbol)
                         && currentDefines.Contains(
-                            flag.customDefineSymbol);
+                            flag.customDefineSymbol.Trim());
                 }
             }
 
@@ -331,10 +319,16 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         // ── Flag Helpers
         // ══════════════════════════════════════════════════
 
+        internal static bool ResolveCustomFlagState(ScriptDefinitionSet profileSet, string symbol, Func<bool> fallback)
+        {
+            if (string.IsNullOrWhiteSpace(symbol)) return false;
+            ScriptDefinitionSlot owned = profileSet?.slots?.Find(slot => slot != null
+                && string.Equals(slot.defineSymbol?.Trim(), symbol.Trim(), StringComparison.Ordinal));
+            return owned != null ? owned.enabled : fallback();
+        }
+
         /// <summary>
-        /// Resolves the <see cref="ScriptDefinitionSlot"/> referenced
-        /// by a Template-type flag.  Returns null when the reference
-        /// is invalid.
+        /// Resolves the slot referenced by a template flag, or null for a missing reference.
         /// </summary>
         private static ScriptDefinitionSlot GetFlagSlot(
             FlagDefinition flag, NoBuildSettings settings)
@@ -384,9 +378,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             {
                 if (slot != null
                     && string.Equals(
-                    slot.defineSymbol,
-                    symbol,
-                    StringComparison.OrdinalIgnoreCase))
+                    slot.defineSymbol?.Trim(),
+                    symbol.Trim(),
+                    StringComparison.Ordinal))
                 {
                     return slot.enabled
                         && !string.IsNullOrEmpty(
@@ -414,6 +408,35 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 default:
                     return PlayerSettings.bundleVersion;
             }
+        }
+
+        internal static string ResolveFileName(string template, BuildProfile profile, NoBuildSettings settings)
+        {
+            string resolved = Resolve(template, profile, settings);
+            char[] invalid = System.IO.Path.GetInvalidFileNameChars();
+            var result = new StringBuilder(resolved.Length);
+            foreach (char character in resolved)
+            {
+                result.Append(Array.IndexOf(invalid, character) >= 0
+                    || character == '/' || character == '\\' || character == ':' ? '_' : character);
+            }
+            string name = result.ToString().Trim().TrimEnd('.');
+            return string.IsNullOrEmpty(name) ? "Build" : name;
+        }
+
+        internal static string[] GetUnknownPlaceholders(string template, NoBuildSettings settings)
+        {
+            var unknown = new List<string>();
+            foreach (Match match in PlaceholderRegex.Matches(template ?? ""))
+            {
+                string key = match.Groups[1].Value.Trim();
+                bool known = Resolvers.ContainsKey(key)
+                    || TryParseGitCommit(key, out _) || TryParseGitCommitFull(key, out _)
+                    || (key.StartsWith("flag-", StringComparison.OrdinalIgnoreCase)
+                        && FindFlagById(key.Substring(5), settings) != null);
+                if (!known && !unknown.Contains(match.Value)) unknown.Add(match.Value);
+            }
+            return unknown.ToArray();
         }
 
         /// <summary>

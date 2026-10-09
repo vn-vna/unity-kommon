@@ -75,13 +75,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             if (s == null) return;
             if (index < 0 || index >= s.sceneSets.Count) return;
 
-            if (SceneSwitcher.SwitchToSet(
-                    s.sceneSets[index]))
-            {
-                s.activeSceneSetIndex = index;
-                EditorUtility.SetDirty(s);
-                NoBuildToolbarState.RequestRepaint();
-            }
+            NoBuildEditorState.OpenSet(s, index);
         }
 
         private static void HandleComboSwitch(int index)
@@ -91,10 +85,24 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
             SceneSet active = s.ActiveSceneSet;
             if (active == null) return;
-            List<SceneCombination> combos = active.GetEnabledCombinations();
-            if (index < 0 || index >= combos.Count) return;
+            SceneCombination combination = GetCombinationForSlot(active, index);
+            if (combination == null) return;
+            SceneSwitcher.SwitchToCombination(combination, active);
+        }
 
-            SceneSwitcher.SwitchToCombination(combos[index], active);
+        internal static SceneCombination GetCombinationForSlot(SceneSet set, int index)
+        {
+            if (set?.combinations == null || index < 0 || index >= 9 || index >= set.combinations.Count) return null;
+            SceneCombination combination = set.combinations[index];
+            return combination != null && combination.enabled && combination.ResolveScenes(set).Count > 0
+                ? combination : null;
+        }
+
+        internal static string GetBinding(int index, bool sceneSet = false)
+        {
+            if (index < 0 || index >= (sceneSet ? 12 : 9)) return "Unassigned";
+            string id = Base + (sceneSet ? "Switch To Scene Set " : "Switch To Combo ") + (index + 1);
+            return UnityEditor.ShortcutManagement.ShortcutManager.instance.GetShortcutBinding(id).ToString();
         }
     }
 }

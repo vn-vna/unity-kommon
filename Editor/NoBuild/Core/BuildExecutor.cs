@@ -22,12 +22,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
     internal static class BuildExecutor
     {
         // ══════════════════════════════════════════════════
-        // ── Constants
-        // ══════════════════════════════════════════════════
-
-        private const string DefaultBuildDir = "Builds";
-
-        // ══════════════════════════════════════════════════
         // ── Events & Delegates
         // ══════════════════════════════════════════════════
 
@@ -66,8 +60,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             }
 
             // ── Validate ──────────────────────
-            string validationError =
-                ValidateProfile(profile, settings);
+            BuildPreflightResult preflight = BuildPreflight.Evaluate(profile, settings);
+            string validationError = preflight.Errors.FirstOrDefault()
+                ?? (preflight.IsRefreshingGit ? "Wait for Git metadata to refresh, then start the build again." : null);
             if (validationError != null)
             {
                 FireFailed(profile, validationError);
@@ -90,11 +85,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         .NamedBuildTarget
                         .FromBuildTargetGroup(targetGroup);
 
-            string[] blockedDefines =
-                GetBlockedDisabledDefines(
-                    profile,
-                    settings,
-                    namedTarget);
+            string[] blockedDefines = preflight.DefinesToRemove;
             if (blockedDefines.Length > 0)
             {
                 bool applyNow = EditorUtility.DisplayDialog(
@@ -109,16 +100,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     "Cancel");
                 if (applyNow)
                 {
-                    ScriptDefinitionSet defineSet =
-                        settings.scriptDefinitionSets[
-                            profile.scriptDefinitionSetIndex];
-                    if (ScriptDefinitionSwitcher.ApplySet(
-                            defineSet,
-                            targetGroup))
+                    if (NoBuildEditorState.ApplyDefines(settings,
+                            profile.scriptDefinitionSetIndex, targetGroup))
                     {
-                        settings.activeScriptDefinitionSetIndex =
-                            profile.scriptDefinitionSetIndex;
-                        EditorUtility.SetDirty(settings);
                         EditorUtility.DisplayDialog(
                             "NoBuild — Defines Applied",
                             "Wait for Unity to finish compiling, "
@@ -156,6 +140,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     Debug.Log(
                         "[NoBuild] Build cancelled while "
                         + "saving modified scenes.");
+                    NoBuildEditorState.SetResult("Build cancelled while saving scenes.");
                     return null;
                 }
 
@@ -180,32 +165,14 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     profile.profileName,
                     "Resolving build output...",
                     0.20f);
-                string[] scenePaths =
-                    GetScenePaths(profile, settings);
+                string[] scenePaths = preflight.ScenePaths;
                 if (scenePaths.Length == 0)
                 {
                     throw new InvalidOperationException(
                         "No valid scenes to build.");
                 }
 
-                string resolvedFolder =
-                    BuildNameResolver.Resolve(
-                        profile.buildFolder?.template
-                            ?? "{project-root}/Builds",
-                        profile, settings);
-                string resolvedName =
-                    BuildNameResolver.Resolve(
-                        profile.buildNameTemplate
-                            ?.template
-                            ?? "{app-version}",
-                        profile, settings);
-                string resolvedOutputPath = outputPath
-                    ?? Path.Combine(
-                        resolvedFolder,
-                        resolvedName
-                        + GetPlatformExtension(
-                            buildTarget,
-                            config));
+                string resolvedOutputPath = outputPath ?? preflight.OutputPath;
 
                 // Ensure output directory exists
                 string outputDir =
@@ -301,6 +268,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         + " MB, "
                         + $"Time: {summary.totalTime}");
                     successfulReport = report;
+                }
+                else if (summary.result == BuildResult.Cancelled)
+                {
+                    NoBuildEditorState.SetResult("Build cancelled: " + profile.profileName);
+                    return null;
                 }
                 else
                 {
@@ -412,215 +384,65 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 return;
             }
 
-            string tempApksPath = null;
-            bool isAab =
-                profile.buildConfiguration
-                    .androidBuildAppBundle;
-
-            try
+            NoBuildDeviceOperations.Start("Detecting build target devices…", async token =>
             {
-                // 1 ── Build ─────────────────
-                BuildReport? report = Build(profile);
-                if (report == null
-                    || report.summary.result
-                    != BuildResult.Succeeded)
+                List<AdbDeviceInfo> devices = (await AdbUtility.GetDevicesAsync(token))
+                    .Where(device => device.State == "device").ToList();
+                List<AdbDeviceInfo> targets = deviceOption switch
                 {
-                    // Build() already showed a failure
-                    // dialog — just abort the run
-                    return;
-                }
-
-                // 2 ── Get devices ───────────
-                ShowProgress(
-                    profile.profileName,
-                    "Detecting devices...",
-                    0f);
-                List<AdbDeviceInfo> devices = AdbUtility
-                    .GetDevices()
-                    .Where(device => device.State == "device")
-                    .ToList();
-                if (devices.Count == 0)
+                    DeviceOption.AllDevices => devices,
+                    DeviceOption.FirstDevice => devices.Take(1).ToList(),
+                    _ => devices.Where(device => device.Serial == specificSerial).ToList()
+                };
+                if (targets.Count == 0) throw new InvalidOperationException("The selected Android device is no longer connected or authorized.");
+                token.ThrowIfCancellationRequested();
+                bool aab = profile.buildConfiguration.androidBuildAppBundle;
+                string package = ResolveAndroidPackageName(profile);
+                NoBuildDeviceOperations.SetStatus("Building " + profile.profileName + "…");
+                BuildReport report = Build(profile);
+                if (report == null) return;
+                string path = report.summary.outputPath;
+                if (!File.Exists(path)) throw new FileNotFoundException("Build artifact not found: " + path);
+                string apks = null;
+                try
                 {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "No Android device connected "
-                        + "via ADB.",
-                        "OK");
-                    return;
-                }
-
-                // 3 ── Select target devices ──
-                List<AdbDeviceInfo> targets = new();
-                switch (deviceOption)
-                {
-                    case DeviceOption.FirstDevice:
-                        targets.Add(devices[0]);
-                        break;
-                    case DeviceOption.AllDevices:
-                        targets.AddRange(devices);
-                        break;
-                    case DeviceOption.SpecificDevice:
-                        var match = devices.Find(
-                            d => d.Serial
-                                == specificSerial);
-                        if (match.Serial == null)
+                    if (aab)
+                    {
+                        NoBuildDeviceOperations.SetStatus("Converting AAB to APKS…");
+                        apks = await AabUtility.BuildApksAsync(path, token);
+                    }
+                    var outcomes = new List<string>();
+                    int success = 0;
+                    foreach (AdbDeviceInfo device in targets)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        NoBuildDeviceOperations.SetStatus("Installing to " + device.DisplayName + "…");
+                        bool installed = await DeviceInstaller.InstallWithRecoveryAsync(device.Serial, device.DisplayName, package,
+                            () => aab ? AabUtility.InstallApksAsync(apks, device.Serial, token)
+                                : AdbUtility.InstallApkAsync(path, device.Serial, token), token);
+                        if (!installed)
                         {
-                            EditorUtility.DisplayDialog(
-                                "NoBuild",
-                                $"Device "
-                                + $"'{specificSerial}' "
-                                + "not found.",
-                                "OK");
-                            return;
+                            outcomes.Add(device.DisplayName + ": install cancelled");
+                            continue;
                         }
-
-                        targets.Add(match);
-                        break;
-                }
-
-                // 4 ── Use the exact path produced by Unity ──
-                string outputPath = report.summary.outputPath;
-                if (string.IsNullOrEmpty(outputPath)
-                    || !File.Exists(outputPath))
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "Build output not found at:\n"
-                        + $"{outputPath}",
-                        "OK");
-                    return;
-                }
-
-                string installPath = outputPath;
-
-                // 5 ── AAB → APKS conversion ─
-                if (isAab)
-                {
-                    // BuildApks() manages its own
-                    // progress bar internally
-                    tempApksPath =
-                        AabUtility.BuildApks(
-                            outputPath);
-                    installPath = tempApksPath;
-                }
-
-                // 6 ── Install + Launch ──────
-                string packageName =
-                    ResolveAndroidPackageName(profile);
-                int successCount = 0;
-                int failCount = 0;
-
-                for (int targetIndex = 0;
-                    targetIndex < targets.Count;
-                    targetIndex++)
-                {
-                    AdbDeviceInfo device = targets[targetIndex];
-                    ShowProgress(
-                        profile.profileName,
-                        $"Installing to "
-                        + $"{device.DisplayName} "
-                        + $"[{targetIndex + 1}/"
-                        + $"{targets.Count}]...",
-                        (float)targetIndex
-                        / targets.Count);
-
-                    bool installed =
-                        DeviceInstaller.InstallWithRecovery(
-                            device.Serial,
-                            device.DisplayName,
-                            packageName,
-                            () => isAab
-                                ? AabUtility.InstallApks(
-                                    tempApksPath,
-                                    device.Serial)
-                                : AdbUtility.InstallApk(
-                                    installPath,
-                                    device.Serial));
-
-                    if (!installed)
-                    {
-                        failCount++;
-                        Debug.LogError(
-                            $"[NoBuild] Install failed "
-                            + "on "
-                            + $"{device.DisplayName}");
-                        continue;
+                        ProcessExecutionResult launch = await AdbUtility.RunAsync(
+                            $"-s \"{device.Serial}\" shell monkey -p \"{package}\" -c android.intent.category.LAUNCHER 1", cancellationToken: token);
+                        bool launched = !launch.TimedOut && launch.ExitCode == 0 && !launch.CombinedOutput.Contains("Error");
+                        outcomes.Add(device.DisplayName + (launched ? ": installed and launched" : ": installed; launch failed"));
+                        if (launched)
+                        {
+                            success++;
+                            EditorPrefs.SetString(NoBuildDeviceOperations.RememberedDeviceKey, device.Serial);
+                        }
                     }
-
-                    bool launched =
-                        AdbUtility.LaunchApp(
-                            device.Serial,
-                            packageName);
-                    if (launched)
-                    {
-                        successCount++;
-                        Debug.Log(
-                            $"[NoBuild] Launched on "
-                            + $"{device.DisplayName} "
-                            + $"({device.Serial})");
-                        EditorPrefs.SetString(
-                            "NoBuild_LastAdbDevice",
-                            device.Serial);
-                    }
-                    else
-                    {
-                        failCount++;
-                        Debug.LogError(
-                            $"[NoBuild] Launch failed "
-                            + "on "
-                            + $"{device.DisplayName}");
-                    }
+                    NoBuildEditorState.SetResult($"Deployment: {success}/{targets.Count} succeeded · {profile.profileName}\n"
+                        + string.Join("\n", outcomes), path, success != targets.Count);
                 }
-
-                // 7 ── Summary ───────────────
-                if (failCount > 0
-                    && successCount == 0)
+                finally
                 {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "Failed to install/launch "
-                        + "on all "
-                        + $"{targets.Count} "
-                        + "device(s).",
-                        "OK");
+                    if (apks != null) AabUtility.Cleanup(apks);
                 }
-                else if (failCount > 0)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        $"{successCount} device(s) "
-                        + "succeeded, "
-                        + $"{failCount} failed.",
-                        "OK");
-                }
-                // All succeeded — silent (log only)
-            }
-            catch (Exception ex)
-            {
-                EditorUtility.DisplayDialog(
-                    "NoBuild — Error",
-                    "An error occurred during "
-                    + $"Build & Run:\n{ex.Message}",
-                    "OK");
-                Debug.LogException(ex);
-            }
-            finally
-            {
-                // ── Cleanup is inevitable ────
-                ShowProgress(
-                    profile.profileName,
-                    "Cleaning up temporary files...",
-                    0f);
-
-                if (isAab
-                    && !string.IsNullOrEmpty(
-                        tempApksPath))
-                {
-                    AabUtility.Cleanup(tempApksPath);
-                }
-
-                EditorUtility.ClearProgressBar();
-            }
+            });
         }
 
         // ══════════════════════════════════════════════════
@@ -657,193 +479,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 .Select(slot => slot.defineSymbol.Trim())
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-        }
-
-        private static string[] GetBlockedDisabledDefines(
-            BuildProfile profile,
-            NoBuildSettings settings,
-            UnityEditor.Build.NamedBuildTarget namedTarget)
-        {
-            if (!profile.HasValidDefineSet(settings))
-            {
-                return Array.Empty<string>();
-            }
-
-            HashSet<string> currentDefines =
-                ParseDefines(PlayerSettings
-                    .GetScriptingDefineSymbols(namedTarget));
-            ScriptDefinitionSet set =
-                settings.scriptDefinitionSets[
-                    profile.scriptDefinitionSetIndex];
-            return set.slots
-                .Where(slot => slot != null
-                    && !slot.enabled
-                    && !string.IsNullOrWhiteSpace(
-                        slot.defineSymbol))
-                .Select(slot => slot.defineSymbol.Trim())
-                .Where(currentDefines.Contains)
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-        }
-
-        private static string ValidateBuildDefines(
-            BuildProfile profile,
-            NoBuildSettings settings)
-        {
-            if (!profile.HasValidDefineSet(settings))
-            {
-                return null;
-            }
-
-            ScriptDefinitionSet set =
-                settings.scriptDefinitionSets[
-                    profile.scriptDefinitionSetIndex];
-            if (set?.slots == null || set.slots.Count == 0)
-            {
-                return $"Define set '{set?.setName ?? "(missing)"}' "
-                    + "has no symbols.";
-            }
-
-            var desiredStates =
-                new Dictionary<string, bool>(
-                    StringComparer.Ordinal);
-            foreach (ScriptDefinitionSlot slot in set.slots)
-            {
-                string error = ScriptDefinitionSwitcher
-                    .ValidateSymbol(slot?.defineSymbol);
-                if (error != null)
-                {
-                    return $"Invalid symbol in define set "
-                        + $"'{set.setName}': {error}";
-                }
-
-                string symbol = slot.defineSymbol.Trim();
-                if (desiredStates.TryGetValue(
-                        symbol,
-                        out bool enabled)
-                    && enabled != slot.enabled)
-                {
-                    return $"Define set '{set.setName}' contains "
-                        + $"conflicting entries for '{symbol}'.";
-                }
-
-                desiredStates[symbol] = slot.enabled;
-            }
-
-            return null;
-        }
-
-        private static HashSet<string> ParseDefines(
-            string defineString)
-        {
-            return new HashSet<string>(
-                (defineString ?? string.Empty)
-                    .Split(';')
-                    .Select(value => value.Trim())
-                    .Where(value => !string.IsNullOrEmpty(value)),
-                StringComparer.Ordinal);
-        }
-
-        private static string ValidateProfile(BuildProfile profile, NoBuildSettings settings)
-        {
-            if (profile.buildConfiguration == null)
-            {
-                return $"Build profile '{profile.profileName}' "
-                    + "has no build configuration.";
-            }
-
-            BuildConfiguration config =
-                profile.buildConfiguration;
-            if (config.platform == BuildTarget.NoTarget)
-            {
-                return $"Build profile '{profile.profileName}' "
-                    + "has no target platform.";
-            }
-
-            if (config.platform == BuildTarget.Android
-                && config.androidExportProject
-                && config.androidBuildAppBundle)
-            {
-                return "Android profiles cannot export a Gradle "
-                    + "project and build an App Bundle at the "
-                    + "same time.";
-            }
-
-            string defineError = ValidateBuildDefines(
-                profile,
-                settings);
-            if (defineError != null)
-            {
-                return defineError;
-            }
-
-            if (!profile.HasValidSceneSet(settings))
-            {
-                return $"Build profile '{profile.profileName}' has an invalid scene set reference.";
-            }
-
-            SceneSet sceneSet = settings.sceneSets[profile.sceneSetIndex];
-            if (!sceneSet.HasContent)
-            {
-                return $"Scene set '{sceneSet.setName}' has no scenes configured.";
-            }
-
-            int validCount = 0;
-            foreach (SceneSlot slot in sceneSet.scenes)
-            {
-                if (slot != null && slot.enabled && slot.IsValid)
-                {
-                    validCount++;
-                }
-            }
-
-            if (validCount == 0)
-            {
-                return $"No valid, enabled scenes in set '{sceneSet.setName}'.";
-            }
-
-            return null;
-        }
-
-        private static string[] GetScenePaths(BuildProfile profile, NoBuildSettings settings)
-        {
-            SceneSet sceneSet = settings.sceneSets[profile.sceneSetIndex];
-
-            bool hasOverride = sceneSet.buildOrderOverride
-                != null
-                && sceneSet.buildOrderOverride.Count > 0;
-            List<SceneSlot> orderedSlots = hasOverride
-                ? sceneSet.buildOrderOverride
-                : sceneSet.scenes;
-
-            List<string> paths = GetValidScenePaths(
-                orderedSlots);
-            if (paths.Count == 0 && hasOverride)
-            {
-                Debug.LogWarning(
-                    "[NoBuild] Build order override has no valid "
-                    + "scenes. Using the scene set's natural order.");
-                paths = GetValidScenePaths(sceneSet.scenes);
-            }
-
-            return paths.ToArray();
-        }
-
-        private static List<string> GetValidScenePaths(
-            IEnumerable<SceneSlot> slots)
-        {
-            var paths = new List<string>();
-            if (slots == null) return paths;
-
-            foreach (SceneSlot slot in slots)
-            {
-                if (slot != null && slot.enabled && slot.IsValid)
-                {
-                    paths.Add(slot.ScenePath);
-                }
-            }
-
-            return paths;
         }
 
         private static BuildStateSnapshot CaptureBuildState(
@@ -903,12 +538,12 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 config.developmentBuild
                 && config.connectWithProfiler;
 
-            if (!string.IsNullOrEmpty(config.bundleIdentifierOverride))
+            if (!string.IsNullOrWhiteSpace(config.bundleIdentifierOverride))
             {
-                PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride);
+                PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride.Trim());
             }
 
-            if (!string.IsNullOrEmpty(config.productNameOverride))
+            if (!string.IsNullOrWhiteSpace(config.productNameOverride))
             {
                 PlayerSettings.productName = config.productNameOverride;
             }
@@ -1072,49 +707,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 message,
                 "OK");
             return false;
-        }
-
-        private static string GetPlatformExtension(BuildTarget target)
-        {
-            return GetPlatformExtension(target, null);
-        }
-
-        /// <summary>
-        /// Returns the platform file extension. When <paramref name="config"/>
-        /// is provided, uses the profile's AAB flag instead of the (possibly
-        /// restored) global EditorUserBuildSettings value.
-        /// </summary>
-        private static string GetPlatformExtension(
-            BuildTarget target, BuildConfiguration config
-        )
-        {
-            switch (target)
-            {
-                case BuildTarget.Android:
-                    if (config != null)
-                    {
-                        if (config.androidExportProject)
-                        {
-                            return string.Empty;
-                        }
-
-                        return config.androidBuildAppBundle
-                            ? ".aab" : ".apk";
-                    }
-                    return EditorUserBuildSettings.buildAppBundle
-                        ? ".aab" : ".apk";
-                case BuildTarget.StandaloneWindows:
-                case BuildTarget.StandaloneWindows64:
-                    return ".exe";
-                case BuildTarget.StandaloneOSX:
-                    return ".app";
-                case BuildTarget.iOS:
-                    return ""; // iOS builds to a folder
-                case BuildTarget.WebGL:
-                    return ""; // WebGL builds to a folder
-                default:
-                    return "";
-            }
         }
 
         private static void FireFailed(

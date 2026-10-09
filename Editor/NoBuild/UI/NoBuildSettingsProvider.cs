@@ -10,6 +10,7 @@ using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Com.Scheherazade.Common.NoBuild.Editor
 {
@@ -20,7 +21,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         private static readonly string[] Tabs =
             { "Scene Sets", "Defines", "Build Profiles", "Devices", "Flags" };
         private static readonly string[] StateFilters =
-            { "All", "Active", "Inactive" };
+            { "All", "Matches Editor", "Differs" };
         private static readonly string[] PlatformFilters =
             { "All", "Android", "Other Platforms" };
         private static readonly string[] FlagFilters =
@@ -28,7 +29,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         private SerializedObject _so;
         private SerializedProperty _sceneSets, _defineSets, _buildProfiles, _flagDefs;
-        private SerializedProperty _activeScene, _activeDefine;
         private SerializedProperty _toolbarLabelTemplate;
         private int _tab;
         private int _selSet = -1, _selDef = -1, _selBuild = -1, _selFlag = -1;
@@ -36,27 +36,99 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         private string _searchQuery = string.Empty;
         private int _filterIndex;
         private int _expandedEntryIndex = -1;
+        private bool _showAppearance;
+        private bool _focusName;
+        private bool _revealEntry;
+        private float _listStartY;
+        private string SessionKey => "NoBuild.UI." + Application.dataPath;
+
+        [Serializable]
+        private sealed class BrowserState
+        {
+            public int tab, scene = -1, define = -1, build = -1, flag = -1, expanded = -1, filter;
+            public string search = "";
+            public Vector2 scroll;
+            public bool appearance;
+        }
 
         // ── Device Tab State ───────────────────────
-        private List<AdbDeviceInfo> _cachedDevices;
-        private double _lastDeviceRefreshTime;
-        private const double DeviceRefreshInterval = 10.0;
-        private string _installApkPath = "";
-        private string _installAabPath = "";
+        private string _installApkPath
+        {
+            get => SessionState.GetString(SessionKey + ".ApkPath", "");
+            set => SessionState.SetString(SessionKey + ".ApkPath", value);
+        }
+        private string _installAabPath
+        {
+            get => SessionState.GetString(SessionKey + ".AabPath", "");
+            set => SessionState.SetString(SessionKey + ".AabPath", value);
+        }
+        private string ApkPackage
+        {
+            get => SessionState.GetString(SessionKey + ".ApkPackage", "");
+            set => SessionState.SetString(SessionKey + ".ApkPackage", value);
+        }
+        private string AabPackage
+        {
+            get => SessionState.GetString(SessionKey + ".AabPackage", "");
+            set => SessionState.SetString(SessionKey + ".AabPackage", value);
+        }
+        private string LaunchPackage
+        {
+            get => SessionState.GetString(SessionKey + ".LaunchPackage", AdbUtility.GetPackageName());
+            set => SessionState.SetString(SessionKey + ".LaunchPackage", value);
+        }
+        private bool _showToolPaths;
         private List<WirelessDeviceInfo> _wirelessDevices;
         private string _pairingCode = "";
 
         private NoBuildSettingsProvider(string p, SettingsScope sc,
             IEnumerable<string> kw = null) : base(p, sc, kw)
         {
-            activateHandler = (_, _2) => Refresh();
-            deactivateHandler = () => { _so?.Dispose(); _so = null; };
+            activateHandler = (_, _2) =>
+            {
+                RestoreBrowserState();
+                Refresh();
+                AssemblyReloadEvents.beforeAssemblyReload += SaveBrowserState;
+                NoBuildToolbarState.RepaintRequested += Repaint;
+            };
+            deactivateHandler = () =>
+            {
+                SaveBrowserState();
+                AssemblyReloadEvents.beforeAssemblyReload -= SaveBrowserState;
+                NoBuildToolbarState.RepaintRequested -= Repaint;
+                _so?.Dispose();
+                _so = null;
+            };
         }
 
         [SettingsProvider]
         public static SettingsProvider Create() => new NoBuildSettingsProvider(Path,
             SettingsScope.Project,
             new[] { "nobuild", "scene", "switch", "define", "build", "profile", "combo" });
+
+        [MenuItem("Dev Menu/Tools/NoBuild")]
+        private static void OpenSettings() => SettingsService.OpenProjectSettings(Path);
+
+        private void SaveBrowserState()
+        {
+            SessionState.SetString(SessionKey, JsonUtility.ToJson(new BrowserState
+            {
+                tab = _tab, scene = _selSet, define = _selDef, build = _selBuild, flag = _selFlag,
+                expanded = _expandedEntryIndex, filter = _filterIndex, search = _searchQuery,
+                scroll = _pvScroll, appearance = _showAppearance
+            }));
+        }
+
+        private void RestoreBrowserState()
+        {
+            string json = SessionState.GetString(SessionKey, "");
+            if (string.IsNullOrEmpty(json)) return;
+            BrowserState state = JsonUtility.FromJson<BrowserState>(json);
+            _tab = Mathf.Clamp(state.tab, 0, Tabs.Length - 1);
+            _selSet = state.scene; _selDef = state.define; _selBuild = state.build; _selFlag = state.flag;
+            _expandedEntryIndex = state.expanded; _filterIndex = Mathf.Clamp(state.filter, 0, 2);
+            _searchQuery = state.search ?? ""; _pvScroll = state.scroll; _showAppearance = state.appearance;
+        }
 
         public override void OnGUI(string searchContext)
         {
@@ -75,7 +147,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 _selFlag = 0;
 
             DrawProviderHeader(s);
-            DrawToolbarLabelSettings(s);
+            _showAppearance = EditorGUILayout.Foldout(_showAppearance, "Appearance", true);
+            if (_showAppearance) DrawToolbarLabelSettings(s);
             int selectedTab = EditorGuiLayout.DrawTabBar(_tab, Tabs);
             if (selectedTab != _tab)
             {
@@ -100,16 +173,23 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             {
                 NoBuildToolbarState.RequestRepaint();
             }
+            if (GUI.changed) SaveBrowserState();
         }
 
         private static void DrawProviderHeader(NoBuildSettings settings)
         {
-            string sceneSet = settings.ActiveSceneSet?.setName ?? "No active scene set";
-            string defineSet = settings.ActiveScriptDefinitionSet?.setName ?? "No active define set";
-            EditorGuiLayout.DrawHeaderBox(
-                "No Build",
-                $"Scenes: {sceneSet}  •  Defines: {defineSet}"
-            );
+            SceneSet scene = settings.ActiveSceneSet;
+            ScriptDefinitionSet defines = settings.ActiveScriptDefinitionSet;
+            string sceneSet = scene == null ? "Custom" : scene.setName
+                + (NoBuildEditorState.ScenesMatch(scene) ? " (open)" : " (shortcut context; scenes differ)");
+            string defineSet = defines == null ? "Custom" : defines.setName
+                + (NoBuildEditorState.DefinesMatch(defines) ? " (applied)" : " (changes not applied)");
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("No Build", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"Scenes: {sceneSet}  •  Defines [{EditorUserBuildSettings.selectedBuildTargetGroup}]: {defineSet}",
+                EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.EndVertical();
+            NoBuildBuildUI.DrawLastResult();
         }
 
         private void DrawToolbarLabelSettings(
@@ -137,7 +217,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.LabelField(
                 "{scene-set}  {define-set}  {platform}  "
                 + "{scene-count}  {define-count}  "
-                + "{project-name}",
+                + "{project-name}  {scene-status}  {define-status}",
                 EditorStyles.miniLabel);
 
             if (changed)
@@ -196,17 +276,22 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             if (GUILayout.Button(GetAddButtonLabel(), GUILayout.Height(22)))
             {
                 AddNew();
+                GUIUtility.ExitGUI();
             }
 
-            EditorGUI.BeginDisabledGroup(!HasSelection());
+            EditorGUI.BeginDisabledGroup(!HasSelection() || !MatchesCollectionFilter(GetSelectedEntryName(),
+                GetSelectedEntryIndex(), GetActiveEntryIndex()));
             Color previousBackground = GUI.backgroundColor;
             GUI.backgroundColor = EditorGuiColors.RunBlue;
             if (GUILayout.Button(
-                    "Clone Selected",
+                    new GUIContent("Duplicate Selected", "Duplicate " + GetSelectedEntryName()),
                     GUILayout.Height(22)
                 ))
             {
                 CloneSelected();
+                GUI.backgroundColor = previousBackground;
+                EditorGUI.EndDisabledGroup();
+                GUIUtility.ExitGUI();
             }
 
             GUI.backgroundColor = previousBackground;
@@ -220,8 +305,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings s = (NoBuildSettings)_so.targetObject;
             EditorGUILayout.LabelField(
                 GetCollectionLabel(),
-                EditorGuiStyles.SectionHeader
+                EditorStyles.boldLabel
             );
+            _listStartY = GUILayoutUtility.GetLastRect().yMax + 2;
             GUILayout.Space(2);
             bool hasVisibleEntries = false;
 
@@ -230,14 +316,14 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 case 0:
                     hasVisibleEntries = DrawCollectionEntries(
                         s.sceneSets.Select(x => x.setName).ToList(),
-                        s.activeSceneSetIndex,
+                        s.SelectedSceneSetIndex,
                         ref _selSet
                     );
                     break;
                 case 1:
                     hasVisibleEntries = DrawCollectionEntries(
                         s.scriptDefinitionSets.Select(x => x.setName).ToList(),
-                        s.activeScriptDefinitionSetIndex,
+                        s.SelectedDefineSetIndex,
                         ref _selDef
                     );
                     break;
@@ -265,10 +351,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             if (!hasVisibleEntries)
             {
                 EditorGuiLayout.DrawEmptyState(
-                    string.IsNullOrEmpty(_searchQuery)
+                    GetCurrentCollectionCount() == 0
                         ? $"No {GetCollectionLabel().ToLowerInvariant()} created."
                         : "No matching entries.",
-                    string.IsNullOrEmpty(_searchQuery)
+                    GetCurrentCollectionCount() == 0
                         ? "Use the create button above to add one."
                         : "Clear or broaden the search and filter."
                 );
@@ -285,6 +371,31 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 2 => _selBuild >= 0 && _selBuild < _buildProfiles.arraySize,
                 4 => _selFlag >= 0 && _selFlag < _flagDefs.arraySize,
                 _ => false
+            };
+        }
+
+        private int GetSelectedEntryIndex() => _tab switch
+        {
+            0 => _selSet, 1 => _selDef, 2 => _selBuild, 4 => _selFlag, _ => -1
+        };
+
+        private int GetActiveEntryIndex()
+        {
+            var settings = (NoBuildSettings)_so.targetObject;
+            return _tab switch { 0 => settings.SelectedSceneSetIndex, 1 => settings.SelectedDefineSetIndex, _ => -1 };
+        }
+
+        private string GetSelectedEntryName()
+        {
+            if (!HasSelection()) return "";
+            var settings = (NoBuildSettings)_so.targetObject;
+            return _tab switch
+            {
+                0 => settings.sceneSets[_selSet].setName,
+                1 => settings.scriptDefinitionSets[_selDef].setName,
+                2 => settings.buildProfiles[_selBuild].profileName,
+                4 => FlagDisplayName(settings.flagDefinitions[_selFlag], _selFlag, settings),
+                _ => ""
             };
         }
 
@@ -314,7 +425,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
                 hasVisibleEntries = true;
                 bool isSel = selIdx == i;
-                bool isAct = activeIdx == i;
+                var settings = (NoBuildSettings)_so.targetObject;
+                bool isAct = _tab == 0 ? NoBuildEditorState.ScenesMatch(settings.sceneSets[i])
+                    : _tab == 1 && NoBuildEditorState.DefinesMatch(settings.scriptDefinitionSets[i]);
                 bool isExpanded = _expandedEntryIndex == i;
                 if (DrawCollectionCard(
                         names[i],
@@ -379,6 +492,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             {
                 selectedIndex = entryIndex;
                 _expandedEntryIndex = entryIndex;
+                SaveBrowserState();
             }
 
             if (GUILayout.Button(
@@ -388,6 +502,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             {
                 selectedIndex = entryIndex;
                 _expandedEntryIndex = isExpanded ? -1 : entryIndex;
+                SaveBrowserState();
             }
 
             EditorGUILayout.EndHorizontal();
@@ -400,9 +515,20 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
             EditorGUILayout.EndVertical();
             Rect cardRect = GUILayoutUtility.GetLastRect();
+            if (_revealEntry && selectedIndex == entryIndex && Event.current.type == EventType.Repaint)
+            {
+                _pvScroll.y = Mathf.Max(0, cardRect.y - _listStartY);
+                _revealEntry = false;
+                SaveBrowserState();
+                Repaint();
+            }
             if (isActive)
             {
                 DrawCardOutline(cardRect, EditorGuiColors.ActiveGreen);
+            }
+            else if (isSelected)
+            {
+                DrawCardOutline(cardRect, EditorGuiColors.RunBlue);
             }
 
             GUILayout.Space(4);
@@ -504,10 +630,13 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         private bool MatchesStateFilter(int entryIndex, int activeIndex)
         {
+            var settings = (NoBuildSettings)_so.targetObject;
+            bool matches = _tab == 0 ? NoBuildEditorState.ScenesMatch(settings.sceneSets[entryIndex])
+                : NoBuildEditorState.DefinesMatch(settings.scriptDefinitionSets[entryIndex]);
             return _filterIndex switch
             {
-                1 => entryIndex == activeIndex,
-                2 => entryIndex != activeIndex,
+                1 => matches,
+                2 => !matches,
                 _ => true
             };
         }
@@ -539,35 +668,57 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         private void AddNew()
         {
+            NoBuildSettings settings = (NoBuildSettings)_so.targetObject;
+            _so.ApplyModifiedProperties();
+            Undo.RecordObject(settings, "Create NoBuild Entry");
             switch (_tab)
             {
                 case 0:
-                    _sceneSets.arraySize++; _so.ApplyModifiedProperties();
-                    _selSet = _sceneSets.arraySize - 1;
-                    _sceneSets.GetArrayElementAtIndex(_selSet)
-                        .FindPropertyRelative("setName").stringValue = "Scene Set " + _sceneSets.arraySize;
+                    settings.sceneSets.Add(new SceneSet { setName = "Scene Set " + (settings.sceneSets.Count + 1) });
+                    _selSet = settings.sceneSets.Count - 1;
                     break;
                 case 1:
-                    _defineSets.arraySize++; _so.ApplyModifiedProperties();
-                    _selDef = _defineSets.arraySize - 1;
-                    _defineSets.GetArrayElementAtIndex(_selDef)
-                        .FindPropertyRelative("setName").stringValue = "Define Set " + _defineSets.arraySize;
+                    settings.scriptDefinitionSets.Add(new ScriptDefinitionSet { setName = "Define Set " + (settings.scriptDefinitionSets.Count + 1) });
+                    _selDef = settings.scriptDefinitionSets.Count - 1;
                     break;
                 case 2:
-                    _buildProfiles.arraySize++; _so.ApplyModifiedProperties();
-                    _selBuild = _buildProfiles.arraySize - 1;
-                    _buildProfiles.GetArrayElementAtIndex(_selBuild)
-                        .FindPropertyRelative("profileName").stringValue = "Build Profile " + _buildProfiles.arraySize;
+                    settings.buildProfiles.Add(new BuildProfile { profileName = "Build Profile " + (settings.buildProfiles.Count + 1) });
+                    _selBuild = settings.buildProfiles.Count - 1;
                     break;
                 case 4:
-                    _flagDefs.arraySize++; _so.ApplyModifiedProperties();
-                    _selFlag = _flagDefs.arraySize - 1;
-                    _flagDefs.GetArrayElementAtIndex(_selFlag)
-                        .FindPropertyRelative("name").stringValue = "Flag " + _flagDefs.arraySize;
-                    _flagDefs.GetArrayElementAtIndex(_selFlag)
-                        .FindPropertyRelative("id").stringValue = "flag-" + _flagDefs.arraySize;
+                    settings.flagDefinitions.Add(new FlagDefinition
+                    {
+                        name = "Flag " + (settings.flagDefinitions.Count + 1),
+                        id = GetUniqueFlagId(settings, "flag")
+                    });
+                    _selFlag = settings.flagDefinitions.Count - 1;
                     break;
             }
+            EditorUtility.SetDirty(settings);
+            _so.Update();
+            RevealSelection();
+        }
+
+        private void RevealSelection()
+        {
+            _searchQuery = "";
+            _filterIndex = 0;
+            _expandedEntryIndex = _tab switch { 0 => _selSet, 1 => _selDef, 2 => _selBuild, 4 => _selFlag, _ => -1 };
+            _pvScroll.y = 0;
+            _focusName = true;
+            _revealEntry = true;
+            SaveBrowserState();
+            Repaint();
+        }
+
+        internal static string GetUniqueFlagId(NoBuildSettings settings, string baseId)
+        {
+            if (string.IsNullOrWhiteSpace(baseId)) baseId = "flag";
+            string candidate = baseId;
+            int suffix = 2;
+            while (settings.flagDefinitions.Any(flag => string.Equals(flag?.id, candidate, StringComparison.OrdinalIgnoreCase)))
+                candidate = baseId + "-" + suffix++;
+            return candidate;
         }
 
         private void CloneSelected()
@@ -575,6 +726,9 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings settings =
                 (NoBuildSettings)_so.targetObject;
             if (settings == null) return;
+
+            _so.ApplyModifiedProperties();
+            Undo.RecordObject(settings, "Duplicate NoBuild Entry");
 
             switch (_tab)
             {
@@ -586,6 +740,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
             _so.Update();
             EditorUtility.SetDirty(settings);
+            RevealSelection();
         }
 
         private void CloneSceneSet(NoBuildSettings settings)
@@ -707,7 +862,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             var source = settings.flagDefinitions[_selFlag];
             var clone = new FlagDefinition
             {
-                id = source.id,
+                id = GetUniqueFlagId(settings, source.id + "-copy"),
                 name = source.name + " (Clone)",
                 type = source.type,
                 scriptDefinitionSetIndex =
@@ -761,26 +916,26 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             var buildOrderP = sp.FindPropertyRelative(
                 "buildOrderOverride");
             var combosP = sp.FindPropertyRelative("combinations");
-            bool active = s.activeSceneSetIndex == _selSet;
+            bool active = NoBuildEditorState.ScenesMatch(s.sceneSets[_selSet]);
 
             EditorGuiLayout.DrawSectionHeader(
                 "Scene Set Configuration",
-                active ? "Currently active." : "Select this set to switch all configured scenes."
+                active ? "These scenes are open. The first scene is active." : "Open this set to replace the current scene setup."
             );
             EditorGUILayout.BeginHorizontal();
             Color oldC = GUI.contentColor;
             if (active) GUI.contentColor = EditorGuiColors.ActiveGreen;
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUI.contentColor = oldC; GUILayout.FlexibleSpace();
-            if (!active)
+            if (!active || s.SelectedSceneSetIndex != _selSet)
             {
                 Color previousBackground = GUI.backgroundColor;
                 GUI.backgroundColor = EditorGuiColors.BuildGreen;
-                if (GUILayout.Button("Set Active", GUILayout.Width(80)))
+                if (GUILayout.Button(active ? "Use for Shortcuts" : "Open Scene Set", GUILayout.Width(120)))
                 {
-                    s.activeSceneSetIndex = _selSet;
-                    EditorUtility.SetDirty(s);
-                    NoBuildToolbarState.RequestRepaint();
+                    _so.ApplyModifiedProperties();
+                    if (active) s.SelectedSceneSetIndex = _selSet;
+                    else NoBuildEditorState.OpenSet(s, _selSet);
                 }
 
                 GUI.backgroundColor = previousBackground;
@@ -793,15 +948,20 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
                 {
                     int removedIndex = _selSet;
+                    Undo.RecordObject(s, "Delete NoBuild Scene Set");
                     _sceneSets.DeleteArrayElementAtIndex(removedIndex);
                     _so.ApplyModifiedProperties();
                     RemapSceneSetReferencesAfterRemoval(
                         s,
                         removedIndex);
-                    if (s.activeSceneSetIndex == _selSet) s.activeSceneSetIndex = -1;
-                    if (s.activeSceneSetIndex > _selSet) s.activeSceneSetIndex--;
+                    EditorUtility.SetDirty(s);
                     NoBuildToolbarState.RequestRepaint();
-                    _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1); return;
+                    _selSet = Mathf.Min(_selSet, _sceneSets.arraySize - 1);
+                    _expandedEntryIndex = _selSet;
+                    SaveBrowserState();
+                    GUI.backgroundColor = previousDeleteBackground;
+                    GUIUtility.ExitGUI();
+                    return;
                 }
             }
             GUI.backgroundColor = previousDeleteBackground;
@@ -816,12 +976,41 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.LabelField("Scenes", EditorStyles.boldLabel);
             DrawSceneReorderableList(scenesP);
 
+            if (GUILayout.Button("Capture Open Scenes", GUILayout.Height(22)))
+            {
+                Scene activeScene = SceneManager.GetActiveScene();
+                var openScenes = new List<UnityEngine.SceneManagement.Scene>();
+                for (int i = 0; i < SceneManager.sceneCount; i++) openScenes.Add(SceneManager.GetSceneAt(i));
+                if (openScenes.Any(scene => scene.isLoaded && string.IsNullOrEmpty(scene.path)))
+                {
+                    EditorUtility.DisplayDialog("Save Scenes First", "Save untitled scenes before capturing them. The configured set has been kept.", "OK");
+                    GUIUtility.ExitGUI();
+                    return;
+                }
+                scenesP.ClearArray();
+                foreach (Scene scene in openScenes.OrderByDescending(scene => scene == activeScene))
+                {
+                    if (string.IsNullOrEmpty(scene.path) || !scene.isLoaded) continue;
+                    int index = scenesP.arraySize++;
+                    SerializedProperty slot = scenesP.GetArrayElementAtIndex(index);
+                    slot.FindPropertyRelative("scene").objectReferenceValue = AssetDatabase.LoadAssetAtPath<SceneAsset>(scene.path);
+                    slot.FindPropertyRelative("enabled").boolValue = true;
+                    slot.FindPropertyRelative("displayName").stringValue = "";
+                }
+                _so.ApplyModifiedProperties();
+                GUIUtility.ExitGUI();
+            }
+
             if (GUILayout.Button("+ Add Scene", GUILayout.Height(22),
                     GUILayout.Width(100)))
             {
                 scenesP.arraySize++;
                 scenesP.GetArrayElementAtIndex(scenesP.arraySize - 1)
                     .FindPropertyRelative("enabled").boolValue = true;
+                scenesP.GetArrayElementAtIndex(scenesP.arraySize - 1)
+                    .FindPropertyRelative("scene").objectReferenceValue = null;
+                scenesP.GetArrayElementAtIndex(scenesP.arraySize - 1)
+                    .FindPropertyRelative("displayName").stringValue = "";
             }
             GUILayout.Space(8);
 
@@ -833,6 +1022,14 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 + "used for builds.",
                 MessageType.None);
             DrawSceneReorderableList(buildOrderP);
+            if (GUILayout.Button("Copy Scene Order to Build Override"))
+            {
+                _so.ApplyModifiedProperties();
+                Undo.RecordObject(s, "Copy NoBuild Build Order");
+                s.sceneSets[_selSet].buildOrderOverride = s.sceneSets[_selSet].scenes.ConvertAll(slot => slot.Clone());
+                EditorUtility.SetDirty(s);
+                _so.Update();
+            }
             if (GUILayout.Button(
                     "+ Add Build Scene",
                     GUILayout.Height(22),
@@ -843,6 +1040,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         buildOrderP.arraySize - 1)
                     .FindPropertyRelative("enabled")
                     .boolValue = true;
+                buildOrderP.GetArrayElementAtIndex(buildOrderP.arraySize - 1)
+                    .FindPropertyRelative("scene").objectReferenceValue = null;
+                buildOrderP.GetArrayElementAtIndex(buildOrderP.arraySize - 1)
+                    .FindPropertyRelative("displayName").stringValue = "";
             }
             GUILayout.Space(8);
 
@@ -856,7 +1057,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
             EditorGUILayout.LabelField(
                 "Shortcut Combinations",
-                EditorGuiStyles.SectionHeader
+                EditorStyles.boldLabel
             );
             EditorGUILayout.HelpBox(
                 "Toolbar shortcuts [1]–[9] open these scene combinations when this set is active.",
@@ -896,6 +1097,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 combination.FindPropertyRelative("name").stringValue =
                     "Shortcut " + combinations.arraySize;
                 combination.FindPropertyRelative("enabled").boolValue = true;
+                combination.FindPropertyRelative("sceneReferences").ClearArray();
             }
 
             GUI.backgroundColor = previousBackground;
@@ -930,7 +1132,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             GUI.color = previousBadgeColor;
 
             EditorGUILayout.LabelField(
-                $"Shortcut {index + 1}",
+                $"Slot {index + 1} · {ShortcutManager.GetBinding(index)}",
                 EditorStyles.boldLabel
             );
             GUILayout.FlexibleSpace();
@@ -975,6 +1177,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 return;
             }
 
+            bool hasStartup = false;
             for (int i = 0; i < scenesP.arraySize; i++)
             {
                 var slot = scenesP.GetArrayElementAtIndex(i);
@@ -982,6 +1185,12 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 var sc = slot.FindPropertyRelative("scene");
 
                 EditorGUILayout.BeginHorizontal();
+
+                bool startup = !hasStartup && en.boolValue && sc.objectReferenceValue != null;
+                if (startup) hasStartup = true;
+                GUILayout.Label(startup ? "Startup" : (i + 1).ToString(), EditorStyles.miniLabel, GUILayout.Width(48));
+                bool previousEnabled = GUI.enabled;
+                Color previousBackground = GUI.backgroundColor;
 
                 // Toggle + object field
                 en.boolValue = EditorGUILayout.Toggle(
@@ -995,24 +1204,24 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         typeof(SceneAsset), false);
 
                 // Up button
-                GUI.enabled = i > 0;
+                GUI.enabled = previousEnabled && i > 0;
                 if (GUILayout.Button("\u25B2",
                         GUILayout.Width(24), GUILayout.Height(18)))
                 {
                     scenesP.MoveArrayElement(i, i - 1);
                     _so.ApplyModifiedProperties();
                 }
-                GUI.enabled = true;
+                GUI.enabled = previousEnabled;
 
                 // Down button
-                GUI.enabled = i < scenesP.arraySize - 1;
+                GUI.enabled = previousEnabled && i < scenesP.arraySize - 1;
                 if (GUILayout.Button("\u25BC",
                         GUILayout.Width(24), GUILayout.Height(18)))
                 {
                     scenesP.MoveArrayElement(i, i + 1);
                     _so.ApplyModifiedProperties();
                 }
-                GUI.enabled = true;
+                GUI.enabled = previousEnabled;
 
                 // Remove button
                 GUI.backgroundColor = new Color(0.9f, 0.3f, 0.3f);
@@ -1021,13 +1230,15 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 {
                     scenesP.DeleteArrayElementAtIndex(i);
                     _so.ApplyModifiedProperties();
-                    GUI.backgroundColor = Color.white;
+                    GUI.backgroundColor = previousBackground;
                     EditorGUILayout.EndHorizontal();
                     break;
                 }
-                GUI.backgroundColor = Color.white;
+                GUI.backgroundColor = previousBackground;
 
                 EditorGUILayout.EndHorizontal();
+                if (en.boolValue && sc.objectReferenceValue == null)
+                    EditorGUILayout.HelpBox("Assign a scene or disable this slot.", MessageType.Warning);
             }
         }
 
@@ -1154,27 +1365,27 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             var sp = _defineSets.GetArrayElementAtIndex(_selDef);
             var nameP = sp.FindPropertyRelative("setName");
             var slotsP = sp.FindPropertyRelative("slots");
-            bool active = s.activeScriptDefinitionSetIndex == _selDef;
+            bool active = NoBuildEditorState.DefinesMatch(s.scriptDefinitionSets[_selDef]);
 
             EditorGuiLayout.DrawSectionHeader(
                 "Script Define Set Configuration",
-                active ? "Currently applied." : "Apply this set to update scripting defines."
+                $"{EditorUserBuildSettings.selectedBuildTargetGroup} · "
+                + (active ? "Configured symbols match Player Settings." : "Changes are not applied.")
             );
             EditorGUILayout.BeginHorizontal();
             Color oldC = GUI.contentColor;
             if (active) GUI.contentColor = EditorGuiColors.ActiveGreen;
             EditorGUILayout.LabelField(nameP.stringValue, EditorStyles.boldLabel);
             GUI.contentColor = oldC; GUILayout.FlexibleSpace();
-            if (!active)
+            using (new EditorGUI.DisabledScope((active && s.SelectedDefineSetIndex == _selDef)
+                || EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode))
             {
                 Color previousBackground = GUI.backgroundColor;
                 GUI.backgroundColor = EditorGuiColors.BuildGreen;
                 if (GUILayout.Button("Apply", GUILayout.Width(60)))
                 {
-                    s.activeScriptDefinitionSetIndex = _selDef;
-                    EditorUtility.SetDirty(s);
                     _so.ApplyModifiedProperties();
-                    ScriptDefinitionSwitcher.ApplySet(s.scriptDefinitionSets[_selDef]);
+                    NoBuildEditorState.ApplyDefines(s, _selDef);
                 }
 
                 GUI.backgroundColor = previousBackground;
@@ -1186,15 +1397,20 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
                 {
                     int removedIndex = _selDef;
+                    Undo.RecordObject(s, "Delete NoBuild Define Set");
                     _defineSets.DeleteArrayElementAtIndex(removedIndex);
                     _so.ApplyModifiedProperties();
                     RemapDefineSetReferencesAfterRemoval(
                         s,
                         removedIndex);
-                    if (s.activeScriptDefinitionSetIndex == _selDef) s.activeScriptDefinitionSetIndex = -1;
-                    if (s.activeScriptDefinitionSetIndex > _selDef) s.activeScriptDefinitionSetIndex--;
+                    EditorUtility.SetDirty(s);
                     NoBuildToolbarState.RequestRepaint();
-                    _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1); return;
+                    _selDef = Mathf.Min(_selDef, _defineSets.arraySize - 1);
+                    _expandedEntryIndex = _selDef;
+                    SaveBrowserState();
+                    GUI.backgroundColor = previousDeleteBackground;
+                    GUIUtility.ExitGUI();
+                    return;
                 }
             }
             GUI.backgroundColor = previousDeleteBackground;
@@ -1217,6 +1433,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 def.stringValue = EditorGUILayout.TextField(def.stringValue);
                 if (GUILayout.Button("\u2212", GUILayout.Width(22)))
                 {
+                    Undo.RecordObject(s, "Remove NoBuild Symbol");
                     slotsP.DeleteArrayElementAtIndex(i);
                     _so.ApplyModifiedProperties();
                     RemapDefineSlotReferencesAfterRemoval(
@@ -1225,12 +1442,22 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         i);
                     EditorUtility.SetDirty(s);
                     _so.Update();
+                    EditorGUILayout.EndHorizontal();
                     break;
                 }
                 EditorGUILayout.EndHorizontal();
+                string symbolError = ScriptDefinitionSwitcher.ValidateSymbol(def.stringValue);
+                if (symbolError != null) EditorGUILayout.HelpBox(symbolError, MessageType.Error);
             }
 
-            if (GUILayout.Button("+ Add Symbol", GUILayout.Height(22))) slotsP.arraySize++;
+            if (GUILayout.Button("+ Add Symbol", GUILayout.Height(22)))
+            {
+                int index = slotsP.arraySize++;
+                var slot = slotsP.GetArrayElementAtIndex(index);
+                slot.FindPropertyRelative("defineSymbol").stringValue = "";
+                slot.FindPropertyRelative("enabled").boolValue = true;
+            }
+            EditorGUILayout.HelpBox("Applying merges this set: enabled symbols are added, disabled symbols are removed, and other symbols are preserved.", MessageType.None);
         }
 
         // ──────────────────────────────────────────────
@@ -1251,9 +1478,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             var folderP = pp.FindPropertyRelative("buildFolder.template");
             var nameTplP = pp.FindPropertyRelative("buildNameTemplate.template");
             BuildProfile profile = s.buildProfiles[_selBuild];
-            string readiness = profile.HasValidSceneSet(s)
-                ? "Scene set configured."
-                : "Select a scene set before building.";
+            BuildPreflightResult preflight = BuildPreflight.Evaluate(profile, s);
+            string readiness = preflight.Summary;
 
             EditorGuiLayout.DrawSectionHeader(
                 "Build Profile Configuration",
@@ -1265,49 +1491,28 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             GUILayout.FlexibleSpace();
             Color previousBuildBackground = GUI.backgroundColor;
             GUI.backgroundColor = EditorGuiColors.BuildGreen;
+            using (new EditorGUI.DisabledScope(!preflight.CanBuild || NoBuildDeviceOperations.IsBusy))
             if (GUILayout.Button(
                     PlatformIconUtility.BuildActionIcon,
                     GUILayout.Width(78)
                 ))
             {
                 _so.ApplyModifiedProperties();
-                var selectedProfile = s.buildProfiles[_selBuild];
-                CustomPopupDropdown.ShowLastRect(
-                    NoBuildDropdowns.CreateBuildConfirmPopup(
-                        selectedProfile, s,
-                        () => BuildExecutor.Build(selectedProfile),
-                        (option, serial) =>
-                            BuildExecutor
-                                .BuildAndRunWithOptions(
-                                    selectedProfile, option,
-                                    serial
-                                )
-                        )
-                    );
+                NoBuildBuildUI.ShowConfirmation(GUILayoutUtility.GetLastRect(), s.buildProfiles[_selBuild], s);
             }
             GUI.backgroundColor = previousBuildBackground;
             if (s.buildProfiles[_selBuild].buildConfiguration.platform == BuildTarget.Android)
             {
                 Color previousRunBackground = GUI.backgroundColor;
                 GUI.backgroundColor = EditorGuiColors.RunBlue;
+                using (new EditorGUI.DisabledScope(!preflight.CanBuild || profile.buildConfiguration.androidExportProject || NoBuildDeviceOperations.IsBusy))
                 if (GUILayout.Button(
                         PlatformIconUtility.BuildAndRunActionIcon,
                         GUILayout.Width(112)
                     ))
                 {
                     _so.ApplyModifiedProperties();
-                    CustomPopupDropdown.ShowLastRect(
-                        NoBuildDropdowns.CreateDeviceSelectPopup(
-                            (option, serial) =>
-                            {
-                                BuildExecutor
-                                    .BuildAndRunWithOptions(
-                                        s.buildProfiles[
-                                            _selBuild],
-                                        option, serial);
-                            }
-                        )
-                    );
+                    NoBuildBuildUI.ShowConfirmation(GUILayoutUtility.GetLastRect(), s.buildProfiles[_selBuild], s);
                 }
                 GUI.backgroundColor = previousRunBackground;
             }
@@ -1318,22 +1523,27 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 if (EditorUtility.DisplayDialog("Delete", $"Delete '{nameP.stringValue}'?", "Delete", "Cancel"))
                 {
                     _buildProfiles.DeleteArrayElementAtIndex(_selBuild); _so.ApplyModifiedProperties();
-                    _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1); return;
+                    _selBuild = Mathf.Min(_selBuild, _buildProfiles.arraySize - 1);
+                    _expandedEntryIndex = _selBuild;
+                    SaveBrowserState();
+                    GUI.backgroundColor = previousDeleteBackground;
+                    GUIUtility.ExitGUI();
+                    return;
                 }
             }
             GUI.backgroundColor = previousDeleteBackground;
             EditorGUILayout.EndHorizontal();
             GUILayout.Space(4);
 
+            NoBuildBuildUI.DrawReadiness(profile, s, preflight);
+
             nameP.stringValue = LblTxt("Name", nameP.stringValue);
 
             string[] ssN = s.sceneSets.Select(x => x.setName).ToArray();
-            ssP.intValue = LPopup("Scene Set", ssP.intValue + 1,
-                new[] { "(None)" }.Concat(ssN).ToArray()) - 1;
+            DrawReferencePopup("Scene Set", ssP, ssN, 0);
 
             string[] dsN = s.scriptDefinitionSets.Select(x => x.setName).ToArray();
-            dsP.intValue = LPopup("Define Set", dsP.intValue + 1,
-                new[] { "(None)" }.Concat(dsN).ToArray()) - 1;
+            DrawReferencePopup("Define Set", dsP, dsN, 1);
             GUILayout.Space(6);
 
             // Build folder with [?]
@@ -1344,10 +1554,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
             // Build name with [?]
             LblTxtHint("Build Name", nameTplP);
-            string nPrev = BuildNameResolver.Resolve(nameTplP.stringValue,
+            string nPrev = BuildNameResolver.ResolveFileName(nameTplP.stringValue,
                 _selBuild < s.buildProfiles.Count ? s.buildProfiles[_selBuild] : null, s);
             EditorGUILayout.LabelField("", "\u2192 " + nPrev, EditorStyles.miniLabel);
-            EditorGUILayout.LabelField("", "Full: " + fPrev + "/" + nPrev, EditorStyles.miniLabel);
+            EditorGUILayout.SelectableLabel("Full: " + preflight.OutputPath, EditorStyles.wordWrappedMiniLabel, GUILayout.Height(32));
             GUILayout.Space(8);
 
             // ── Build Configuration (two-column, one per line) ──
@@ -1402,6 +1612,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             LblProp("Stripping Level", cfgP.FindPropertyRelative("strippingLevel"));
             LblTxt("Bundle Identifier", cfgP.FindPropertyRelative("bundleIdentifierOverride"));
             LblTxt("Product Name", cfgP.FindPropertyRelative("productNameOverride"));
+            EditorGUILayout.LabelField("Blank overrides use Player Settings.", EditorStyles.miniLabel);
 
             // Windows
             if (selPlat == BuildTarget.StandaloneWindows || selPlat == BuildTarget.StandaloneWindows64)
@@ -1515,6 +1726,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     _selFlag = Mathf.Min(
                         _selFlag,
                         _flagDefs.arraySize - 1);
+                    _expandedEntryIndex = _selFlag;
+                    SaveBrowserState();
+                    GUI.backgroundColor = previousDeleteBackground;
+                    GUIUtility.ExitGUI();
                     return;
                 }
             }
@@ -1526,6 +1741,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             nameP.stringValue = LblTxt("Name", nameP.stringValue);
             var idP = fp.FindPropertyRelative("id");
             idP.stringValue = LblTxt("Id", idP.stringValue);
+            if (string.IsNullOrWhiteSpace(idP.stringValue)
+                || s.flagDefinitions.Where((flag, index) => index != _selFlag)
+                    .Any(flag => string.Equals(flag.id, idP.stringValue, StringComparison.OrdinalIgnoreCase)))
+                EditorGUILayout.HelpBox("Use a non-empty, unique flag ID for named tokens.", MessageType.Error);
             GUILayout.Space(4);
 
             // Type button group
@@ -1630,306 +1849,221 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         private void DrawDevicePanel()
         {
+            _pvScroll = EditorGUILayout.BeginScrollView(_pvScroll);
             EditorGuiLayout.DrawHeaderBox(
                 "Devices",
                 "Manage Android Debug Bridge connections and install builds."
             );
             string adbPath = AdbUtility.AdbPath;
-            bool adbFound = AdbUtility.IsAvailable;
+            AdbDeviceCache.EnsureFresh();
 
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
-            EditorGUILayout.LabelField("Environment", EditorGuiStyles.SectionHeader);
+            EditorGUILayout.LabelField("Environment", EditorStyles.boldLabel);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("ADB:", GUILayout.Width(40));
-            Color previousAdbColor = GUI.color;
-            GUI.color = adbFound
-                ? EditorGuiColors.ActiveGreen
-                : EditorGuiColors.RemoveRed;
             EditorGUILayout.LabelField(
-                adbFound ? "Found" : "Not found",
-                EditorStyles.boldLabel, GUILayout.Width(65));
-            GUI.color = previousAdbColor;
-            EditorGUILayout.LabelField(adbPath ?? "(unknown)",
-                EditorStyles.miniLabel);
+                AdbDeviceCache.IsRefreshing ? "Checking…" : !string.IsNullOrEmpty(AdbDeviceCache.Error) ? "Unavailable" : "Ready",
+                EditorStyles.boldLabel, GUILayout.Width(85));
+            EditorGUILayout.LabelField(new GUIContent(adbPath ?? "(unknown)", adbPath),
+                EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.EndHorizontal();
-
-            string pkg = "";
-#if UNITY_ANDROID
-            pkg = PlayerSettings.GetApplicationIdentifier(
-                UnityEditor.Build.NamedBuildTarget.Android);
-#endif
+            if (!string.IsNullOrEmpty(AdbDeviceCache.Error))
+                EditorGUILayout.HelpBox(AdbDeviceCache.Error + "\nCheck the tool path below or Unity Preferences → External Tools.", MessageType.Error);
+            _showToolPaths = EditorGUILayout.Foldout(_showToolPaths, "Tool Paths (local to this machine)", true);
+            if (_showToolPaths)
+            {
+                string adbOverride = DrawToolPath("ADB", AdbUtility.CustomAdbPath);
+                if (adbOverride != AdbUtility.CustomAdbPath) AdbUtility.CustomAdbPath = adbOverride;
+                AabUtility.CustomJavaPath = DrawToolPath("Java", AabUtility.CustomJavaPath);
+                AabUtility.CustomBundletoolPath = DrawToolPath("bundletool.jar", AabUtility.CustomBundletoolPath, "jar");
+                EditorGUILayout.HelpBox("Blank paths use automatic discovery. AAB operations download bundletool into Library/NoBuild if it is missing.", MessageType.None);
+            }
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Package:",
-                GUILayout.Width(60));
-            EditorGUILayout.LabelField(
-                string.IsNullOrEmpty(pkg) ? "(not set)"
-                    : pkg,
-                EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Launch Package", GUILayout.Width(LabelW));
+            LaunchPackage = EditorGUILayout.TextField(LaunchPackage);
+            if (GUILayout.Button("Use Project", GUILayout.Width(90))) LaunchPackage = AdbUtility.GetPackageName();
             EditorGUILayout.EndHorizontal();
+            if (!AdbUtility.IsValidPackageName(LaunchPackage))
+                EditorGUILayout.HelpBox("Use a valid Android package, such as com.company.game, to enable Launch.", MessageType.Warning);
             EditorGUILayout.EndVertical();
             GUILayout.Space(4);
 
+            if (NoBuildDeviceOperations.IsBusy)
+            {
+                EditorGUILayout.HelpBox(NoBuildDeviceOperations.Status, MessageType.Info);
+                if (GUILayout.Button("Cancel Device Operation")) NoBuildDeviceOperations.Cancel();
+            }
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
-            EditorGUILayout.LabelField("Operations", EditorGuiStyles.SectionHeader);
+            EditorGUILayout.LabelField("Operations", EditorStyles.boldLabel);
             EditorGUILayout.BeginHorizontal();
-            Color previousRefreshBackground = GUI.backgroundColor;
-            GUI.backgroundColor = EditorGuiColors.RunBlue;
+            using (new EditorGUI.DisabledScope(AdbDeviceCache.IsRefreshing))
             if (GUILayout.Button("\u21BB Refresh Devices",
                     GUILayout.Height(26)))
             {
                 AdbUtility.RefreshAvailability();
                 RefreshDevices();
             }
-            GUI.backgroundColor = previousRefreshBackground;
-
-            GUILayout.Space(8);
-            Color previousApkBackground = GUI.backgroundColor;
-            GUI.backgroundColor = EditorGuiColors.BuildGreen;
-            if (GUILayout.Button("Install APK...",
-                    GUILayout.Height(26)))
+            using (new EditorGUI.DisabledScope(NoBuildDeviceOperations.IsBusy))
             {
-                string picked = EditorUtility.OpenFilePanel(
-                    "Select APK", "", "apk");
-                if (!string.IsNullOrEmpty(picked))
-                    _installApkPath = picked;
+                if (GUILayout.Button("Select APK…", GUILayout.Height(26))) SelectArtifact(false);
+                if (GUILayout.Button("Select AAB…", GUILayout.Height(26))) SelectArtifact(true);
             }
-            GUI.backgroundColor = previousApkBackground;
-
-            GUILayout.Space(8);
-            Color previousAabBackground = GUI.backgroundColor;
-            GUI.backgroundColor = EditorGuiColors.WarningAmber;
-            if (GUILayout.Button("Install AAB...",
-                    GUILayout.Height(26)))
-            {
-                string picked = EditorUtility.OpenFilePanel(
-                    "Select AAB", "", "aab");
-                if (!string.IsNullOrEmpty(picked))
-                    _installAabPath = picked;
-            }
-            GUI.backgroundColor = previousAabBackground;
             EditorGUILayout.EndHorizontal();
+            DrawSelectedArtifact(false);
+            DrawSelectedArtifact(true);
             EditorGUILayout.EndVertical();
             GUILayout.Space(6);
 
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
-            EditorGUILayout.LabelField(
-                "Connected Devices",
-                EditorGuiStyles.SectionHeader
-            );
-
+            EditorGUILayout.LabelField("Connected Devices", EditorStyles.boldLabel);
+            if (AdbDeviceCache.HasChecked)
+                EditorGUILayout.LabelField("Last checked " + Math.Max(0, (int)(EditorApplication.timeSinceStartup - AdbDeviceCache.LastRefresh)) + "s ago", EditorStyles.miniLabel);
             var devices = GetCachedDevices();
-
             if (devices.Count == 0)
             {
-                EditorGUILayout.HelpBox(
-                    "No devices connected.\n" +
-                    "Connect a device via USB and enable USB debugging, " +
-                    "or start an emulator.",
-                    MessageType.Info);
+                EditorGUILayout.HelpBox(AdbDeviceCache.IsRefreshing ? "Refreshing devices…"
+                    : "No devices connected. Connect via USB and enable USB debugging, or start an emulator.", MessageType.Info);
             }
             else
             {
                 for (int i = 0; i < devices.Count; i++)
                 {
-                    var d = devices[i];
-                    DrawDeviceRow(d, pkg, i);
-                    if (i < devices.Count - 1)
-                        GUILayout.Space(2);
+                    DrawDeviceRow(devices[i], LaunchPackage, i);
                 }
             }
             EditorGUILayout.EndVertical();
-
             GUILayout.Space(6);
-
             EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
-            EditorGUILayout.LabelField(
-                "Wireless ADB",
-                EditorGuiStyles.SectionHeader
-            );
-
+            EditorGUILayout.LabelField("Wireless ADB", EditorStyles.boldLabel);
             EditorGUILayout.BeginHorizontal();
-            Color previousScanBackground = GUI.backgroundColor;
-            GUI.backgroundColor = EditorGuiColors.RunBlue;
-            if (GUILayout.Button(
-                    "\uD83D\uDD0D Scan Network",
-                    GUILayout.Height(26)))
-            {
-                EditorUtility.DisplayProgressBar(
-                    "NoBuild",
-                    "Scanning for wireless devices...",
-                    0.5f);
-                _wirelessDevices =
-                    AdbUtility.ScanWirelessDevices();
-                EditorUtility.ClearProgressBar();
-                if (_wirelessDevices.Count == 0)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "No wireless devices found.\n" +
-                        "Ensure devices have wireless " +
-                        "debugging enabled.",
-                        "OK");
-                }
-            }
-            GUI.backgroundColor = previousScanBackground;
-            GUILayout.Space(8);
-            if (_wirelessDevices != null
-                && _wirelessDevices.Count > 0)
-            {
-                _pairingCode =
-                    EditorGUILayout.TextField(
-                        "Pair Code:", _pairingCode,
-                        GUILayout.Width(140));
-            }
+            using (new EditorGUI.DisabledScope(NoBuildDeviceOperations.IsBusy))
+                if (GUILayout.Button("Scan Network", GUILayout.Height(26))) ScanWirelessDevices();
+            _pairingCode = EditorGUILayout.TextField("Pair Code", _pairingCode, GUILayout.MinWidth(160));
             EditorGUILayout.EndHorizontal();
-
-            if (_wirelessDevices == null
-                || _wirelessDevices.Count == 0)
-            {
-                EditorGUILayout.LabelField(
-                    "  (no devices discovered yet)",
-                    EditorStyles.miniLabel);
-            }
+            if (_wirelessDevices == null || _wirelessDevices.Count == 0)
+                EditorGUILayout.LabelField("Enable Wireless debugging on the device, then scan. Pairing uses the six-digit device code.", EditorStyles.wordWrappedMiniLabel);
             else
             {
-                for (int i = 0;
-                    i < _wirelessDevices.Count; i++)
-                {
-                    var w = _wirelessDevices[i];
-                    DrawWirelessRow(w, i);
-                }
+                for (int i = 0; i < _wirelessDevices.Count; i++) DrawWirelessRow(_wirelessDevices[i], i);
             }
             EditorGUILayout.EndVertical();
-
             GUILayout.Space(6);
-
-            string lastSerial = EditorPrefs.GetString(
-                "NoBuild_LastAdbDevice", "");
+            string lastSerial = EditorPrefs.GetString(NoBuildDeviceOperations.RememberedDeviceKey, "");
             if (!string.IsNullOrEmpty(lastSerial))
             {
                 EditorGUILayout.BeginVertical(EditorGuiStyles.Card);
-                EditorGUILayout.LabelField(
-                    "Remembered Device",
-                    EditorGuiStyles.SectionHeader
-                );
+                EditorGUILayout.LabelField("Remembered Device", EditorStyles.boldLabel);
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(lastSerial,
-                    EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(lastSerial, EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
-                Color previousForgetBackground = GUI.backgroundColor;
-                GUI.backgroundColor = EditorGuiColors.RemoveRed;
-                if (GUILayout.Button("Forget",
-                        GUILayout.Width(65)))
-                {
-                    EditorPrefs.DeleteKey(
-                        "NoBuild_LastAdbDevice");
-                }
-                GUI.backgroundColor = previousForgetBackground;
+                if (GUILayout.Button("Forget", GUILayout.Width(65))) EditorPrefs.DeleteKey(NoBuildDeviceOperations.RememberedDeviceKey);
                 EditorGUILayout.EndHorizontal();
                 EditorGUILayout.EndVertical();
             }
+            EditorGUILayout.EndScrollView();
+        }
+
+        private static string DrawToolPath(string label, string value, string extension = "")
+        {
+            EditorGUILayout.BeginHorizontal();
+            string path = EditorGUILayout.TextField(label, value);
+            if (GUILayout.Button("Browse…", GUILayout.Width(65)))
+            {
+                string selected = EditorUtility.OpenFilePanel("Select " + label, "", extension);
+                if (!string.IsNullOrEmpty(selected)) path = selected;
+            }
+            EditorGUILayout.EndHorizontal();
+            return path;
+        }
+
+        private void SelectArtifact(bool aab)
+        {
+            string selected = EditorUtility.OpenFilePanel("Select " + (aab ? "AAB" : "APK"), "", aab ? "aab" : "apk");
+            if (string.IsNullOrEmpty(selected)) return;
+            if (aab) { _installAabPath = selected; AabPackage = ""; }
+            else { _installApkPath = selected; ApkPackage = ""; }
+            InspectArtifact(selected, aab);
+        }
+
+        private void InspectArtifact(string path, bool aab)
+        {
+            NoBuildDeviceOperations.InspectArtifact(path, aab, package =>
+            {
+                if (aab) AabPackage = package; else ApkPackage = package;
+                LaunchPackage = package;
+            });
+        }
+
+        private void DrawSelectedArtifact(bool aab)
+        {
+            string path = aab ? _installAabPath : _installApkPath;
+            if (string.IsNullOrEmpty(path)) return;
+            string package = aab ? AabPackage : ApkPackage;
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent((aab ? "AAB: " : "APK: ") + System.IO.Path.GetFileName(path), path), EditorStyles.boldLabel);
+            using (new EditorGUI.DisabledScope(NoBuildDeviceOperations.IsBusy))
+            {
+                if (string.IsNullOrEmpty(package) && GUILayout.Button("Read Package", GUILayout.Width(95))) InspectArtifact(path, aab);
+                if (GUILayout.Button("Clear", GUILayout.Width(48)))
+                {
+                    if (aab) { _installAabPath = ""; AabPackage = ""; }
+                    else { _installApkPath = ""; ApkPackage = ""; }
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.LabelField(string.IsNullOrEmpty(package) ? "Package not verified; installation is disabled." : package, EditorStyles.miniLabel);
+        }
+
+        private void ScanWirelessDevices()
+        {
+            NoBuildDeviceOperations.Start("Scanning wireless devices…", async token =>
+            {
+                _wirelessDevices = await AdbUtility.ScanWirelessDevicesAsync(token);
+                NoBuildEditorState.SetResult($"Discovered {_wirelessDevices.Count} wireless device(s).");
+            });
         }
 
         private void DrawDeviceRow(
             AdbDeviceInfo device, string packageName, int index)
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-
-            // State dot
             bool isOnline = device.State == "device";
-            GUI.color = isOnline ? Color.green : Color.yellow;
-            GUILayout.Label("\u25CF", GUILayout.Width(16));
-            GUI.color = Color.white;
-
-            // Model + Serial
             EditorGUILayout.BeginVertical();
-            EditorGUILayout.LabelField(device.Model,
-                EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(device.Serial,
-                EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(device.Model, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(device.Serial, EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(device.State, EditorStyles.miniLabel);
             EditorGUILayout.EndVertical();
-
             GUILayout.FlexibleSpace();
-
-            // Launch button
-            GUI.enabled = isOnline && !string.IsNullOrEmpty(
-                packageName);
-            GUI.backgroundColor =
-                new Color(0.3f, 0.6f, 0.3f);
-            if (GUILayout.Button("Launch", GUILayout.Width(65),
-                    GUILayout.Height(24)))
+            using (new EditorGUI.DisabledScope(!isOnline || !AdbUtility.IsValidPackageName(packageName) || NoBuildDeviceOperations.IsBusy))
             {
-                AdbUtility.LaunchApp(device.Serial,
-                    packageName);
-                EditorPrefs.SetString(
-                    "NoBuild_LastAdbDevice",
-                    device.Serial);
+                if (GUILayout.Button("Launch", GUILayout.Width(65), GUILayout.Height(24)))
+                    NoBuildDeviceOperations.Launch(device.Serial, packageName);
             }
-            GUI.backgroundColor = Color.white;
-            GUI.enabled = true;
-
-            // Install APK button (if APK path is set)
-            if (!string.IsNullOrEmpty(_installApkPath)
-                && isOnline)
+            if (!string.IsNullOrEmpty(_installApkPath))
             {
-                GUI.backgroundColor =
-                    new Color(0.45f, 0.45f, 0.9f);
-                if (GUILayout.Button(
-                        "Install",
-                        GUILayout.Width(60),
-                        GUILayout.Height(24)))
+                using (new EditorGUI.DisabledScope(!isOnline || string.IsNullOrEmpty(ApkPackage) || NoBuildDeviceOperations.IsBusy))
                 {
-                    string apkFile = System.IO.Path.GetFileName(
-                        _installApkPath);
-                    if (EditorUtility.DisplayDialog(
-                            "Install APK",
-                            $"Install {apkFile} to " +
-                            $"{device.Model}?",
-                            "Install", "Cancel"))
+                    if (GUILayout.Button("Install APK", GUILayout.Width(80), GUILayout.Height(24)))
                     {
-                        EditorUtility.DisplayProgressBar(
-                            "NoBuild",
-                            $"Installing {apkFile}...",
-                            0.5f);
-                        bool ok =
-                            DeviceInstaller
-                                .InstallWithRecovery(
-                                    device.Serial,
-                                    device.DisplayName,
-                                    packageName,
-                                    () => AdbUtility
-                                        .InstallApk(
-                                            _installApkPath,
-                                            device.Serial));
-                        EditorUtility.ClearProgressBar();
-                        if (ok)
-                        {
-                            EditorPrefs.SetString(
-                                "NoBuild_LastAdbDevice",
-                                device.Serial);
-                        }
+                        string file = System.IO.Path.GetFileName(_installApkPath);
+                        if (EditorUtility.DisplayDialog("Install APK", $"Install {file} to {device.DisplayName}?\n\nPackage: {ApkPackage}", "Install", "Cancel"))
+                            NoBuildDeviceOperations.Install(_installApkPath, ApkPackage, device.Serial, device.DisplayName, false);
                     }
                 }
-                GUI.backgroundColor = Color.white;
             }
-
-            // Install AAB button (if AAB path is set)
-            if (!string.IsNullOrEmpty(_installAabPath)
-                && isOnline)
+            if (!string.IsNullOrEmpty(_installAabPath))
             {
-                GUI.backgroundColor =
-                    new Color(0.7f, 0.45f, 0.15f);
-                if (GUILayout.Button(
-                        "Install AAB",
-                        GUILayout.Width(75),
-                        GUILayout.Height(24)))
+                using (new EditorGUI.DisabledScope(!isOnline || string.IsNullOrEmpty(AabPackage) || NoBuildDeviceOperations.IsBusy))
                 {
-                    InstallAabToDevice(device);
+                    if (GUILayout.Button("Install AAB", GUILayout.Width(80), GUILayout.Height(24)))
+                        InstallAabToDevice(device);
                 }
-                GUI.backgroundColor = Color.white;
             }
-
             EditorGUILayout.EndHorizontal();
+            if (!isOnline)
+                EditorGUILayout.HelpBox(device.State == "unauthorized"
+                    ? "Unlock the device and accept the USB debugging authorization prompt, then refresh."
+                    : "Device is offline. Reconnect USB or wireless debugging, then refresh.", MessageType.Warning);
         }
 
 
@@ -1941,73 +2075,20 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     "Install AAB",
                     $"Install {aabFile} to " +
                     $"{device.Model}?\n\n" +
-                    "The AAB will be converted to APKS first.",
+                    "The AAB will be converted to APKS first.\nPackage: " + AabPackage,
                     "Install", "Cancel"))
             {
                 return;
             }
 
-            string tempApksPath = null;
-            try
-            {
-                EditorUtility.DisplayProgressBar(
-                    "NoBuild",
-                    $"Converting {aabFile}...",
-                    0.3f);
-                tempApksPath =
-                    AabUtility.BuildApks(
-                        _installAabPath);
-
-                EditorUtility.DisplayProgressBar(
-                    "NoBuild",
-                    $"Installing to {device.Model}...",
-                    0.6f);
-                bool ok =
-                    DeviceInstaller.InstallWithRecovery(
-                        device.Serial,
-                        device.DisplayName,
-                        AdbUtility.GetPackageName(),
-                        () => AabUtility.InstallApks(
-                            tempApksPath,
-                            device.Serial));
-                EditorUtility.ClearProgressBar();
-
-                if (ok)
-                {
-                    EditorPrefs.SetString(
-                        "NoBuild_LastAdbDevice",
-                        device.Serial);
-                }
-            }
-            catch (Exception ex)
-            {
-                EditorUtility.ClearProgressBar();
-                EditorUtility.DisplayDialog(
-                    "NoBuild — Install Failed",
-                    $"AAB install failed.\n\n" +
-                    $"{ex.Message}",
-                    "OK");
-            }
-            finally
-            {
-                if (tempApksPath != null)
-                    AabUtility.Cleanup(tempApksPath);
-            }
+            NoBuildDeviceOperations.Install(_installAabPath, AabPackage, device.Serial, device.DisplayName, true);
         }
 
         private void DrawWirelessRow(
             WirelessDeviceInfo device, int index)
         {
-            EditorGUILayout.BeginHorizontal(
-                EditorStyles.helpBox);
-
-            // Status dot
-            GUI.color = device.IsConnected
-                ? Color.green : Color.gray;
-            GUILayout.Label("\u25CF", GUILayout.Width(16));
-            GUI.color = Color.white;
-
-            // Device info
+            device.IsConnected = AdbUtility.IsWirelessConnected(device, AdbDeviceCache.Devices);
+            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             EditorGUILayout.BeginVertical();
             EditorGUILayout.LabelField(
                 device.IsConnected
@@ -2018,128 +2099,59 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 device.Endpoint,
                 EditorStyles.miniLabel);
             EditorGUILayout.EndVertical();
-
             GUILayout.FlexibleSpace();
-
-            if (device.IsConnected)
+            using (new EditorGUI.DisabledScope(NoBuildDeviceOperations.IsBusy))
             {
-                GUI.backgroundColor =
-                    new Color(0.9f, 0.3f, 0.3f);
-                if (GUILayout.Button("Disconnect",
-                        GUILayout.Width(85),
-                        GUILayout.Height(22)))
+                if (device.IsConnected)
                 {
-                    AdbUtility.DisconnectWireless(
-                        device.IpAddress,
-                        device.Port);
-                    RefreshDevices();
-                    _wirelessDevices =
-                        AdbUtility.ScanWirelessDevices();
+                    if (GUILayout.Button("Disconnect", GUILayout.Width(85), GUILayout.Height(22)))
+                        RunWirelessCommand($"disconnect {device.IpAddress}:{device.Port}", "Disconnecting wireless device…");
                 }
-                GUI.backgroundColor = Color.white;
-            }
-            else
-            {
-                GUI.backgroundColor =
-                    new Color(0.3f, 0.6f, 0.3f);
-                EditorGUI.BeginDisabledGroup(device.Port <= 0);
-                if (GUILayout.Button("Connect",
-                        GUILayout.Width(70),
-                        GUILayout.Height(22)))
+                else
                 {
-                    bool ok = AdbUtility
-                        .ConnectWireless(
-                            device.IpAddress,
-                            device.Port);
-                    if (ok)
+                    using (new EditorGUI.DisabledScope(device.Port <= 0))
                     {
-                        RefreshDevices();
-                        _wirelessDevices =
-                            AdbUtility
-                                .ScanWirelessDevices();
+                        if (GUILayout.Button("Connect", GUILayout.Width(70), GUILayout.Height(22)))
+                            RunWirelessCommand($"connect {device.IpAddress}:{device.Port}", "Connecting wireless device…");
                     }
-                    else
+                    if (device.PairingPort > 0)
                     {
-                        EditorUtility.DisplayDialog(
-                            "NoBuild",
-                            "Connection failed.\n" +
-                            "Try using the pairing " +
-                            "code if required.",
-                            "OK");
-                    }
-                }
-                EditorGUI.EndDisabledGroup();
-                GUI.backgroundColor = Color.white;
-
-                // Pair button
-                if (!string.IsNullOrEmpty(
-                        _pairingCode)
-                    && device.PairingPort > 0)
-                {
-                    GUI.backgroundColor =
-                        new Color(0.7f, 0.6f, 0.2f);
-                    if (GUILayout.Button("Pair",
-                            GUILayout.Width(50),
-                            GUILayout.Height(22)))
-                    {
-                        bool paired =
-                            AdbUtility.PairDevice(
-                                device.IpAddress,
-                                device.PairingPort,
-                                _pairingCode);
-                        if (paired)
+                        using (new EditorGUI.DisabledScope(_pairingCode.Length != 6 || !_pairingCode.All(character => character >= '0' && character <= '9')))
                         {
-                            // After pairing, connect when the
-                            // device advertises a connect endpoint.
-                            if (device.Port > 0)
+                            if (GUILayout.Button("Pair", GUILayout.Width(50), GUILayout.Height(22)))
                             {
-                                AdbUtility.ConnectWireless(
-                                    device.IpAddress,
-                                    device.Port);
+                                RunWirelessCommand($"pair {device.IpAddress}:{device.PairingPort} {_pairingCode}", "Pairing wireless device…");
+                                _pairingCode = "";
                             }
-
-                            RefreshDevices();
-                            _wirelessDevices =
-                                AdbUtility
-                                    .ScanWirelessDevices
-                                    ();
-                        }
-                        else
-                        {
-                            EditorUtility
-                                .DisplayDialog(
-                                    "NoBuild",
-                                    "Pairing failed. " +
-                                    "Check the code.",
-                                    "OK");
                         }
                     }
-                    GUI.backgroundColor =
-                        Color.white;
                 }
             }
-
             EditorGUILayout.EndHorizontal();
         }
 
         private List<AdbDeviceInfo> GetCachedDevices()
         {
-            if (_cachedDevices == null
-                || (EditorApplication.timeSinceStartup
-                    - _lastDeviceRefreshTime)
-                > DeviceRefreshInterval)
-            {
-                RefreshDevices();
-            }
-            return _cachedDevices
-                ?? (_cachedDevices = new List<AdbDeviceInfo>());
+            AdbDeviceCache.EnsureFresh();
+            return AdbDeviceCache.Devices;
         }
 
         private void RefreshDevices()
         {
-            _cachedDevices = AdbUtility.GetDevices();
-            _lastDeviceRefreshTime =
-                EditorApplication.timeSinceStartup;
+            AdbDeviceCache.Refresh();
+        }
+
+        private void RunWirelessCommand(string command, string status)
+        {
+            NoBuildDeviceOperations.Start(status, async token =>
+            {
+                ProcessExecutionResult result = await AdbUtility.RunAsync(command, cancellationToken: token);
+                if (result.TimedOut || result.ExitCode != 0 || result.CombinedOutput.IndexOf("failed", StringComparison.OrdinalIgnoreCase) >= 0
+                    || result.CombinedOutput.IndexOf("cannot", StringComparison.OrdinalIgnoreCase) >= 0)
+                    throw new InvalidOperationException(result.CombinedOutput);
+                NoBuildEditorState.SetResult(result.CombinedOutput.Trim());
+                _wirelessDevices = await AdbUtility.ScanWirelessDevicesAsync(token);
+            });
         }
 
         // ══════════════════════════════════════════════════
@@ -2210,11 +2222,17 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.EndHorizontal();
         }
 
-        private static string LblTxt(string label, string val)
+        private string LblTxt(string label, string val)
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            if (label == "Name") GUI.SetNextControlName("NoBuild.EntryName");
             string result = EditorGUILayout.TextField(val);
+            if (label == "Name" && _focusName && Event.current.type == EventType.Repaint)
+            {
+                EditorGUI.FocusTextInControl("NoBuild.EntryName");
+                _focusName = false;
+            }
             EditorGUILayout.EndHorizontal();
             return result;
         }
@@ -2224,6 +2242,33 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
             EditorGUILayout.PropertyField(prop, GUIContent.none);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawReferencePopup(string label, SerializedProperty property, string[] names, int tab)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
+            bool missing = property.intValue < -1 || property.intValue >= names.Length;
+            string[] choices = new[] { "(None)" }.Concat(names).ToArray();
+            if (missing) choices = choices.Concat(new[] { "(Missing reference)" }).ToArray();
+            int oldChoice = missing ? choices.Length - 1 : property.intValue + 1;
+            int choice = EditorGUILayout.Popup(oldChoice, choices);
+            if (choice != oldChoice) property.intValue = choice - 1;
+            using (new EditorGUI.DisabledScope(property.intValue < 0 || property.intValue >= names.Length))
+            {
+                if (GUILayout.Button("Edit…", GUILayout.Width(52)))
+                {
+                    int index = property.intValue;
+                    _so.ApplyModifiedProperties();
+                    _tab = tab;
+                    if (tab == 0) _selSet = index; else _selDef = index;
+                    RevealSelection();
+                    EditorGUILayout.EndHorizontal();
+                    GUIUtility.ExitGUI();
+                    return;
+                }
+            }
             EditorGUILayout.EndHorizontal();
         }
 
@@ -2241,7 +2286,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(label, GUILayout.Width(LabelW));
             prop.stringValue = EditorGUILayout.TextField(prop.stringValue);
-            if (GUILayout.Button("?", GUILayout.Width(22)))
+            if (GUILayout.Button("Insert Token…", GUILayout.Width(95)))
             {
                 Rect btnRect =
                     GUILayoutUtility.GetLastRect();
@@ -2250,7 +2295,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     {
                         prop.stringValue += key;
                         prop.serializedObject.ApplyModifiedProperties();
-                    });
+                    }, (NoBuildSettings)prop.serializedObject.targetObject);
             }
             EditorGUILayout.EndHorizontal();
         }
@@ -2339,6 +2384,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings settings,
             int removedIndex)
         {
+            NoBuildEditorState.RemapContexts(settings, removedIndex, insertion: false, defines: false);
             foreach (BuildProfile profile in settings.buildProfiles)
             {
                 if (profile.sceneSetIndex == removedIndex)
@@ -2356,10 +2402,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings settings,
             int insertionIndex)
         {
-            if (settings.activeSceneSetIndex >= insertionIndex)
-            {
-                settings.activeSceneSetIndex++;
-            }
+            NoBuildEditorState.RemapContexts(settings, insertionIndex, insertion: true, defines: false);
 
             foreach (BuildProfile profile in settings.buildProfiles)
             {
@@ -2374,6 +2417,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings settings,
             int removedIndex)
         {
+            NoBuildEditorState.RemapContexts(settings, removedIndex, insertion: false, defines: true);
             foreach (BuildProfile profile in settings.buildProfiles)
             {
                 profile.scriptDefinitionSetIndex =
@@ -2399,11 +2443,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             NoBuildSettings settings,
             int insertionIndex)
         {
-            if (settings.activeScriptDefinitionSetIndex
-                >= insertionIndex)
-            {
-                settings.activeScriptDefinitionSetIndex++;
-            }
+            NoBuildEditorState.RemapContexts(settings, insertionIndex, insertion: true, defines: true);
 
             foreach (BuildProfile profile in settings.buildProfiles)
             {
@@ -2461,8 +2501,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             _defineSets = _so.FindProperty("scriptDefinitionSets");
             _buildProfiles = _so.FindProperty("buildProfiles");
             _flagDefs = _so.FindProperty("flagDefinitions");
-            _activeScene = _so.FindProperty("activeSceneSetIndex");
-            _activeDefine = _so.FindProperty("activeScriptDefinitionSetIndex");
             _toolbarLabelTemplate = _so.FindProperty(
                 "toolbarLabelTemplate");
 

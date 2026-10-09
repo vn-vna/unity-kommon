@@ -26,6 +26,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         /// </summary>
         public static bool SwitchToSet(SceneSet set)
         {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
+            {
+                FireFailed("Wait until Unity is idle and outside Play Mode before opening scenes.");
+                return false;
+            }
             if (set == null)
             {
                 FireFailed("Scene set is null.");
@@ -102,6 +107,11 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             SceneCombination combination,
             SceneSet parentSet)
         {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
+            {
+                FireFailed("Wait until Unity is idle and outside Play Mode before opening scenes.");
+                return;
+            }
             if (combination == null) { FireFailed("Combination is null."); return; }
             if (parentSet == null) { FireFailed("Parent SceneSet is null."); return; }
 
@@ -126,6 +136,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                         valid[i].ScenePath, OpenSceneMode.Additive);
 
                 NotifyCombinationSwitched(combination);
+                NoBuildEditorState.SetResult($"Opened combination: {combination.DisplayName}");
             }
             catch (Exception ex)
             {
@@ -163,6 +174,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         private static void FireFailed(string message)
         {
             Debug.LogError($"[NoBuild] {message}");
+            NoBuildEditorState.SetResult(message, failed: true);
             try
             {
                 SwitchFailed?.Invoke(message);
