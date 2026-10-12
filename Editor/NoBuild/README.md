@@ -17,6 +17,8 @@ Search the toolbar popup, then use **Up/Down** to select and **Enter** to execut
 
 Scene sets use the existing `NoBuild/Switch To Scene Set 1…12` bindings. Combinations use fixed slots `1…9`: disabling or invalidating slot 1 does not move slot 2 onto binding 1. The settings UI and tooltips display the actual bindings from Unity's Shortcut Manager.
 
+**Play** belongs to the scene-combination rows under **Open Scenes**. It opens only that combination's scenes, makes the first one active, and then enters Play Mode. Cancelling the modified-scene save prompt also cancels Play. Scene-set rows only open/select the full set.
+
 ## Builds
 
 Toolbar and settings actions open the same confirmation with target, backend, mode, artifact, scenes, define changes, and the exact output path including its extension.

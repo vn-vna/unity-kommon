@@ -133,24 +133,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                             }
                         }
 
-                        EditorGUI.BeginDisabledGroup(
-                            EditorApplication
-                                .isPlayingOrWillChangePlaymode);
-                        if (GUILayout.Button(
-                                new GUIContent(
-                                    "▶",
-                                    $"Play from scene set "
-                                    + $"'{set.setName}'"),
-                                GUILayout.Width(24),
-                                GUILayout.Height(20)))
-                        {
-                            if (NoBuildEditorState.OpenSet(_s, i, play: true))
-                            {
-                                editorWindow.Close();
-                            }
-                        }
-                        EditorGUI.EndDisabledGroup();
-
                         EditorGUILayout.EndHorizontal();
                     }
 
@@ -214,6 +196,14 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                             GUILayout.Label(EditorGuiStrings.Truncate(label, 38), EditorStyles.label);
                         }
 
+                        using (new EditorGUI.DisabledScope(!valid || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
+                        {
+                            if (GUILayout.Button(new GUIContent("▶ Play", $"Open and play scene combination '{c.DisplayName}'"),
+                                GUILayout.Width(64), GUILayout.Height(24)))
+                            {
+                                if (SceneSwitcher.PlayFromCombination(c, activeSet)) editorWindow.Close();
+                            }
+                        }
                         EditorGUILayout.EndHorizontal();
                     }
                 }

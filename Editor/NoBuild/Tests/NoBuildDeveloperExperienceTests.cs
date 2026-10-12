@@ -262,6 +262,26 @@ namespace Com.Scheherazade.Common.NoBuild.Editor.Tests
             Assert.That(AdbUtility.IsWirelessConnected(wireless, new[] { connected }), Is.False);
         }
 
+        [Test]
+        public void PlayFromCombination_RejectsDisabledOrEmptyCombinationsWithoutSchedulingPlay()
+        {
+            SceneAsset scene = GetSourceScene();
+            var set = new SceneSet
+            {
+                scenes = new List<SceneSlot> { new() { scene = scene } }
+            };
+            var disabled = new SceneCombination
+            {
+                enabled = false,
+                sceneReferences = new List<SceneReference> { new() { scene = scene, enabled = true } }
+            };
+            UnityEditor.EditorApplication.CallbackFunction pending = EditorApplication.delayCall;
+            Assert.That(SceneSwitcher.PlayFromCombination(disabled, set), Is.False);
+            Assert.That(SceneSwitcher.PlayFromCombination(new SceneCombination(), set), Is.False);
+            Assert.That(SceneSwitcher.PlayFromCombination(null, set), Is.False);
+            Assert.That(EditorApplication.delayCall, Is.EqualTo(pending));
+        }
+
         [TestCase((int)InstallFailureKind.UpdateIncompatible, true)]
         [TestCase((int)InstallFailureKind.VersionDowngrade, true)]
         [TestCase((int)InstallFailureKind.AlreadyExists, true)]

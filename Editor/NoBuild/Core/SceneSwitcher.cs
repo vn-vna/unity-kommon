@@ -86,6 +86,25 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 return false;
             }
 
+            SchedulePlayMode();
+            return true;
+        }
+
+        public static bool PlayFromCombination(SceneCombination combination, SceneSet parentSet)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling
+                || combination == null || !combination.enabled || parentSet == null
+                || combination.ResolveScenes(parentSet).Count == 0)
+            {
+                return false;
+            }
+            if (!SwitchToCombination(combination, parentSet)) return false;
+            SchedulePlayMode();
+            return true;
+        }
+
+        private static void SchedulePlayMode()
+        {
             EditorApplication.delayCall += () =>
             {
                 if (!EditorApplication.isCompiling
@@ -94,7 +113,6 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     EditorApplication.isPlaying = true;
                 }
             };
-            return true;
         }
 
         /// <summary>
@@ -103,29 +121,29 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
         /// First valid scene is opened as single (closing others),
         /// remaining are loaded additively. The first scene is set active.
         /// </summary>
-        public static void SwitchToCombination(
+        public static bool SwitchToCombination(
             SceneCombination combination,
             SceneSet parentSet)
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling)
             {
                 FireFailed("Wait until Unity is idle and outside Play Mode before opening scenes.");
-                return;
+                return false;
             }
-            if (combination == null) { FireFailed("Combination is null."); return; }
-            if (parentSet == null) { FireFailed("Parent SceneSet is null."); return; }
+            if (combination == null) { FireFailed("Combination is null."); return false; }
+            if (parentSet == null) { FireFailed("Parent SceneSet is null."); return false; }
 
             var valid = combination.ResolveScenes(parentSet);
 
             if (valid.Count == 0)
             {
                 FireFailed($"Combination '{combination.DisplayName}' has no valid scenes.");
-                return;
+                return false;
             }
 
             try
             {
-                if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+                if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return false;
 
                 Scene first = EditorSceneManager.OpenScene(
                     valid[0].ScenePath, OpenSceneMode.Single);
@@ -137,11 +155,13 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
                 NotifyCombinationSwitched(combination);
                 NoBuildEditorState.SetResult($"Opened combination: {combination.DisplayName}");
+                return true;
             }
             catch (Exception ex)
             {
                 FireFailed($"Failed to switch to '{combination.DisplayName}': {ex.Message}");
                 Debug.LogException(ex);
+                return false;
             }
         }
 

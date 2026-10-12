@@ -146,15 +146,16 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
     internal sealed class NoBuildCombinedPopup : PopupWindowContent
     {
-        private const float PopupW = 310f;
-        private const float PopupH = 440f;
+        private const float PopupW = 520f;
+        private const float PopupH = 520f;
+        private const float RowH = 30f;
         private const float BulletW = 20f;
         private const float BadgeW = 22f;
         private const float BadgeH = 18f;
         private const float CountW = 65f;
         private const float DefCountW = 40f;
-        private const float BtnW = 50f;
-        private const float BtnH = 22f;
+        private const float BtnW = 72f;
+        private const float BtnH = 26f;
         private const float SectSpace = 6f;
         private const float FootSpace = 4f;
         private const int LabelMax = 28;
@@ -180,6 +181,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             public string Label;
             public bool Enabled;
             public Action<Rect> Execute;
+            public Func<bool> Play;
         }
 
         public NoBuildCombinedPopup(NoBuildSettings s)
@@ -202,9 +204,13 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
 
         public override void OnGUI(Rect rect)
         {
+            GUILayout.Space(6);
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(8);
+            EditorGUILayout.BeginVertical(GUILayout.MinWidth(0), GUILayout.ExpandWidth(true));
             EditorGuiLayout.DrawHeaderBox(
                 "No Build",
-                "Switch scenes and defines, then start a configured build."
+                "Open scenes, apply defines, or start a configured build."
             );
             HandleSearchKeyboard();
             GUI.SetNextControlName("NoBuild.QuickSearch");
@@ -215,7 +221,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 EditorGUI.FocusTextInControl("NoBuild.QuickSearch");
                 _focusSearch = false;
             }
-            _scroll = EditorGUILayout.BeginScrollView(_scroll);
+            _scroll = EditorGUILayout.BeginScrollView(_scroll, GUIStyle.none, GUI.skin.verticalScrollbar);
             if (!string.IsNullOrWhiteSpace(_search)) DrawSearchResults();
             else
             {
@@ -235,6 +241,10 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             GUILayout.Space(FootSpace);
             if (GUILayout.Button("Manage..."))
             { SettingsService.OpenProjectSettings(NoBuildSettingsProvider.Path); editorWindow.Close(); }
+            EditorGUILayout.EndVertical();
+            GUILayout.Space(8);
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(6);
         }
 
         private bool Matches(string name) => string.IsNullOrWhiteSpace(_search)
@@ -263,7 +273,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 if (Matches(label)) actions.Add(new QuickAction
                 {
                     Label = label, Enabled = idle && combination.ResolveScenes(context).Count > 0,
-                    Execute = _ => { SceneSwitcher.SwitchToCombination(combination, context); editorWindow.Close(); }
+                    Execute = _ => { if (SceneSwitcher.SwitchToCombination(combination, context)) editorWindow.Close(); },
+                    Play = () => SceneSwitcher.PlayFromCombination(combination, context)
                 });
             }
             for (int i = 0; i < _settings.scriptDefinitionSets.Count; i++)
@@ -321,8 +332,16 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 QuickAction action = actions[i];
                 using (new EditorGUI.DisabledScope(!action.Enabled))
                 {
+                    EditorGUILayout.BeginHorizontal(GUILayout.MinHeight(RowH));
                     if (GUILayout.Button(new GUIContent((i == _keyboardSelection ? "› " : "  ") + action.Label, action.Label),
-                        EditorStyles.miniButton, GUILayout.Height(26))) action.Execute(GUILayoutUtility.GetLastRect());
+                        EditorStyles.miniButton, GUILayout.Height(BtnH), GUILayout.MinWidth(0), GUILayout.ExpandWidth(true)))
+                        action.Execute(GUILayoutUtility.GetLastRect());
+                    if (action.Play != null && GUILayout.Button(new GUIContent("▶ Play", "Open and play " + action.Label),
+                            GUILayout.Width(64), GUILayout.Height(BtnH)))
+                    {
+                        if (action.Play()) editorWindow.Close();
+                    }
+                    EditorGUILayout.EndHorizontal();
                 }
             }
             EditorGUILayout.LabelField("↑/↓ Select · Enter Run · Esc Clear", EditorStyles.miniLabel);
@@ -338,36 +357,21 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 var s = _settings.sceneSets[i];
                 if (!Matches(s.setName)) continue;
                 bool a = NoBuildEditorState.ScenesMatch(s);
-                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox, GUILayout.MinHeight(RowH));
                 GUI.color = a
                     ? EditorGuiColors.ActiveGreen
                     : EditorGuiColors.InactiveGray;
                 GUILayout.Label(a ? BulletOn : BulletOff, GUILayout.Width(BulletW));
                 GUI.color = Color.white;
                 if (GUILayout.Button(new GUIContent(EditorGuiStrings.Truncate(s.setName, LabelMax),
-                    s.setName + "\n" + ShortcutManager.GetBinding(i, true)), EditorGuiStyles.HoverLabel))
+                    s.setName + "\n" + ShortcutManager.GetBinding(i, true)), EditorGuiStyles.HoverLabel,
+                    GUILayout.MinWidth(0), GUILayout.ExpandWidth(true)))
                 {
                     if (NoBuildEditorState.OpenSet(_settings, i))
                     {
                         editorWindow.Close();
                     }
                 }
-
-                EditorGUI.BeginDisabledGroup(
-                    EditorApplication.isPlayingOrWillChangePlaymode);
-                if (GUILayout.Button(
-                        new GUIContent(
-                            "▶",
-                            $"Play from scene set '{s.setName}'"),
-                        GUILayout.Width(24),
-                        GUILayout.Height(BtnH)))
-                {
-                    if (NoBuildEditorState.OpenSet(_settings, i, play: true))
-                    {
-                        editorWindow.Close();
-                    }
-                }
-                EditorGUI.EndDisabledGroup();
 
                 int n = s.scenes.Count(
                     slot => slot != null
@@ -389,7 +393,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 var c = combos[i];
                 if (c == null || !c.enabled || !Matches(c.DisplayName)) continue;
                 bool valid = c.ResolveScenes(active).Count > 0;
-                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox, GUILayout.MinHeight(RowH));
                 Color previousBadgeColor = GUI.color;
                 GUI.color = EditorGuiColors.InactiveGray;
                 GUILayout.Label(
@@ -402,11 +406,22 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 using (new EditorGUI.DisabledScope(!valid || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
                 {
                     if (GUILayout.Button(new GUIContent(EditorGuiStrings.Truncate(c.DisplayName, LabelMax),
-                        c.DisplayName + "\n" + ShortcutManager.GetBinding(i)), EditorGuiStyles.HoverLabel))
-                    { SceneSwitcher.SwitchToCombination(c, active); editorWindow.Close(); }
+                        c.DisplayName + "\n" + ShortcutManager.GetBinding(i)), EditorGuiStyles.HoverLabel,
+                        GUILayout.MinWidth(0), GUILayout.ExpandWidth(true)))
+                    {
+                        if (SceneSwitcher.SwitchToCombination(c, active)) editorWindow.Close();
+                    }
                 }
-                int sc = c.sceneReferences?.Count(r => r.enabled && r.IsValid) ?? Zero;
-                GUILayout.Label(sc + " sc", EditorStyles.miniLabel, GUILayout.Width(35));
+                int sc = c.ResolveScenes(active).Count;
+                GUILayout.Label(sc + (sc == 1 ? " scene" : " scenes"), EditorStyles.miniLabel, GUILayout.Width(CountW));
+                using (new EditorGUI.DisabledScope(!valid || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling))
+                {
+                    if (GUILayout.Button(new GUIContent("▶ Play", $"Open and play scene combination '{c.DisplayName}'"),
+                        GUILayout.Width(64), GUILayout.Height(BtnH)))
+                    {
+                        if (SceneSwitcher.PlayFromCombination(c, active)) editorWindow.Close();
+                    }
+                }
                 EditorGUILayout.EndHorizontal();
             }
         }
@@ -421,7 +436,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 var s = _settings.scriptDefinitionSets[i];
                 if (!Matches(s.setName)) continue;
                 bool a = NoBuildEditorState.DefinesMatch(s);
-                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox, GUILayout.MinHeight(RowH));
                 GUI.color = a
                     ? EditorGuiColors.ActiveGreen
                     : EditorGuiColors.InactiveGray;
@@ -429,7 +444,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                 GUI.color = Color.white;
                 using (new EditorGUI.DisabledScope(EditorApplication.isCompiling || EditorApplication.isPlayingOrWillChangePlaymode))
                 if (GUILayout.Button(new GUIContent(EditorGuiStrings.Truncate(s.setName, LabelMax),
-                    s.setName + "\nApply to " + EditorUserBuildSettings.selectedBuildTargetGroup), EditorGuiStyles.HoverLabel))
+                    s.setName + "\nApply to " + EditorUserBuildSettings.selectedBuildTargetGroup), EditorGuiStyles.HoverLabel,
+                    GUILayout.MinWidth(0), GUILayout.ExpandWidth(true)))
                 {
                     if (NoBuildEditorState.ApplyDefines(_settings, i)) editorWindow.Close();
                 }
@@ -448,7 +464,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
             foreach (var bp in _settings.buildProfiles)
             {
                 if (!Matches(bp.profileName)) continue;
-                EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.MinWidth(0));
+                EditorGUILayout.BeginHorizontal();
 
                 GUIContent platIcon = PlatformIconUtility.GetPlatformIcon(
                     bp.buildConfiguration.platform);
@@ -456,12 +473,15 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     GUILayout.Label(platIcon, GUILayout.Width(20),
                         GUILayout.Height(20));
 
-                EditorGUILayout.BeginVertical();
-                GUILayout.Label(new GUIContent(EditorGuiStrings.Truncate(bp.profileName, LabelMax), bp.profileName), EditorStyles.boldLabel);
+                GUILayout.Label(new GUIContent(bp.profileName, bp.profileName), EditorStyles.boldLabel,
+                    GUILayout.MinWidth(0), GUILayout.ExpandWidth(true));
+                EditorGUILayout.EndHorizontal();
                 string prev = BuildNameResolver.Resolve(
                     bp.buildNameTemplate?.template ?? "{app-version}", bp, _settings);
-                GUILayout.Label(EditorGuiStrings.Truncate(prev, PrevMax), EditorStyles.miniLabel);
-                EditorGUILayout.EndVertical();
+                GUILayout.Label(new GUIContent(EditorGuiStrings.Truncate(prev, PrevMax), prev), EditorStyles.miniLabel,
+                    GUILayout.MinWidth(0), GUILayout.ExpandWidth(true));
+                GUILayout.Space(4);
+                EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
                 GUI.backgroundColor = EditorGuiColors.BuildGreen;
                 if (GUILayout.Button(
@@ -477,7 +497,7 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     GUI.backgroundColor = EditorGuiColors.RunBlue;
                     if (GUILayout.Button(
                             PlatformIconUtility.BuildAndRunActionIcon,
-                            GUILayout.Width(105),
+                            GUILayout.Width(120),
                             GUILayout.Height(BtnH)
                         ))
                     {
@@ -486,6 +506,8 @@ namespace Com.Scheherazade.Common.NoBuild.Editor
                     GUI.backgroundColor = Color.white;
                 }
                 EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
+                GUILayout.Space(4);
             }
         }
 
