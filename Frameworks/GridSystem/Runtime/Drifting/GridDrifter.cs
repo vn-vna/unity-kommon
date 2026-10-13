@@ -49,6 +49,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         private DirectionFlag _movementDirection;
         private bool _drifting;
         private bool _hasDisplaced;
+        private readonly List<IDrifter> _frameDrifters = new();
+        private readonly List<IGridOccupant> _groupOccupants = new();
 
         #endregion
 
@@ -83,6 +85,15 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 return;
             }
 
+            var connected = new List<IDrifter> { drifter };
+            for(int index=0;index<connected.Count;index++)
+            {
+                if(connected[index] is not IConnectedDrifter links)continue;
+                foreach(var peer in links.ConnectedDrifters)
+                    if(peer!=null&&peer.HookedCell!=null&&!connected.Contains(peer))connected.Add(peer);
+            }
+            foreach(var peer in connected)
+                if(!peer.Driftable||(connected.Count>1&&peer.HookedCell==null)){drifter.HandleDrifterFailed();_feedback?.PlayDriftFail(drifter);return;}
             _driftMaster = drifter;
             _drifting = true;
             _drifters.Clear();
@@ -97,7 +108,18 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 RelativeMousePosition = _board.PointerPlanePosition
                     - _board.Coordinates.Flatten(drifter.ControlledPosition)
             });
-            drifter.HandleDriftAttached();
+            foreach(var peer in connected)
+            {
+                if(ReferenceEquals(peer,drifter))continue;
+                (peer as IGridReleasePresentation)?.PrepareForDrift();
+                _drifters.Add(peer,new DrifterInformation {
+                    Drifter=peer,MovementAbility=DirectionFlag.All,CurrentSpeed=GetDrifterBaseSpeed(),
+                    IntentPointerAnchor=_board.PointerPlanePosition,
+                    RelativeMousePosition=_board.PointerPlanePosition-_board.Coordinates.Flatten(peer.ControlledPosition)
+                });
+            }
+            foreach(var peer in connected)if(_drifters.ContainsKey(peer))peer.HandleDriftAttached();
+            if(_drifters.Count==0)return;
             DriftingStarted?.Invoke();
             DrifterAppended?.Invoke(drifter);
             _feedback?.PlayDriftStart(drifter);
@@ -129,22 +151,28 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         public void UpdateDrifting(Vector2 pointerPlanePosition)
         {
             if (!Enabled || !_drifting || _drifters.Count == 0) return;
-
-            foreach (var (drifter, _) in _drifters)
+            _frameDrifters.Clear();_frameDrifters.AddRange(_drifters.Keys);
+            foreach (var drifter in _frameDrifters)
             {
-                drifter.HandleDrifterPreUpdate();
+                if(_drifters.ContainsKey(drifter))drifter.HandleDrifterPreUpdate();
             }
 
             UpdateDrifterMovementAbility();
-
-            foreach (var (drifter, data) in _drifters)
+            if(_driftMaster==null||!_drifters.TryGetValue(_driftMaster,out var masterData))return;
+            Vector2 origin=_board.Coordinates.Flatten(_driftMaster.ControlledPosition);
+            Vector2 delta=ClampDrifterPosition(_driftMaster,masterData,pointerPlanePosition)-origin;
+            foreach (var drifter in _frameDrifters)
             {
-                Vector2 newPos = ClampDrifterPosition(drifter, data, pointerPlanePosition);
+                if(!_drifters.TryGetValue(drifter,out var data))continue;
+                data.CurrentSpeed=masterData.CurrentSpeed;
+                Vector2 newPos = _board.Coordinates.Flatten(drifter.ControlledPosition)+delta;
                 drifter.ControlledPosition = _board.Coordinates.Unflatten(
                     newPos, drifter.ControlledPosition
                 );
-                drifter.HandleDriftUpdated();
             }
+            // Disposal can remove the master or a peer while collection callbacks run.
+            foreach(var drifter in _frameDrifters)if(_drifters.ContainsKey(drifter))drifter.HandleDriftUpdated();
+            if(_driftMaster==null)return;
 
             _hoveringCell = _map.AccessCell(
                 _board.Coordinates.WorldToCell(_driftMaster.ControlledPosition)
@@ -265,6 +293,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
 
         private void UpdateDrifterMovementAbility()
         {
+            _groupOccupants.Clear();foreach(var drifter in _drifters.Keys)_groupOccupants.Add(drifter.Occupant);
             foreach (var (drifter, data) in _drifters)
             {
                 if (drifter.HookedCell == null)
@@ -274,7 +303,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 }
 
                 data.MovementAbility = drifter.Driftable
-                    ? _map.CheckObjectMovement(drifter.Occupant) & drifter.MovementLimitations
+                    ? _map.CheckObjectMovement(drifter.Occupant, _groupOccupants) & drifter.MovementLimitations
                     : DirectionFlag.None;
             }
 

@@ -119,9 +119,9 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
 
         private bool IsTraversable(IGridOccupant occupant, GridCoord relativeStep)
         {
-            GridCoord target = _currentPositionCell.GridPosition + relativeStep;
-            if (!_map.CheckValidGridPosition(target)) return false;
-            return _map.CheckObjectPlaceable(target, occupant);
+            _occupantScratch.Clear();
+            foreach(var member in _drifter.Drifters)_occupantScratch.Add(member.Occupant);
+            return _map.CheckGroupPlaceable(_occupantScratch,relativeStep);
         }
 
         private IGridOccupant GetFirstOccupant()

@@ -14,6 +14,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
     /// </summary>
     public class GridMap
     {
+        private IReadOnlyList<IGridOccupant> _placementGroup;
         #region Events
 
         public event Action AllCellsCreated;
@@ -264,13 +265,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 });
             }
 
-            foreach (MovingOccupantRelativeInfo info in relatives)
-            {
-                if (!CheckObjectPlaceable(info.RelativePosition + to.GridPosition, info.Occupant))
-                {
-                    return false;
-                }
-            }
+            if (!CheckGroupPlaceable(relatives.ConvertAll(item => item.Occupant), to.GridPosition - from.GridPosition))
+                return false;
 
             foreach (MovingOccupantRelativeInfo info in relatives)
             {
@@ -358,8 +354,12 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             return success;
         }
 
-        public DirectionFlag CheckObjectMovement(IGridOccupant occupant)
+        public DirectionFlag CheckObjectMovement(IGridOccupant occupant, IReadOnlyList<IGridOccupant> group = null)
         {
+            var previous = _placementGroup;
+            _placementGroup = group;
+            try
+            {
             DirectionFlag movement = DirectionFlag.All;
             ExecuteObjectPlacementAction(
                 occupant.HookedCell,
@@ -368,6 +368,21 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 CheckSingleCellPartMovable
             );
             return movement;
+            }
+            finally { _placementGroup = previous; }
+        }
+
+        public bool CheckGroupPlaceable(IReadOnlyList<IGridOccupant> occupants, GridCoord delta)
+        {
+            var previous = _placementGroup;
+            _placementGroup = occupants;
+            try
+            {
+                foreach(var occupant in occupants)
+                    if(occupant?.HookedCell==null || !CheckObjectPlaceable(occupant.HookedCell.GridPosition+delta,occupant))return false;
+                return true;
+            }
+            finally { _placementGroup=previous; }
         }
 
         public bool RemoveObject(IGridOccupant occupant)
@@ -589,6 +604,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             IGridOccupant perdOccupant = predictedCell.Occupant;
             if (perdOccupant == null) return true;
             if (perdOccupant == occupant) return true;
+            if (_placementGroup != null)
+                for(int i=0;i<_placementGroup.Count;i++)if(ReferenceEquals(perdOccupant,_placementGroup[i]))return true;
             return perdOccupant.CheckReplaceableBy(occupant, cell, relPosition);
         }
 
