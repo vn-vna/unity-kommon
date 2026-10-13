@@ -1,4 +1,4 @@
-#if FIREBASE_ANALYTICS
+#if FIREBASE_ANALYTICS && !CREATIVE_WEBGL
 
 using System;
 using System.Collections.Generic;
