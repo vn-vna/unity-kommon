@@ -96,6 +96,7 @@ namespace Com.Scheherazade.Common.Sound
 
         public void SetBusVolume(SoundBusType bus, float volume)
         {
+            EnsureInitialized();
             AudioMixerGroup group = bus == SoundBusType.Sfx ? _sfxGroup : _bgmGroup;
             string param = bus == SoundBusType.Sfx ? _sfxVolumeParam : _bgmVolumeParam;
 
@@ -104,6 +105,8 @@ namespace Com.Scheherazade.Common.Sound
                 float db = ToDecibels(Mathf.Clamp01(volume));
                 group.audioMixer.SetFloat(param, db);
             }
+            // Source gain also works without an optional mixer (the default setup).
+            _pool.SetBusVolume(bus, volume);
         }
 
         #endregion

@@ -20,6 +20,7 @@ namespace Com.Scheherazade.Common.Sound
         private int _generation;
         private int _instanceId;
         private SoundDefinition _current;
+        private float _volumeScale = 1f;
 
         public bool IsFree => !_inUse;
         public bool IsPaused => _isPaused;
@@ -52,6 +53,7 @@ namespace Com.Scheherazade.Common.Sound
         public void Configure(SoundDefinition def, float volumeScale)
         {
             _current = def;
+            _volumeScale = volumeScale;
             _generation++; // invalidate stale handles
 
             _source.clip = def.Clip;
@@ -62,6 +64,12 @@ namespace Com.Scheherazade.Common.Sound
             _source.spatialBlend = def.SpatialBlend;
             _source.playOnAwake = false;
             _source.Stop();
+        }
+
+        public void SetBusVolume(float volume)
+        {
+            if (_current == null || _source == null) return;
+            _source.volume = Mathf.Clamp01(_current.Volume * _volumeScale * volume);
         }
 
         /// <summary>Starts playback: enables the GameObject (disable = stop semantics).</summary>

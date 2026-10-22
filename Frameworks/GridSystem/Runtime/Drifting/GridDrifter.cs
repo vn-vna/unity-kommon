@@ -30,6 +30,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         public DirectionFlag MovementAbility => _movementAbility;
         public DirectionFlag MovementDirection => _movementDirection;
         public bool Enabled { get; set; } = true;
+        public GridBoard Board => _board;
+        public int ModuleCount => _modules.Count;
 
         #endregion
 
@@ -51,6 +53,9 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         private bool _hasDisplaced;
         private readonly List<IDrifter> _frameDrifters = new();
         private readonly List<IGridOccupant> _groupOccupants = new();
+        private readonly List<IGridDrifterModule> _modules = new();
+        private bool _evaluatingModules;
+        private bool _shutDown;
 
         #endregion
 
@@ -67,11 +72,79 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             _map = map;
             _config = config;
             _feedback = feedback;
+            RegisterModule(new GridOccupancyDriftModule());
         }
 
         #endregion
 
         #region Public Methods
+
+        public bool RegisterModule(IGridDrifterModule module)
+        {
+            if (module == null) throw new ArgumentNullException(nameof(module));
+            if (_shutDown) throw new ObjectDisposedException(nameof(GridDrifter));
+            if (_evaluatingModules) throw new InvalidOperationException("Cannot change modules during a movement query.");
+            if (_modules.Contains(module)) return false;
+            _modules.Add(module);
+            try { module.HandleRegistered(this); }
+            catch
+            {
+                _modules.Remove(module);
+                module.HandleUnregistered(this);
+                throw;
+            }
+            return true;
+        }
+
+        public bool UnregisterModule(IGridDrifterModule module)
+        {
+            if (_evaluatingModules) throw new InvalidOperationException("Cannot change modules during a movement query.");
+            if (!_modules.Remove(module)) return false;
+            module.HandleUnregistered(this);
+            return true;
+        }
+
+        public bool CanBeginDrag(IReadOnlyList<IGridOccupant> occupants)
+            => EvaluateModules(occupants, GridCoord.zero, true);
+
+        /// <summary>Checks a neighboring group step, including both diagonal intermediate footprints.</summary>
+        public bool CanMove(IReadOnlyList<IGridOccupant> occupants, GridCoord delta)
+        {
+            if (delta == GridCoord.zero || Mathf.Abs(delta.x) > 1 || Mathf.Abs(delta.y) > 1) return false;
+            if (!EvaluateModules(occupants, delta, false)) return false;
+            return delta.x == 0 || delta.y == 0
+                || (EvaluateModules(occupants, new GridCoord(delta.x, 0), false)
+                    && EvaluateModules(occupants, new GridCoord(0, delta.y), false));
+        }
+
+        public void Shutdown()
+        {
+            if (_shutDown) return;
+            _shutDown = true;
+            try { ReleaseAllDrifters(); }
+            finally
+            {
+                for (int index = _modules.Count - 1; index >= 0; index--)
+                    UnregisterModule(_modules[index]);
+            }
+        }
+
+        private bool EvaluateModules(IReadOnlyList<IGridOccupant> occupants, GridCoord delta, bool begin)
+        {
+            if (_shutDown || occupants == null || occupants.Count == 0) return false;
+            if (_evaluatingModules) throw new InvalidOperationException("Recursive movement query.");
+            var context = new GridDriftContext(_board, _map, occupants);
+            _evaluatingModules = true;
+            try
+            {
+                foreach (IGridDrifterModule module in _modules)
+                {
+                    if (!(begin ? module.CanBeginDrag(in context) : module.CanMove(in context, delta))) return false;
+                }
+                return true;
+            }
+            finally { _evaluatingModules = false; }
+        }
 
         /// <summary>Called by <see cref="GridBoard"/> on MouseDownOnCell — attaches an IDrifter occupant.</summary>
         public void HandleMouseDownOnCell(GridCell cell)
@@ -94,6 +167,14 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             }
             foreach(var peer in connected)
                 if(!peer.Driftable||(connected.Count>1&&peer.HookedCell==null)){drifter.HandleDrifterFailed();_feedback?.PlayDriftFail(drifter);return;}
+            _groupOccupants.Clear();
+            foreach (IDrifter peer in connected) _groupOccupants.Add(peer.Occupant);
+            if (!CanBeginDrag(_groupOccupants))
+            {
+                drifter.HandleDrifterFailed();
+                _feedback?.PlayDriftFail(drifter);
+                return;
+            }
             _driftMaster = drifter;
             _drifting = true;
             _drifters.Clear();
@@ -293,24 +374,12 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
 
         private void UpdateDrifterMovementAbility()
         {
-            _groupOccupants.Clear();foreach(var drifter in _drifters.Keys)_groupOccupants.Add(drifter.Occupant);
-            foreach (var (drifter, data) in _drifters)
+            _groupOccupants.Clear();
+            foreach (IDrifter drifter in _drifters.Keys) _groupOccupants.Add(drifter.Occupant);
+            DirectionFlag combined = DirectionFlag.None;
+            foreach (DirectionFlag direction in DirectionFlagHelper.AllCellDirections)
             {
-                if (drifter.HookedCell == null)
-                {
-                    data.MovementAbility = DirectionFlag.All;
-                    continue;
-                }
-
-                data.MovementAbility = drifter.Driftable
-                    ? _map.CheckObjectMovement(drifter.Occupant, _groupOccupants) & drifter.MovementLimitations
-                    : DirectionFlag.None;
-            }
-
-            DirectionFlag combined = DirectionFlag.All;
-            foreach (DrifterInformation data in _drifters.Values)
-            {
-                combined &= data.MovementAbility;
+                if (CanMove(_groupOccupants, direction.ToGridCoord())) combined |= direction;
             }
             foreach (var (drifter, data) in _drifters)
             {

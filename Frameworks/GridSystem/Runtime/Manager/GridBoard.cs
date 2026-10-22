@@ -23,6 +23,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         public event Action<GridCell> MouseUpOnCell;
         public event Action AllCellsCleared;
         public event Action AllCellsCreated;
+        public event Action<GridDrifter> DrifterCreated;
         public event Action SnappedCellChanged;          // forwarded from GridSnappingAdapter
         public event Action<IDrifter> DrifterAppended;   // forwarded from GridDrifter
         public event Action DriftingFinished;            // forwarded from GridDrifter
@@ -33,6 +34,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
 
         public GridConfiguration Configuration => configuration;
         public GridMap Map => _map;
+        public GridDrifter Drifter => _drifter;
         public GridCell[,] CellObjects => _map != null ? _map.CellObjects : null;
         public GridCoord GridSize => _map != null
             ? _map.GridSize
@@ -213,6 +215,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
 
             if (_map != null)
             {
+                _drifter?.Shutdown();
                 _map.ClearAllCells();
                 UnsubscribeModules();
                 _map = null;
@@ -391,6 +394,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             _map = new GridMap(configuration);
             _drifter = new GridDrifter(this, _map, configuration, _feedback);
             _snappingAdapter = new GridSnappingAdapter(_map, _drifter);
+            DrifterCreated?.Invoke(_drifter);
 
             _snappingAdapter.SnappedCellChanged += HandleSnappedCellChanged;
             _drifter.DrifterAppended += HandleDrifterAppended;

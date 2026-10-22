@@ -121,7 +121,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         {
             _occupantScratch.Clear();
             foreach(var member in _drifter.Drifters)_occupantScratch.Add(member.Occupant);
-            return _map.CheckGroupPlaceable(_occupantScratch,relativeStep);
+            return _drifter.CanMove(_occupantScratch, relativeStep);
         }
 
         private IGridOccupant GetFirstOccupant()
@@ -143,6 +143,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 _occupantScratch.Add(drifter.Occupant);
             }
 
+            GridCoord delta = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
+            if (!_drifter.CanMove(_occupantScratch, delta)) return;
             if (!_map.MoveOccupants(_occupantScratch, _currentPositionCell, _predictedCell)) return;
 
             _drifter.NotifyGridDisplacement();
