@@ -101,7 +101,9 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
         private const string OverrideConfigResourcePath
             = "PuzzleLevelOverrideConfig";
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+#endif
         private static void CreateRuntimeObjects()
         {
             PuzzleLevelManager manager = Instance;

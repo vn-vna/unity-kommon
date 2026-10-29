@@ -137,7 +137,9 @@ namespace Com.Scheherazade.Common.ItemDatabase
 
         #region Bootstrap
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             if (Instance != null) return;

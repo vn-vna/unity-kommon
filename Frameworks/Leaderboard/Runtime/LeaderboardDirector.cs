@@ -41,7 +41,9 @@ namespace Com.Scheherazade.Common.Leaderboard
 
         #region Bootstrap
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             LeaderboardConfiguration config = LeaderboardConfiguration.Instance;

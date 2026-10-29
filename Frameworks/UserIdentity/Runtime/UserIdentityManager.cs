@@ -50,7 +50,9 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         #region Bootstrap
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             UserIdentityConfiguration config = UserIdentityConfiguration.Instance;

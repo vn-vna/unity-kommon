@@ -79,7 +79,9 @@ namespace Com.Scheherazade.Common.DebugCaller
 
         #region Unity Callbacks
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             DebugCaller existing = _instance != null
