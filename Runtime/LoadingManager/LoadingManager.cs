@@ -107,7 +107,9 @@ namespace Com.Scheherazade.Common.LoadingManager
         #endregion
 
         #region Bootstrap
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             GameObject go = new GameObject(ManagerGameObjectName);

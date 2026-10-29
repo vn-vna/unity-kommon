@@ -196,7 +196,9 @@ namespace Com.Scheherazade.Common.Chrono
         #endregion
 
         #region Bootstrap
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             var go = new GameObject("[Scheherazade Chrono Director]");

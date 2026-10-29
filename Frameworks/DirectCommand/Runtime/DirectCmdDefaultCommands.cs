@@ -16,7 +16,9 @@ namespace Com.Scheherazade.Common
         #endregion
 
         #region Public Methods
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+#endif
         private static void RegisterAllDefaultCommands()
         {
             RegisterAdsCommands();

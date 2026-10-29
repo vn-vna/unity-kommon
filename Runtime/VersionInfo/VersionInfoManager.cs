@@ -15,7 +15,9 @@ namespace Com.Scheherazade.Common.VIC
         #endregion
 
         #region Bootstrap
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             if (Object.FindAnyObjectByType<VersionInfoManager>(

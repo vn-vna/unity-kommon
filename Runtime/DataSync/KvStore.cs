@@ -200,8 +200,10 @@ namespace Com.Scheherazade.Common.DataSync
 
         #region Bootstrap
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(
             RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             var go = new GameObject(

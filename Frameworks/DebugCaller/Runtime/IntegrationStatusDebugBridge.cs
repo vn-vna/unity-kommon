@@ -21,7 +21,9 @@ namespace Com.Scheherazade.Common.DebugCaller
             _hasShownForCurrentRun = false;
         }
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+#endif
         private static void Initialize()
         {
             if (!_isSubscribed)

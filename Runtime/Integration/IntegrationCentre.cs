@@ -25,7 +25,9 @@ namespace Com.Scheherazade.Common.Integration
         [Tooltip("Hide the ticker GameObject in the hierarchy.")]
         private bool hideTickerGameObject = true;
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             var centre = Instance;

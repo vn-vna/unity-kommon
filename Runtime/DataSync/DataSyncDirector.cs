@@ -386,7 +386,9 @@ namespace Com.Scheherazade.Common.DataSync
 
         #region Bootstrap
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+#endif
         private static void Bootstrap()
         {
             if (Instance != null) return;

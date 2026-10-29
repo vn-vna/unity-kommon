@@ -45,7 +45,9 @@ namespace Com.Scheherazade.Common
             return builder;
         }
 
+#if !CREATIVE_CORE_GAME
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+#endif
         private static void CreateInstance()
         {
             if (Instance != null)
