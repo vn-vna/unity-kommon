@@ -30,6 +30,9 @@ namespace Com.Scheherazade.Common.Integration
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             var centre = Instance;
             if (centre == null)
             {

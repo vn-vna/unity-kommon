@@ -1,3 +1,7 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using AwaitableCompletionSource = Com.Scheherazade.Common.Threading.CreativeCompletionSource;
+#endif
 using System;
 using UnityEngine;
 
@@ -36,7 +40,13 @@ namespace Com.Scheherazade.Common.UserInterface
             _completionAwaitable = _completionSource.Awaitable;
             _play = play;
             _complete = complete;
+#if PLA_CREATIVE_BUILD
+            if (cancel == null && !awaitable.IsCompleted)
+                throw new ArgumentException("A pending creative animation requires its real cancellation delegate.", nameof(cancel));
+            _cancel = cancel;
+#else
             _cancel = cancel ?? awaitable.Cancel;
+#endif
             _ = ObserveCompletionAsync(awaitable);
         }
 
@@ -79,7 +89,11 @@ namespace Com.Scheherazade.Common.UserInterface
             CancelCore();
         }
 
+#if PLA_CREATIVE_BUILD
+        public System.Runtime.CompilerServices.TaskAwaiter GetAwaiter()
+#else
         public Awaitable.Awaiter GetAwaiter()
+#endif
         {
             if (_awaiterRequested)
             {
@@ -123,7 +137,11 @@ namespace Com.Scheherazade.Common.UserInterface
 
         private void CancelCore()
         {
+#if PLA_CREATIVE_BUILD
+            _cancel?.Invoke(); // Null is allowed only for an already-completed task.
+#else
             _cancel.Invoke();
+#endif
         }
 
         private enum AnimationStatus

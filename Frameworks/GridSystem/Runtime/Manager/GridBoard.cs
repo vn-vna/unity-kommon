@@ -1,3 +1,9 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using FrameAwaitable = Com.Scheherazade.Common.Threading.CreativeFrameTiming;
+#else
+using FrameAwaitable = UnityEngine.Awaitable;
+#endif
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -179,7 +185,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     token.ThrowIfCancellationRequested();
-                    await Awaitable.NextFrameAsync();
+                    await FrameAwaitable.NextFrameAsync();
                 }
 
                 FinalizeInitialization();

@@ -46,6 +46,9 @@ namespace Com.Scheherazade.Common.Leaderboard
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             LeaderboardConfiguration config = LeaderboardConfiguration.Instance;
 
             if (config == null)

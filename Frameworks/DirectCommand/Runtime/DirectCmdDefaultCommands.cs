@@ -21,6 +21,9 @@ namespace Com.Scheherazade.Common
 #endif
         private static void RegisterAllDefaultCommands()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             RegisterAdsCommands();
             RegisterIapCommands();
             RegisterTrackingCommands();

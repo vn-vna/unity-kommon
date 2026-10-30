@@ -145,7 +145,11 @@ namespace Com.Scheherazade.Common.Extensions
 
         public static string ToConsiseString(this Vector2Int vector2Int)
         {
+#if PLA_CREATIVE_BUILD
+            return $"({vector2Int.x.ToString("D", CultureInfo.InvariantCulture)},{vector2Int.y.ToString("D", CultureInfo.InvariantCulture)})";
+#else
             return $"({vector2Int.x.ToString(CultureInfo.InvariantCulture)},{vector2Int.y.ToString(CultureInfo.InvariantCulture)})";
+#endif
         }
 
         public static string ToConsiseString(this Vector3 vector3, string format = "F4")
@@ -155,7 +159,11 @@ namespace Com.Scheherazade.Common.Extensions
 
         public static string ToConsiseString(this Vector3Int vector3Int)
         {
+#if PLA_CREATIVE_BUILD
+            return $"({vector3Int.x.ToString("D", CultureInfo.InvariantCulture)},{vector3Int.y.ToString("D", CultureInfo.InvariantCulture)},{vector3Int.z.ToString("D", CultureInfo.InvariantCulture)})";
+#else
             return $"({vector3Int.x.ToString(CultureInfo.InvariantCulture)},{vector3Int.y.ToString(CultureInfo.InvariantCulture)},{vector3Int.z.ToString(CultureInfo.InvariantCulture)})";
+#endif
         }
 
         public static void FromConsiseString(this Vector2 vector2, string consiseString)
@@ -337,6 +345,9 @@ namespace Com.Scheherazade.Common.Extensions
         }
     }
 
+#if UNITY_EDITOR || !PLA_CREATIVE_BUILD
+    // No retained playable source uses this combinatorial convenience API.
+    // Keep normal builds and Editor tooling intact; retain VectorExtensions above.
     public static class VectorSwizzleExtensions
     {
         // Swizzles for Vector2
@@ -827,4 +838,5 @@ namespace Com.Scheherazade.Common.Extensions
         public static Vector4 SwizzleWWWW(this Vector4 v) => new Vector4(v.w, v.w, v.w, v.w);
 
     }
+#endif
 }

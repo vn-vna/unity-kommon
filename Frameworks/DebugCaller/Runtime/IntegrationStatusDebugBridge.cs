@@ -1,3 +1,4 @@
+#if !PLA_CREATIVE_BUILD
 using Com.Scheherazade.Common.Integration;
 using UnityEngine;
 
@@ -26,6 +27,9 @@ namespace Com.Scheherazade.Common.DebugCaller
 #endif
         private static void Initialize()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             if (!_isSubscribed)
             {
                 DebugCallerState.StateChanged += HandleDebugStateChanged;
@@ -61,3 +65,4 @@ namespace Com.Scheherazade.Common.DebugCaller
         }
     }
 }
+#endif

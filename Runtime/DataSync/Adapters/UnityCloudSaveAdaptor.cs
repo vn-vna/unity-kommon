@@ -1,4 +1,4 @@
-#if UNITY_CLOUDSAVE
+#if UNITY_CLOUDSAVE && !PLA_CREATIVE_BUILD
 
 using System;
 using System.Collections.Generic;

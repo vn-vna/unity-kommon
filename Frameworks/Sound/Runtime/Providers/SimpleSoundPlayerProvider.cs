@@ -55,7 +55,9 @@ namespace Com.Scheherazade.Common.Sound
             source.volume = Mathf.Clamp01(def.Volume * volumeScale);
             source.pitch = def.Pitch;
             source.loop = def.Loop;
+#if !PLA_CREATIVE_BUILD || !UNITY_LUNA
             source.priority = def.Priority;
+#endif
             source.spatialBlend = def.SpatialBlend;
             source.playOnAwake = false;
             source.Play();

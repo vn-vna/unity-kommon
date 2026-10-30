@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableArray = Com.Scheherazade.Common.Compatibility.CreativeArray;
+#else
+using PortableArray = System.Array;
+#endif
 using System;
 using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
@@ -18,7 +23,7 @@ namespace Com.Scheherazade.Common.Sound
         private ScriptableObject _bgmProvider;
 
         [SerializeField]
-        private SoundDefinition[] _sounds = Array.Empty<SoundDefinition>();
+        private SoundDefinition[] _sounds = PortableArray.Empty<SoundDefinition>();
 
         #endregion
 
@@ -44,8 +49,8 @@ namespace Com.Scheherazade.Common.Sound
 
         public SoundDefinition[] Sounds
         {
-            get => _sounds ?? Array.Empty<SoundDefinition>();
-            set => _sounds = value ?? Array.Empty<SoundDefinition>();
+            get => _sounds ?? PortableArray.Empty<SoundDefinition>();
+            set => _sounds = value ?? PortableArray.Empty<SoundDefinition>();
         }
 
         #endregion

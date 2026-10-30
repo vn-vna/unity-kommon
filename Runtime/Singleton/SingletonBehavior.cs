@@ -71,6 +71,18 @@ namespace Com.Scheherazade.Common.Singleton
             }
         }
 
+#if PLA_CREATIVE_BUILD && (UNITY_LUNA || UNITY_EDITOR)
+        // Bridge's extension GetCustomAttribute is a stub; this instance API reads
+        // genuine attribute metadata and keeps the native single-attribute contract.
+        internal static TAttribute GetCreativeAttribute<TAttribute>(Type type, bool inherit)
+            where TAttribute : Attribute
+        {
+            object[] attributes = type.GetCustomAttributes(typeof(TAttribute), inherit);
+            if (attributes.Length > 1) throw new AmbiguousMatchException();
+            return attributes.Length == 0 ? null : (TAttribute)attributes[0];
+        }
+#endif
+
         private static void DiscoverAssembly(List<Type> holderTypes, Assembly assembly)
         {
             try
@@ -78,9 +90,13 @@ namespace Com.Scheherazade.Common.Singleton
                 foreach (Type type in assembly.GetTypes())
                 {
                     if (
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+                        GetCreativeAttribute<GlobalReferenceHolderAttribute>(type, false) == null
+#else
                         type.GetCustomAttribute(
                             typeof(GlobalReferenceHolderAttribute), false
                         ) is not GlobalReferenceHolderAttribute
+#endif
                     )
                     {
                         continue;
@@ -224,18 +240,26 @@ namespace Com.Scheherazade.Common.Singleton
             _instance = (T)(object)this;
 
             if (
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+                GlobalReferenceHelper.GetCreativeAttribute<DontDestroyOnLoadAttribute>(GetType(), false) != null
+#else
                 GetType().GetCustomAttribute(
                     typeof(DontDestroyOnLoadAttribute), false
                 ) is DontDestroyOnLoadAttribute
+#endif
             )
             {
                 DontDestroyOnLoad(gameObject);
             }
 
             if (
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+                GlobalReferenceHelper.GetCreativeAttribute<AutoRegisterGlobalAttribute>(GetType(), false) is AutoRegisterGlobalAttribute autoRegisterAttribute
+#else
                 GetType().GetCustomAttribute(
                     typeof(AutoRegisterGlobalAttribute), false
                 ) is AutoRegisterGlobalAttribute autoRegisterAttribute
+#endif
             )
             {
                 AutoRegister(autoRegisterAttribute);

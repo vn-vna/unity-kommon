@@ -36,6 +36,9 @@ namespace Com.Scheherazade.Common.AsyncResourceLoader
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             var config = Instance;
             if (config == null)
             {

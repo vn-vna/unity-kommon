@@ -391,6 +391,9 @@ namespace Com.Scheherazade.Common.DataSync
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             if (Instance != null) return;
 
             var go = new GameObject(

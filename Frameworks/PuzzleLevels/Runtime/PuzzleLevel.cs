@@ -1,3 +1,11 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using AwaitablePuzzleLevel = System.Threading.Tasks.Task<Com.Scheherazade.Common.Frameworks.PuzzleLevels.IPuzzleLevelData>;
+using FrameAwaitable = Com.Scheherazade.Common.Threading.CreativeFrameTiming;
+#else
+using AwaitablePuzzleLevel = UnityEngine.Awaitable<Com.Scheherazade.Common.Frameworks.PuzzleLevels.IPuzzleLevelData>;
+using FrameAwaitable = UnityEngine.Awaitable;
+#endif
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -139,7 +147,7 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
             }
         }
 
-        public static async Awaitable<IPuzzleLevelData> GetLevelAsync(
+        public static async AwaitablePuzzleLevel GetLevelAsync(
             string levelId,
             float timeoutSeconds = 30f,
             CancellationToken cancellationToken = default)
@@ -192,7 +200,7 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
                     throw CreateTimeoutException(levelId, timeoutSeconds);
                 }
 
-                await Awaitable.NextFrameAsync();
+                await FrameAwaitable.NextFrameAsync();
             }
 
             cancellationToken.ThrowIfCancellationRequested();

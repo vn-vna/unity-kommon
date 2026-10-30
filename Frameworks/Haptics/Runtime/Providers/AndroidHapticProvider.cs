@@ -51,7 +51,7 @@ namespace Com.Scheherazade.Common.Haptics
         {
             _isAvailable = false;
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             try
             {
                 using (AndroidJavaClass hapticEngine =
@@ -82,7 +82,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void Cue(HapticKeyframe keyframe, float intensityScale = 1f)
         {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable) return;
 
             int durationMs = Mathf.Max(1, Mathf.RoundToInt(
@@ -124,7 +124,7 @@ namespace Com.Scheherazade.Common.Haptics
         {
             tokenId = -1;
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable) return;
 
             int durationMs = Mathf.Max(1, Mathf.RoundToInt(
@@ -160,7 +160,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void UpdateContinuous(int tokenId, HapticKeyframe keyframe)
         {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable || tokenId < 0) return;
 
             int durationMs = Mathf.Max(1, Mathf.RoundToInt(
@@ -192,7 +192,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void EndContinuous(int tokenId)
         {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (tokenId < 0) return;
 
             try
@@ -215,7 +215,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void CancelAll()
         {
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             try
             {
                 using (AndroidJavaClass hapticEngine =
@@ -241,7 +241,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         #region Private Methods
 
-#if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
         private static AndroidJavaObject GetUnityActivity()
         {
             using (AndroidJavaClass unityPlayer =

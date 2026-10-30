@@ -1,3 +1,9 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using FrameAwaitable = Com.Scheherazade.Common.Threading.CreativeFrameTiming;
+#else
+using FrameAwaitable = UnityEngine.Awaitable;
+#endif
 using System;
 using System.Reflection;
 using System.Threading;
@@ -257,7 +263,7 @@ namespace Com.Scheherazade.Common.UserInterface
             {
                 if (delay > 0f)
                 {
-                    await Awaitable.WaitForSecondsAsync(
+                    await FrameAwaitable.WaitForSecondsAsync(
                         delay,
                         animation.CancellationToken
                     );

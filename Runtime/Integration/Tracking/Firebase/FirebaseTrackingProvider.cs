@@ -1,4 +1,4 @@
-#if FIREBASE_ANALYTICS && !CREATIVE_WEBGL
+#if FIREBASE_ANALYTICS && !CREATIVE_WEBGL && !PLA_CREATIVE_BUILD
 
 using System;
 using System.Collections;
