@@ -66,7 +66,7 @@ namespace Com.Scheherazade.Common.Haptics
         {
             _isAvailable = false;
 
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             try
             {
                 _isAvailable = NativeHapticBridge.haptic_isAvailable();
@@ -87,7 +87,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void Cue(HapticKeyframe keyframe, float intensityScale = 1f)
         {
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable) return;
 
             float intensity = ScaleIntensity(
@@ -114,7 +114,7 @@ namespace Com.Scheherazade.Common.Haptics
         {
             tokenId = -1;
 
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable) return;
 
             try
@@ -142,7 +142,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void UpdateContinuous(int tokenId, HapticKeyframe keyframe)
         {
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (!_isAvailable || tokenId < 0) return;
 
             try
@@ -164,7 +164,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void EndContinuous(int tokenId)
         {
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             if (tokenId < 0) return;
 
             try
@@ -183,7 +183,7 @@ namespace Com.Scheherazade.Common.Haptics
 
         public void CancelAll()
         {
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
             try
             {
                 NativeHapticBridge.haptic_cancelAll();
@@ -215,7 +215,7 @@ namespace Com.Scheherazade.Common.Haptics
     /// </summary>
     internal static class NativeHapticBridge
     {
-#if UNITY_IOS && !UNITY_EDITOR
+#if UNITY_IOS && !UNITY_EDITOR && !PLA_CREATIVE_BUILD
         [DllImport("__Internal")]
         [return: MarshalAs(UnmanagedType.I1)]
         public static extern bool haptic_isAvailable();

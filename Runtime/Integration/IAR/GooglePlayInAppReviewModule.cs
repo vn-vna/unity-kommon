@@ -1,4 +1,4 @@
-#if (UNITY_ANDROID || !UNITY_EDITOR) && GOOGLEPLAY_REVIEW
+#if (UNITY_ANDROID || !UNITY_EDITOR) && GOOGLEPLAY_REVIEW && !PLA_CREATIVE_BUILD
 using System.Collections;
 using Google.Play.Review;
 using UnityEngine;

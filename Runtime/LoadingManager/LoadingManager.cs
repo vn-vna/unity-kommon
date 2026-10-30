@@ -110,6 +110,9 @@ namespace Com.Scheherazade.Common.LoadingManager
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             GameObject go = new GameObject(ManagerGameObjectName);
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();

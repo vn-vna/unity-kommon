@@ -23,6 +23,9 @@ namespace Com.Scheherazade.Common
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void CreateCliStartupOptions()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             if (Instance != null)
             {
                 return;

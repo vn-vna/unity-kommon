@@ -44,6 +44,9 @@ namespace Com.Scheherazade.Common.Leaderboard
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             LeaderboardConfiguration config = LeaderboardConfiguration.Instance;
 
             if (config == null)

@@ -1,4 +1,4 @@
-#if APPLOVIN_MAX
+#if APPLOVIN_MAX && !PLA_CREATIVE_BUILD
 
 using System;
 using System.Linq;

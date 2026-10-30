@@ -1,3 +1,9 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+#endif
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+using Thread = Com.Scheherazade.Common.Threading.CreativeBrowserThread;
+#endif
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -33,11 +39,37 @@ namespace Com.Scheherazade.Common.Threading
             {
                 _mainThreadId = Thread.CurrentThread.ManagedThreadId;
                 _isAvailable = true;
+#if PLA_CREATIVE_BUILD
+                CreativeFrameTiming.Initialize(Time.frameCount, Time.time);
+#endif
             }
         }
 
+#if PLA_CREATIVE_BUILD
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            if (ReferenceEquals(Instance, this) && !_isAvailable)
+            {
+                _mainThreadId = Thread.CurrentThread.ManagedThreadId;
+                _isAvailable = true;
+                CreativeFrameTiming.Initialize(Time.frameCount, Time.time);
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (!ReferenceEquals(Instance, this)) return;
+            _isAvailable = false;
+            CreativeFrameTiming.Shutdown();
+        }
+#endif
+
         private void Update()
         {
+#if PLA_CREATIVE_BUILD
+            CreativeFrameTiming.Advance(Time.frameCount, Time.time);
+#endif
             lock (_actionsLock)
             {
                 if (_actions.Count == 0)
@@ -181,14 +213,22 @@ namespace Com.Scheherazade.Common.Threading
         }
 
         /// <summary>Queues an awaitable main-thread function.</summary>
+#if PLA_CREATIVE_BUILD
+        public static DispatchHandle<T> DispatchAwaitable<T>(Func<Task<T>> action)
+#else
         public static DispatchHandle<T> DispatchAwaitable<T>(Func<Awaitable<T>> action)
+#endif
         {
             TryDispatchAwaitable(action, out DispatchHandle<T> handle);
             return handle;
         }
 
         /// <summary>Queues an awaitable main-thread function that can report progress.</summary>
+#if PLA_CREATIVE_BUILD
+        public static DispatchHandle<T> DispatchAwaitable<T>(Func<DispatchHandle<T>, Task<T>> action)
+#else
         public static DispatchHandle<T> DispatchAwaitable<T>(Func<DispatchHandle<T>, Awaitable<T>> action)
+#endif
         {
             TryDispatchAwaitable(action, out DispatchHandle<T> handle);
             return handle;
@@ -260,7 +300,11 @@ namespace Com.Scheherazade.Common.Threading
             return TryQueueWorkItem(handle, new AwaitableDispatchWorkItem(handle, action));
         }
 
+#if PLA_CREATIVE_BUILD
+        public static bool TryDispatchAwaitable<T>(Func<Task<T>> action, out DispatchHandle<T> handle)
+#else
         public static bool TryDispatchAwaitable<T>(Func<Awaitable<T>> action, out DispatchHandle<T> handle)
+#endif
         {
             handle = new DispatchHandle<T>();
             if (action == null)
@@ -271,7 +315,11 @@ namespace Com.Scheherazade.Common.Threading
             return TryQueueWorkItem(handle, new AwaitableResultDispatchWorkItem<T>(handle, _ => action.Invoke()));
         }
 
+#if PLA_CREATIVE_BUILD
+        public static bool TryDispatchAwaitable<T>(Func<DispatchHandle<T>, Task<T>> action, out DispatchHandle<T> handle)
+#else
         public static bool TryDispatchAwaitable<T>(Func<DispatchHandle<T>, Awaitable<T>> action, out DispatchHandle<T> handle)
+#endif
         {
             handle = new DispatchHandle<T>();
             if (action == null)
@@ -738,11 +786,19 @@ namespace Com.Scheherazade.Common.Threading
         private sealed class AwaitableResultDispatchWorkItem<T> : IDispatchWorkItem
         {
             private readonly DispatchHandle<T> _handle;
+#if PLA_CREATIVE_BUILD
+            private readonly Func<DispatchHandle<T>, Task<T>> _action;
+#else
             private readonly Func<DispatchHandle<T>, Awaitable<T>> _action;
+#endif
 
             public AwaitableResultDispatchWorkItem(
                 DispatchHandle<T> handle,
+#if PLA_CREATIVE_BUILD
+                Func<DispatchHandle<T>, Task<T>> action)
+#else
                 Func<DispatchHandle<T>, Awaitable<T>> action)
+#endif
             {
                 _handle = handle;
                 _action = action;
@@ -767,7 +823,11 @@ namespace Com.Scheherazade.Common.Threading
             {
                 try
                 {
+#if PLA_CREATIVE_BUILD
+                    Task<T> operation = _action.Invoke(_handle);
+#else
                     Awaitable<T> operation = _action.Invoke(_handle);
+#endif
                     if (operation == null)
                     {
                         throw new InvalidOperationException("Dispatched awaitable action returned null.");
@@ -879,6 +939,9 @@ namespace Com.Scheherazade.Common.Threading
         {
             if (ReferenceEquals(Instance, this))
             {
+#if PLA_CREATIVE_BUILD
+                CreativeFrameTiming.Shutdown();
+#endif
                 _isAvailable = false;
                 _mainThreadId = 0;
             }
@@ -914,10 +977,18 @@ namespace Com.Scheherazade.Common.Threading
         public static DispatchHandle DispatchAwaitable(this Func<DispatchHandle, Awaitable> action)
             => Dispatcher.DispatchAwaitable(action);
 
+#if PLA_CREATIVE_BUILD
+        public static DispatchHandle<T> DispatchAwaitable<T>(this Func<Task<T>> action)
+#else
         public static DispatchHandle<T> DispatchAwaitable<T>(this Func<Awaitable<T>> action)
+#endif
             => Dispatcher.DispatchAwaitable(action);
 
+#if PLA_CREATIVE_BUILD
+        public static DispatchHandle<T> DispatchAwaitable<T>(this Func<DispatchHandle<T>, Task<T>> action)
+#else
         public static DispatchHandle<T> DispatchAwaitable<T>(this Func<DispatchHandle<T>, Awaitable<T>> action)
+#endif
             => Dispatcher.DispatchAwaitable(action);
 
         public static void DispatchOnMainThread(this Action action)
@@ -943,6 +1014,21 @@ namespace Com.Scheherazade.Common.Threading
                 )
             );
         
+#if PLA_CREATIVE_BUILD
+        public static Coroutine DispatchOnDispatcher(this Task task)
+        {
+            if (task == null) throw new ArgumentNullException(nameof(task));
+            return Dispatcher.DispatchCoroutine(ObserveCreativeTask(task));
+        }
+
+        private static IEnumerator ObserveCreativeTask(Task task)
+        {
+            while (!task.IsCompleted) yield return null;
+            // Observe completion/error just as the native Awaitable IEnumerator does.
+            task.GetAwaiter().GetResult();
+        }
+#endif
+
         public static Coroutine DispatchOnDispatcher(this IEnumerator coroutine)
             => Dispatcher.DispatchCoroutine(coroutine);
     }

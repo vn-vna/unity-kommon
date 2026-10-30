@@ -97,6 +97,7 @@ namespace Com.Scheherazade.Common.Sound
         public void SetBusVolume(SoundBusType bus, float volume)
         {
             EnsureInitialized();
+#if !PLA_CREATIVE_BUILD || !UNITY_LUNA
             AudioMixerGroup group = bus == SoundBusType.Sfx ? _sfxGroup : _bgmGroup;
             string param = bus == SoundBusType.Sfx ? _sfxVolumeParam : _bgmVolumeParam;
 
@@ -105,6 +106,7 @@ namespace Com.Scheherazade.Common.Sound
                 float db = ToDecibels(Mathf.Clamp01(volume));
                 group.audioMixer.SetFloat(param, db);
             }
+#endif
             // Source gain also works without an optional mixer (the default setup).
             _pool.SetBusVolume(bus, volume);
         }

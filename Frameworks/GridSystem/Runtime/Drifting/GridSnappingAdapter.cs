@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableMath = Com.Scheherazade.Common.Compatibility.CreativeMath;
+#else
+using PortableMath = System.Math;
+#endif
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -59,12 +64,12 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             }
 
             GridCoord predictedDirection = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
-            predictedDirection.x = Math.Clamp(
+            predictedDirection.x = PortableMath.Clamp(
                 predictedDirection.x,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.West) ? -1 : 0,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.East) ? 1 : 0
             );
-            predictedDirection.y = Math.Clamp(
+            predictedDirection.y = PortableMath.Clamp(
                 predictedDirection.y,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.South) ? -1 : 0,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.North) ? 1 : 0

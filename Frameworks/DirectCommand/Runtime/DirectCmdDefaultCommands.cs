@@ -19,6 +19,9 @@ namespace Com.Scheherazade.Common
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void RegisterAllDefaultCommands()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             RegisterAdsCommands();
             RegisterIapCommands();
             RegisterTrackingCommands();

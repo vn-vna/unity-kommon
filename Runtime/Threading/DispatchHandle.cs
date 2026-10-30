@@ -1,3 +1,7 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using AwaitableCompletionSource = Com.Scheherazade.Common.Threading.CreativeCompletionSource;
+#endif
 using System;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -23,7 +27,11 @@ namespace Com.Scheherazade.Common.Threading
     {
         private readonly object _stateLock = new object();
         private readonly TaskCompletionSource<bool> _taskCompletion =
+#if PLA_CREATIVE_BUILD
+            new TaskCompletionSource<bool>();
+#else
             new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
         private readonly AwaitableCompletionSource _awaitableCompletion = new AwaitableCompletionSource();
 
         private DispatchStatus _status = DispatchStatus.Queued;
@@ -184,8 +192,13 @@ namespace Com.Scheherazade.Common.Threading
     public sealed class DispatchHandle<T> : DispatchHandle
     {
         private readonly TaskCompletionSource<T> _taskCompletion =
+#if PLA_CREATIVE_BUILD
+            new TaskCompletionSource<T>();
+        private readonly CreativeCompletionSource<T> _awaitableCompletion = new CreativeCompletionSource<T>();
+#else
             new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly AwaitableCompletionSource<T> _awaitableCompletion = new AwaitableCompletionSource<T>();
+#endif
 
         private T _result;
 
@@ -196,7 +209,11 @@ namespace Com.Scheherazade.Common.Threading
         public new Task<T> Task => _taskCompletion.Task;
 
         /// <summary>A Unity awaitable completion signal that returns the dispatched result.</summary>
+#if PLA_CREATIVE_BUILD
+        public new Task<T> Awaitable => _awaitableCompletion.Awaitable;
+#else
         public new Awaitable<T> Awaitable => _awaitableCompletion.Awaitable;
+#endif
 
         internal bool TrySetResult(T result)
         {

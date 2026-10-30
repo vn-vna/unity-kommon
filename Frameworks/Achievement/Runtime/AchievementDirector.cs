@@ -102,6 +102,9 @@ namespace Com.Scheherazade.Common.Achievement
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             var go = new GameObject("[Scheherazade Achievement Director]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();

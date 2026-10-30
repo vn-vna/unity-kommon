@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 using GooglePlayGames.BasicApi.SavedGame;
@@ -102,7 +102,7 @@ namespace Com.Scheherazade.Common.DataSync
 
         #endregion
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
         public static ISavedGameClient Client => PlayGamesPlatform.Instance?.SavedGame;
 #endif
 
@@ -112,7 +112,7 @@ namespace Com.Scheherazade.Common.DataSync
         {
             IsAvailable = false;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             try
             {
                 return await InitializeInternalAsync();
@@ -139,7 +139,7 @@ namespace Com.Scheherazade.Common.DataSync
 
         public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             await ValidateConnection();
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             ct.ThrowIfCancellationRequested();
@@ -153,7 +153,7 @@ namespace Com.Scheherazade.Common.DataSync
         public async Task<bool> ExistsAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             using Stream stream = await OpenByteReadStream(metadata, ct);
             return stream != null && stream.Length > 0;
@@ -165,7 +165,7 @@ namespace Com.Scheherazade.Common.DataSync
         public async Task<DateTime?> GetLastWriteTimeAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             return (await OpenConnection(key, ct))
                 ?.LastModifiedTimestamp;
 #else
@@ -176,7 +176,7 @@ namespace Com.Scheherazade.Common.DataSync
         public async Task<Stream> OpenReadAsync(
             string key, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             ISavedGameMetadata metadata = await OpenConnection(key, ct);
             return await OpenByteReadStream(metadata, ct);
 #else
@@ -190,7 +190,7 @@ namespace Com.Scheherazade.Common.DataSync
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             ct.ThrowIfCancellationRequested();
             ISavedGameMetadata metadata = await OpenConnection(
                 key,
@@ -225,7 +225,7 @@ namespace Com.Scheherazade.Common.DataSync
 
         private async Task ValidateConnection()
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
             if (PlayGamesPlatform.Instance == null)
             {
                 throw new DataSyncException("Cannot find Play Games Platform instance");
@@ -245,7 +245,7 @@ namespace Com.Scheherazade.Common.DataSync
 #endif
         }
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && GOOGLE_SERVICES_SAVE && !PLA_CREATIVE_BUILD
         private async Task<bool> InitializeInternalAsync()
         {
             if (PlayGamesPlatform.Instance == null)

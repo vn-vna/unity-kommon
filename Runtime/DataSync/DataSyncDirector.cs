@@ -389,6 +389,9 @@ namespace Com.Scheherazade.Common.DataSync
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             if (Instance != null) return;
 
             var go = new GameObject(

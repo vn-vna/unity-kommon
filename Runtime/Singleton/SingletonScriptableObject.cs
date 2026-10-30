@@ -39,8 +39,12 @@ namespace Com.Scheherazade.Common.Singleton
             {
                 if (_cachedConfig == null)
                 {
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+                    _cachedConfig = GlobalReferenceHelper.GetCreativeAttribute<SingletonScriptableConfigAttribute>(typeof(T), true);
+#else
                     _cachedConfig = typeof(T)
                         .GetCustomAttribute<SingletonScriptableConfigAttribute>();
+#endif
                 }
 
                 return _cachedConfig;

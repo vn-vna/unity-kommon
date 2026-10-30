@@ -140,6 +140,10 @@ namespace Com.Scheherazade.Common.ItemDatabase
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            CompleteInitialization(ItemDatabaseLifecycleState.Disabled);
+            return;
+#endif
             if (Instance != null) return;
 
             if (ItemDatabaseConfiguration.LoadCanonical() == null)

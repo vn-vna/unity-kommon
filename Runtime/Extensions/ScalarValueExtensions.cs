@@ -56,6 +56,7 @@ namespace Com.Scheherazade.Common.Extensions
             return int.Parse(s, provider ?? CultureInfo.InvariantCulture);
         }
 
+#if UNITY_EDITOR || !PLA_CREATIVE_BUILD
         public static long ToLong(this string s, IFormatProvider provider = null, long defaultValue = 0)
         {
             if (string.IsNullOrEmpty(s))
@@ -65,6 +66,7 @@ namespace Com.Scheherazade.Common.Extensions
 
             return long.Parse(s, provider ?? CultureInfo.InvariantCulture);
         }
+#endif
 
         public static double ToDouble(this string s, IFormatProvider provider = null, double defaultValue = 0.0)
         {

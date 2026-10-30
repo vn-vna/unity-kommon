@@ -28,6 +28,9 @@ namespace Com.Scheherazade.Common.Integration
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             var centre = Instance;
             if (centre == null)
             {
