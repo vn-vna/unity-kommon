@@ -1,4 +1,4 @@
-#if TRACKING_APPMETRICA
+#if TRACKING_APPMETRICA && !PLA_CREATIVE_BUILD
 
 using System;
 using Com.Scheherazade.Common.Logging;

@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Com.Scheherazade.Common.Integration.InAppPurchase.Processing;
 using UnityEngine;
-#if UNITY_PURCHASING
+#if UNITY_PURCHASING && !PLA_CREATIVE_BUILD
 using UnityEngine.Purchasing.Security;
 #endif
 
@@ -27,7 +27,7 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
                 reason = "Google Play validation is applicable only to Android.";
                 return false;
             }
-#if !UNITY_PURCHASING
+#if !UNITY_PURCHASING || PLA_CREATIVE_BUILD
             reason = "Unity IAP purchasing support is not compiled.";
             return false;
 #else
@@ -58,7 +58,7 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
                 return InAppPurchaseReceiptValidationResult.Rejected(
                     "Google Play receipt validation requires an Android order."
                 );
-#if !UNITY_PURCHASING
+#if !UNITY_PURCHASING || PLA_CREATIVE_BUILD
             return InAppPurchaseReceiptValidationResult.Rejected(
                 "Unity IAP purchasing support is not compiled."
             );
@@ -112,7 +112,7 @@ namespace Com.Scheherazade.Common.Integration.InAppPurchase.Validation
 #endif
         }
 
-#if UNITY_PURCHASING
+#if UNITY_PURCHASING && !PLA_CREATIVE_BUILD
         protected virtual IPurchaseReceipt[] ValidateReceipt(string receipt, byte[] data)
         {
             var validator = new CrossPlatformValidator(data, Application.identifier);

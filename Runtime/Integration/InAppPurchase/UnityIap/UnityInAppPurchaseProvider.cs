@@ -1,4 +1,4 @@
-#if UNITY_PURCHASING
+#if UNITY_PURCHASING && !PLA_CREATIVE_BUILD
 
 using System;
 using System.Collections;

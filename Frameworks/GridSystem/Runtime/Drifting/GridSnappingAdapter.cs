@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableMath = Com.Scheherazade.Common.Compatibility.CreativeMath;
+#else
+using PortableMath = System.Math;
+#endif
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -59,12 +64,12 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
             }
 
             GridCoord predictedDirection = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
-            predictedDirection.x = Math.Clamp(
+            predictedDirection.x = PortableMath.Clamp(
                 predictedDirection.x,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.West) ? -1 : 0,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.East) ? 1 : 0
             );
-            predictedDirection.y = Math.Clamp(
+            predictedDirection.y = PortableMath.Clamp(
                 predictedDirection.y,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.South) ? -1 : 0,
                 _drifter.MovementAbility.HasFlag(DirectionFlag.North) ? 1 : 0
@@ -121,7 +126,7 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
         {
             _occupantScratch.Clear();
             foreach(var member in _drifter.Drifters)_occupantScratch.Add(member.Occupant);
-            return _map.CheckGroupPlaceable(_occupantScratch,relativeStep);
+            return _drifter.CanMove(_occupantScratch, relativeStep);
         }
 
         private IGridOccupant GetFirstOccupant()
@@ -143,6 +148,8 @@ namespace Com.Scheherazade.Common.Frameworks.GridSystem
                 _occupantScratch.Add(drifter.Occupant);
             }
 
+            GridCoord delta = _predictedCell.GridPosition - _currentPositionCell.GridPosition;
+            if (!_drifter.CanMove(_occupantScratch, delta)) return;
             if (!_map.MoveOccupants(_occupantScratch, _currentPositionCell, _predictedCell)) return;
 
             _drifter.NotifyGridDisplacement();

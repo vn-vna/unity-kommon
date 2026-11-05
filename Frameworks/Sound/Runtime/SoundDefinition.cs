@@ -173,5 +173,29 @@ namespace Com.Scheherazade.Common.Sound
 
         public string DisplayLabel =>
             string.IsNullOrEmpty(_displayName) ? _id : _displayName;
+
+#if PLA_CREATIVE_BUILD
+        /// <summary>
+        /// Independently owned runtime settings without unsupported ScriptableObject
+        /// Instantiate. The AudioClip remains borrowed and must not be destroyed with this copy.
+        /// </summary>
+        public SoundDefinition CreateRuntimeCopy()
+        {
+            SoundDefinition copy = CreateInstance<SoundDefinition>();
+            copy._id = _id;
+            copy._displayName = _displayName;
+            copy._bus = _bus;
+            copy._clip = _clip;
+            copy._volume = _volume;
+            copy._pitch = _pitch;
+            copy._loop = _loop;
+            copy._priority = _priority;
+            copy._spatialBlend = _spatialBlend;
+            copy._playOnAwake = _playOnAwake;
+            copy._fadeInSeconds = _fadeInSeconds;
+            copy._fadeOutSeconds = _fadeOutSeconds;
+            return copy;
+        }
+#endif
     }
 }

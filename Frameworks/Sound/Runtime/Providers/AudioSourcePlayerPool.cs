@@ -17,8 +17,8 @@ namespace Com.Scheherazade.Common.Sound
         private const float SweepIntervalSeconds = 0.05f;
         private const int CapacityHint = 32;
 
-        private static readonly WaitForSeconds SweepInterval =
-            new WaitForSeconds(SweepIntervalSeconds);
+        private readonly WaitForSecondsRealtime _sweepInterval =
+            new WaitForSecondsRealtime(SweepIntervalSeconds);
 
         #endregion
 
@@ -43,6 +43,8 @@ namespace Com.Scheherazade.Common.Sound
         private readonly Stack<PooledAudioPlayer> _free =
             new Stack<PooledAudioPlayer>(CapacityHint);
         private int _nextInstanceId = 1;
+        private float _sfxVolume = 1f;
+        private float _bgmVolume = 1f;
 
         #endregion
 
@@ -74,6 +76,7 @@ namespace Com.Scheherazade.Common.Sound
 
         public SoundHandle Play(SoundDefinition def, float volumeScale = 1f)
         {
+            if (def == null || def.Clip == null) return SoundHandle.Invalid;
             PooledAudioPlayer player = Acquire();
             if (player == null)
             {
@@ -84,6 +87,7 @@ namespace Com.Scheherazade.Common.Sound
             }
 
             player.Configure(def, volumeScale);
+            player.SetBusVolume(def.IsBgm ? _bgmVolume : _sfxVolume);
             player.PlayRequest();
             return new SoundHandle(
                 SoundManager.Instance,
@@ -127,20 +131,32 @@ namespace Com.Scheherazade.Common.Sound
             }
         }
 
+        public void SetBusVolume(SoundBusType bus, float volume)
+        {
+            volume = Mathf.Clamp01(volume);
+            if (bus == SoundBusType.Bgm) _bgmVolume = volume;
+            else _sfxVolume = volume;
+            foreach (PooledAudioPlayer player in _players)
+            {
+                if (!player.IsFree && player.Current != null && player.Current.Bus == bus)
+                    player.SetBusVolume(volume);
+            }
+        }
+
         #endregion
 
         #region Private Methods
 
         /// <summary>
         /// Lightweight sweeper: recycles non-looping players whose clip finished
-        /// naturally. Runs on a cached WaitForSeconds interval — no per-frame
+        /// naturally, including while gameplay is paused. Uses an unscaled interval — no per-frame
         /// Update, no per-call allocations.
         /// </summary>
         private IEnumerator SweepFinishedPlayers()
         {
             while (true)
             {
-                yield return SweepInterval;
+                yield return _sweepInterval;
 
                 for (int i = 0; i < _players.Count; i++)
                 {
@@ -163,7 +179,8 @@ namespace Com.Scheherazade.Common.Sound
 
             if (_growable && _players.Count < _maxCapacity)
             {
-                return CreatePlayer();
+                CreatePlayer();
+                return _free.Pop();
             }
 
             return null; // pool exhausted, not growable

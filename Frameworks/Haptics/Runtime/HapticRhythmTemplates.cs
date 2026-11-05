@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableArray = Com.Scheherazade.Common.Compatibility.CreativeArray;
+#else
+using PortableArray = System.Array;
+#endif
 using System;
 using UnityEngine;
 
@@ -124,7 +129,7 @@ namespace Com.Scheherazade.Common.Haptics
                     return new[] { new HapticKeyframe(0f, 0.30f, 0.80f, 0.5f, HapticWaveformType.VibrationBurst) };
 
                 default:
-                    return Array.Empty<HapticKeyframe>();
+                    return PortableArray.Empty<HapticKeyframe>();
             }
         }
 

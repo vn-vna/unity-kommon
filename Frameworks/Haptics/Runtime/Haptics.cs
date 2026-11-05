@@ -1,3 +1,11 @@
+#if PLA_CREATIVE_BUILD
+using Awaitable = System.Threading.Tasks.Task;
+using AwaitableBool = System.Threading.Tasks.Task<bool>;
+using FrameAwaitable = Com.Scheherazade.Common.Threading.CreativeFrameTiming;
+#else
+using AwaitableBool = UnityEngine.Awaitable<bool>;
+using FrameAwaitable = UnityEngine.Awaitable;
+#endif
 using System;
 using System.Collections;
 using System.Threading;
@@ -46,13 +54,13 @@ namespace Com.Scheherazade.Common.Haptics
             return HapticManager.TryCreateIfConfigured();
         }
 
-        public static async Awaitable<bool> InitializeAsync(
+        public static async AwaitableBool InitializeAsync(
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             bool initialized = Initialize();
-            await Awaitable.NextFrameAsync();
+            await FrameAwaitable.NextFrameAsync();
 
             cancellationToken.ThrowIfCancellationRequested();
             return initialized && IsReady;
@@ -63,7 +71,11 @@ namespace Com.Scheherazade.Common.Haptics
         {
             if (cancellationToken.IsCancellationRequested)
             {
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+                return Com.Scheherazade.Common.Compatibility.CreativeTasks.FromCanceled<bool>(cancellationToken);
+#else
                 return Task.FromCanceled<bool>(cancellationToken);
+#endif
             }
 
             return Task.FromResult(Initialize() && IsReady);

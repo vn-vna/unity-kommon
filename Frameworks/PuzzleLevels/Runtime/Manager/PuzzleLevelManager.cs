@@ -106,6 +106,9 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
 #endif
         private static void CreateRuntimeObjects()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             PuzzleLevelManager manager = Instance;
             if (manager == null)
             {

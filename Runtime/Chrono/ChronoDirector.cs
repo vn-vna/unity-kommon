@@ -201,6 +201,9 @@ namespace Com.Scheherazade.Common.Chrono
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             var go = new GameObject("[Scheherazade Chrono Director]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();

@@ -1,4 +1,4 @@
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 #endif
@@ -67,7 +67,7 @@ namespace Com.Scheherazade.Common.UserIdentity
         {
             get
             {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
                 return PlayGamesPlatform.Instance != null
                     && PlayGamesPlatform.Instance.IsAuthenticated();
 #else
@@ -78,7 +78,7 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         public async Task<bool> InitializeAsync(CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             if (PlayGamesPlatform.Instance == null)
             {
                 QuickLog.Warning<GoogleServiceIdentityProvider>(
@@ -116,7 +116,7 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         public async Task<bool> SignInAsync(bool forceUi, CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             if (PlayGamesPlatform.Instance == null)
             {
                 return false;
@@ -161,7 +161,7 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         public Task<bool> SignOutAsync(CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             // This GPGS plugin version exposes no SignOut API. The user can
             // switch accounts through the platform account picker instead.
             QuickLog.Warning<GoogleServiceIdentityProvider>(
@@ -176,7 +176,7 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         public Task<IdentityLink> GetIdentityAsync(CancellationToken ct = default)
         {
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             if (!IsAuthenticated)
             {
                 return Task.FromResult<IdentityLink>(null);
@@ -201,7 +201,7 @@ namespace Com.Scheherazade.Common.UserIdentity
 
         #region Private Methods
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
         private async Task<bool> RunAuthFlowAsync(
             bool forceUiOnSilentFailure,
             CancellationToken ct)

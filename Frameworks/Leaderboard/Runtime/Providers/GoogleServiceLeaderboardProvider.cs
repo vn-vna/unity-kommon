@@ -1,4 +1,4 @@
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
 using GooglePlayGames;
 using GooglePlayGames.BasicApi;
 #endif
@@ -38,7 +38,7 @@ namespace Com.Scheherazade.Common.Leaderboard
         {
             get
             {
-#if UNITY_ANDROID
+#if UNITY_ANDROID && !PLA_CREATIVE_BUILD
                 return
                     LeaderboardProviderFeatures.ReportScore
                     | LeaderboardProviderFeatures.FetchTopScores
@@ -103,7 +103,7 @@ namespace Com.Scheherazade.Common.Leaderboard
             QuickLog.Info<GoogleServiceLeaderboardProvider>(
                 "[{0}] Starting initialization...", providerId);
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             try
             {
                 return await InitializeInternal();
@@ -138,7 +138,7 @@ namespace Com.Scheherazade.Common.Leaderboard
                 "[{0}] ReportScore: id='{1}', score={2}, mode={3}",
                 providerId, leaderboardId, score, mode);
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             try
             {
                 string gpgsId = ResolveMappedId(leaderboardId);
@@ -198,7 +198,7 @@ namespace Com.Scheherazade.Common.Leaderboard
             if (index < 0) index = 0;
             if (size <= 0) size = 1;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             return await FetchLeaderboardInternal(leaderboardId, index, size, timeframe, ct);
 #else
             await Task.CompletedTask;
@@ -220,7 +220,7 @@ namespace Com.Scheherazade.Common.Leaderboard
 
             if (radius < 0) radius = 0;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             return await FetchLeaderboardAroundPlayerInternal(leaderboardId, radius, timeframe, ct);
 #else
             await Task.CompletedTask;
@@ -239,7 +239,7 @@ namespace Com.Scheherazade.Common.Leaderboard
                 "[{0}] FetchPlayerEntry: id='{1}', tf={2}",
                 providerId, leaderboardId, timeframe);
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             return await FetchPlayerEntryInternal(leaderboardId, timeframe, ct);
 #else
             await Task.CompletedTask;
@@ -359,7 +359,7 @@ namespace Com.Scheherazade.Common.Leaderboard
 
         #region Private Methods — GPGS Helpers
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
 
         private Task<bool> InitializeInternal()
         {
@@ -592,7 +592,7 @@ namespace Com.Scheherazade.Common.Leaderboard
 
         #region Private Methods — Fetch Implementations
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
 
         private async Task<LeaderboardResult> FetchLeaderboardInternal(
             string leaderboardId, int index, int size,
@@ -877,7 +877,7 @@ namespace Com.Scheherazade.Common.Leaderboard
 
         #region Private Methods — Cache Parsing & Slicing
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
 
         private void ParseAndCacheTopScores(
             CachedLeaderboardData cacheEntry,
@@ -1023,7 +1023,7 @@ namespace Com.Scheherazade.Common.Leaderboard
             return key;
         }
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
         private static LeaderboardTimeSpan ToLeaderboardTimeSpan(
             LeaderboardTimeframe timeframe)
         {
@@ -1055,7 +1055,7 @@ namespace Com.Scheherazade.Common.Leaderboard
             /// <summary>0-based index of the first entry in RangeEntries.</summary>
             public int RangeStartIndex;
 
-#if UNITY_ANDROID && GOOGLE_PLAY_GAMES
+#if UNITY_ANDROID && GOOGLE_PLAY_GAMES && !PLA_CREATIVE_BUILD
             /// <summary>Token for loading the next page of top scores.</summary>
             public ScorePageToken NextPageToken;
 #endif

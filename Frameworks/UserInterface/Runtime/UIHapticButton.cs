@@ -140,6 +140,9 @@ namespace Com.Scheherazade.Common.UserInterface
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void InitializeRuntimeCoverage()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             SceneManager.sceneLoaded -= HandleSceneLoaded;
             SceneManager.sceneLoaded += HandleSceneLoaded;
             for (int index = 0; index < SceneManager.sceneCount; index++)

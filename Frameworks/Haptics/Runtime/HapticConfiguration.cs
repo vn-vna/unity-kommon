@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableArray = Com.Scheherazade.Common.Compatibility.CreativeArray;
+#else
+using PortableArray = System.Array;
+#endif
 using System;
 using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
@@ -24,7 +29,7 @@ namespace Com.Scheherazade.Common.Haptics
         private ScriptableObject _iosProvider;
 
         [SerializeField]
-        private HapticRhythm[] _rhythms = Array.Empty<HapticRhythm>();
+        private HapticRhythm[] _rhythms = PortableArray.Empty<HapticRhythm>();
 
         #endregion
 
@@ -47,8 +52,8 @@ namespace Com.Scheherazade.Common.Haptics
 
         public HapticRhythm[] Rhythms
         {
-            get => _rhythms ?? Array.Empty<HapticRhythm>();
-            set => _rhythms = value ?? Array.Empty<HapticRhythm>();
+            get => _rhythms ?? PortableArray.Empty<HapticRhythm>();
+            set => _rhythms = value ?? PortableArray.Empty<HapticRhythm>();
         }
 
         public bool HasAnyProvider => _androidProvider != null || _iosProvider != null;

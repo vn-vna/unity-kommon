@@ -1,4 +1,4 @@
-#if FIREBASE_REMOTE && !CREATIVE_WEBGL
+#if FIREBASE_REMOTE && !CREATIVE_WEBGL && !PLA_CREATIVE_BUILD
 using System;
 using System.Collections.Generic;
 using System.IO;

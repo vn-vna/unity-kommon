@@ -119,6 +119,9 @@ namespace Com.Scheherazade.Common.Logging
         )
         {
 #if !NO_LOGGING
+#if PLA_CREATIVE_BUILD && UNITY_LUNA
+            EvaluateCreativeLogArguments(args);
+#else
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] is Func<object> func)
@@ -126,6 +129,7 @@ namespace Com.Scheherazade.Common.Logging
                     args[i] = func();
                 }
             }
+#endif
 
             string msg = args != null && args.Length > 0 ? string.Format(message, args) : message;
 
@@ -143,6 +147,61 @@ namespace Com.Scheherazade.Common.Logging
             Instance.LogMessage(msg, tag, level);
 #endif
         }
+
+#if PLA_CREATIVE_BUILD || UNITY_EDITOR
+        private static void EvaluateCreativeLogArguments(object[] args)
+        {
+            if (args == null) return;
+            for (int index = 0; index < args.Length; index++)
+            {
+                object argument = args[index];
+                if (argument == null) continue;
+                // Bridge marks Func<T> IgnoreCast, erasing an `is`/`as` check.
+                // GetType retains the actual runtime check against JavaScript Function.
+                if (argument.GetType() != typeof(Func<object>)) continue;
+                args[index] = ((Func<object>)argument)();
+            }
+        }
+#endif
+
+#if PLA_CREATIVE_BUILD
+        // Avoid the native compiler's implicit Array.Empty<object>() for omitted
+        // params arguments: Bridge exposes that method as an unsupported Array.empty.
+        [HideInCallstack]
+        public static void Log<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Info,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Log<T>(string message, LogLevel level)
+            => Log(message, typeof(T).Name, level,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Debug<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Debug,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Info<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Info,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Warning<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Warning,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Error<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Error,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+
+        [HideInCallstack]
+        public static void Critical<T>(string message)
+            => Log(message, typeof(T).Name, LogLevel.Critical,
+                Com.Scheherazade.Common.Compatibility.CreativeArray.Empty<object>());
+#endif
 
         [HideInCallstack]
         // ReSharper disable Unity.PerformanceAnalysis
@@ -191,7 +250,11 @@ namespace Com.Scheherazade.Common.Logging
             {
                 Type frameType = frame.GetMethod().DeclaringType;
                 if (frameType == typeof(QuickLog)) continue;
+#if PLA_CREATIVE_BUILD
+                if (!IsVisibleForCreativeLog(frameType)) continue;
+#else
                 if (!frameType.IsVisible) continue;
+#endif
                 if (frameType.FullName.StartsWith("<")) continue;
                 if (frameType.FullName.Contains("System.")) continue;
                 callingType = frameType;
@@ -204,6 +267,28 @@ namespace Com.Scheherazade.Common.Logging
             }
 #endif
         }
+
+#if PLA_CREATIVE_BUILD
+        // Declaring types cannot be pointer/by-ref types. The remaining Type.IsVisible
+        // rules can use Bridge's real type metadata rather than its absent property.
+        private static bool IsVisibleForCreativeLog(Type type)
+        {
+            if (type == null) return false;
+            if (type.IsGenericParameter) return true;
+            if (type.IsArray) return IsVisibleForCreativeLog(type.GetElementType());
+            if (type.IsGenericType)
+            {
+                foreach (Type argument in type.GetGenericArguments())
+                    if (!IsVisibleForCreativeLog(argument)) return false;
+            }
+            while (type != null && type.IsNested)
+            {
+                if (!type.IsNestedPublic) return false;
+                type = type.DeclaringType;
+            }
+            return type != null && type.IsPublic;
+        }
+#endif
 
         [HideInCallstack]
         public static void SDebug(string message, params object[] args)

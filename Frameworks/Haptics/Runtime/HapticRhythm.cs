@@ -1,3 +1,8 @@
+#if PLA_CREATIVE_BUILD
+using PortableArray = Com.Scheherazade.Common.Compatibility.CreativeArray;
+#else
+using PortableArray = System.Array;
+#endif
 using System;
 using Com.Scheherazade.Common.Logging;
 using UnityEngine;
@@ -38,15 +43,15 @@ namespace Com.Scheherazade.Common.Haptics
 
         [Tooltip("Legacy unified timeline retained as a migration fallback")]
         [SerializeField, HideInInspector]
-        private HapticKeyframe[] _keyframes = Array.Empty<HapticKeyframe>();
+        private HapticKeyframe[] _keyframes = PortableArray.Empty<HapticKeyframe>();
 
         [Tooltip("Android-specific timeline; kept sorted by timeSeconds")]
         [SerializeField]
-        private HapticKeyframe[] _androidKeyframes = Array.Empty<HapticKeyframe>();
+        private HapticKeyframe[] _androidKeyframes = PortableArray.Empty<HapticKeyframe>();
 
         [Tooltip("iOS-specific timeline; kept sorted by timeSeconds")]
         [SerializeField]
-        private HapticKeyframe[] _iosKeyframes = Array.Empty<HapticKeyframe>();
+        private HapticKeyframe[] _iosKeyframes = PortableArray.Empty<HapticKeyframe>();
 
         [SerializeField, HideInInspector] private bool _hasAndroidTimeline;
         [SerializeField, HideInInspector] private bool _hasIosTimeline;
@@ -90,7 +95,7 @@ namespace Com.Scheherazade.Common.Haptics
             get => GetKeyframes(ActivePlatform);
             set
             {
-                HapticKeyframe[] source = value ?? Array.Empty<HapticKeyframe>();
+                HapticKeyframe[] source = value ?? PortableArray.Empty<HapticKeyframe>();
                 _keyframes = Clone(source);
                 _androidKeyframes = Clone(source);
                 _iosKeyframes = Clone(source);
@@ -104,7 +109,7 @@ namespace Com.Scheherazade.Common.Haptics
             get => GetKeyframes(HapticRhythmPlatform.Android);
             set
             {
-                _androidKeyframes = value ?? Array.Empty<HapticKeyframe>();
+                _androidKeyframes = value ?? PortableArray.Empty<HapticKeyframe>();
                 _hasAndroidTimeline = true;
             }
         }
@@ -114,7 +119,7 @@ namespace Com.Scheherazade.Common.Haptics
             get => GetKeyframes(HapticRhythmPlatform.Ios);
             set
             {
-                _iosKeyframes = value ?? Array.Empty<HapticKeyframe>();
+                _iosKeyframes = value ?? PortableArray.Empty<HapticKeyframe>();
                 _hasIosTimeline = true;
             }
         }
@@ -170,15 +175,15 @@ namespace Com.Scheherazade.Common.Haptics
             if (hasPlatformTimeline)
             {
                 return (isIos ? _iosKeyframes : _androidKeyframes)
-                    ?? Array.Empty<HapticKeyframe>();
+                    ?? PortableArray.Empty<HapticKeyframe>();
             }
 
-            return _keyframes ?? Array.Empty<HapticKeyframe>();
+            return _keyframes ?? PortableArray.Empty<HapticKeyframe>();
         }
 
         public bool MigrateLegacyKeyframes()
         {
-            HapticKeyframe[] legacy = _keyframes ?? Array.Empty<HapticKeyframe>();
+            HapticKeyframe[] legacy = _keyframes ?? PortableArray.Empty<HapticKeyframe>();
             bool changed = false;
             if (!_hasAndroidTimeline)
             {
@@ -243,7 +248,7 @@ namespace Com.Scheherazade.Common.Haptics
         {
             if (source == null || source.Length == 0)
             {
-                return Array.Empty<HapticKeyframe>();
+                return PortableArray.Empty<HapticKeyframe>();
             }
 
             var clone = new HapticKeyframe[source.Length];

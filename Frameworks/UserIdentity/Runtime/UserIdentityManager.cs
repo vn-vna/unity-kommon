@@ -55,6 +55,9 @@ namespace Com.Scheherazade.Common.UserIdentity
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             UserIdentityConfiguration config = UserIdentityConfiguration.Instance;
 
             if (config == null)

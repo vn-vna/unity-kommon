@@ -1,3 +1,4 @@
+#if !PLA_CREATIVE_BUILD
 using System;
 using Com.Scheherazade.Common.Logging;
 using SRDebugger.Services;
@@ -84,6 +85,9 @@ namespace Com.Scheherazade.Common.DebugCaller
 #endif
         private static void Bootstrap()
         {
+#if PLA_CREATIVE_BUILD
+            return;
+#endif
             DebugCaller existing = _instance != null
                 ? _instance
                 : FindAnyObjectByType<DebugCaller>(FindObjectsInactive.Include);
@@ -484,3 +488,4 @@ namespace Com.Scheherazade.Common.DebugCaller
         #endregion
     }
 }
+#endif
