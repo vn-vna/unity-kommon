@@ -172,8 +172,7 @@ namespace Com.Scheherazade.Common.DebugCaller
                 QuickLog.Info<DebugCaller>(
                     "Gesture completed. Enabling debug mode and requesting SRDebugger."
                 );
-                DebugCallerState.Enable();
-                RequestDebugger();
+                EnableAndShowDebugger();
                 ResetProgressLogging();
                 _gesture.Reset();
                 return;
@@ -233,6 +232,16 @@ namespace Com.Scheherazade.Common.DebugCaller
             );
 
             GUI.color = previousColor;
+        }
+
+        #endregion
+
+        #region Public Methods
+
+        public static void EnableAndShowDebugger()
+        {
+            DebugCallerState.Enable();
+            RequestDebugger();
         }
 
         #endregion
