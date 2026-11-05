@@ -3,7 +3,9 @@
   "rootNamespace": "Com.Scheherazade.Common.DebugCaller",
   "references": [
     "Com.Scheherazade.Common",
-    "StompyRobot.SRDebugger"
+    "StompyRobot.SRDebugger",
+    "Unity.TextMeshPro",
+    "Unity.ugui"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
