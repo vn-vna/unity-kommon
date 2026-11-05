@@ -1,0 +1,7 @@
+{
+    "name": "Com.Scheherazade.SandEngine.Editor",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.SandEngine.Editor",
+    "references": ["Com.Scheherazade.SandEngine"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}

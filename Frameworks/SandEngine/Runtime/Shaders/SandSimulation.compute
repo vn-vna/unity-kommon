@@ -1,0 +1,1577 @@
+#pragma kernel ClearEngine
+#pragma kernel CompactEligible
+#pragma kernel ResolveMovement
+#pragma kernel ResolveLateralMixing
+#pragma kernel ResolveCascade
+#pragma kernel BuildReconciliationProjection
+#pragma kernel DetectReconciliationRisk
+#pragma kernel ReconcileIntents
+#pragma kernel CommitMovement
+#pragma kernel ExtractView
+#pragma kernel ClearCount
+#pragma kernel CountCells
+
+#define THREAD_GROUP_SIZE 256
+#define TYPE_MASK 0xFF
+#define VELOCITY_SHIFT 8
+#define VELOCITY_MASK 0x0000FF00
+#define SAND_TYPE 1
+#define WALL_TYPE 2
+#define HEADSPACE_ROOT_BIT 8
+#define PROJECTED_OCCUPIED 0
+#define PROJECTED_UNVISITED_EMPTY 1
+#define PROJECTED_EXTERIOR_EMPTY 2
+#define PROJECTED_STATE_MASK 3
+#define BASELINE_EXTERIOR_BIT 4
+#define MAX_RECONCILIATION_PASSES 4
+#define REJECTED_MOVEMENT_BIT 16
+#define UNSETTLED_MASK 0x01000000
+#define FALL_SPEED_MULTIPLIER_SHIFT 26
+#define FALL_SPEED_MULTIPLIER_MASK 0x0C000000
+
+RWStructuredBuffer<int> _Current;
+RWStructuredBuffer<int> _Next;
+RWStructuredBuffer<int> _Engine;
+RWStructuredBuffer<int> _InputIntents;
+RWStructuredBuffer<int> _OutputIntents;
+RWStructuredBuffer<int> _ReconciliationStates;
+RWStructuredBuffer<int> _ReconciliationQueue;
+RWStructuredBuffer<uint> _View;
+RWStructuredBuffer<int> _Count;
+
+int _CellCount;
+int _Width;
+int _EnableVerticalSettle;
+int _Height;
+int _DisableGravity;
+int _ConstantFallSpeed;
+int _GravityPerStep;
+int _MaxFallSpeed;
+int _SlideChance;
+int _PreventTemporaryEdgeVacancies;
+int _LateralMixChance;
+int _MixingSeed;
+int _SimulationSeed;
+int _GravityX;
+int _GravityY;
+int _PreserveExistingMoves;
+int _ViewWordCount;
+int _CountType;
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CompactEligible(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int lineIndex=(int)dispatchThreadId.x;
+    bool vertical=_GravityX==0;
+    if(lineIndex>=(vertical?_Width:_Height))return;
+    int length=vertical?_Height:_Width;
+    int startX=vertical?lineIndex:(_GravityX>0?_Width-1:0);
+    int startY=vertical?(_GravityY>0?_Height-1:0):lineIndex;
+    int sx=-_GravityX,sy=-_GravityY,write=0;
+    for(int read=0;read<length;read++){
+        int index=(startY+read*sy)*_Width+startX+read*sx;
+        int cell=_Current[index];int type=cell&TYPE_MASK;
+        if(type==WALL_TYPE||(type==SAND_TYPE&&(cell&UNSETTLED_MASK)!=0)){write=read+1;continue;}
+        if(type!=SAND_TYPE)continue;
+        int target=(startY+write*sy)*_Width+startX+write*sx;
+        if(target!=index){_Current[target]=cell&~VELOCITY_MASK;_Current[index]=0;}
+        write++;
+    }
+}
+
+uint Hash(int x, int y)
+{
+    uint value = (uint)x * 73856093u ^ (uint)y * 19349663u;
+    value ^= value >> 16;
+    value *= 2246822519u;
+    value ^= value >> 13;
+    return value;
+}
+
+uint MixHash(int x, int y, int seed, uint salt)
+{
+    uint value = (uint)x * 73856093u
+        ^ (uint)y * 19349663u
+        ^ (uint)seed * 2654435761u
+        ^ salt;
+    value ^= value >> 16;
+    value *= 2246822519u;
+    value ^= value >> 13;
+    return value;
+}
+
+bool IsInBounds(int x, int y)
+{
+    return x >= 0 && x < _Width && y >= 0 && y < _Height;
+}
+
+bool IsInBoundsIndex(int index)
+{
+    return index >= 0 && index < _CellCount;
+}
+
+bool IsEmpty(int x, int y)
+{
+    bool isEmpty = false;
+    if (IsInBounds(x, y))
+    {
+        isEmpty = _Current[y * _Width + x] == 0;
+    }
+
+    return isEmpty;
+}
+
+int GetVelocity(int cell)
+{
+    return (cell & VELOCITY_MASK) >> VELOCITY_SHIFT;
+}
+
+int WithVelocity(int cell, int velocity)
+{
+    return (cell & ~VELOCITY_MASK) | ((velocity & 0xFF) << VELOCITY_SHIFT);
+}
+
+uint GetViewCell(int cell)
+{
+    uint elementType = (uint)(cell & TYPE_MASK);
+    uint packedColorVariant = (uint)((cell >> 16) & 0xFF);
+    return elementType | (packedColorVariant << 8);
+}
+
+int GetFreeRun(int sourceX, int sourceY, int fallSpeed)
+{
+    int freeRun = 0;
+    int probeX = sourceX + _GravityX;
+    int probeY = sourceY + _GravityY;
+
+    while (freeRun < fallSpeed && IsEmpty(probeX, probeY))
+    {
+        freeRun++;
+        probeX += _GravityX;
+        probeY += _GravityY;
+    }
+
+    return freeRun;
+}
+
+bool CanSlide(int x, int y)
+{
+    return (MixHash(x, y, _MixingSeed ^ _SimulationSeed, 362437u) & 0xFFFFu)
+        < (uint)_SlideChance;
+}
+
+int ResolveSlideDirection(
+    int sourceX,
+    int sourceY,
+    bool canSlidePositive,
+    bool canSlideNegative
+)
+{
+    int direction = canSlideNegative ? -1 : 1;
+    if (canSlidePositive && canSlideNegative)
+    {
+        uint sideHash = MixHash(
+            sourceX,
+            sourceY,
+            _MixingSeed ^ _SimulationSeed,
+            1013904223u
+        );
+        direction = (sideHash & 1u) == 0 ? -1 : 1;
+    }
+
+    return direction;
+}
+
+int GetSlideSteps(
+    int downX,
+    int downY,
+    int perpendicularX,
+    int perpendicularY,
+    int direction,
+    int fallSpeed
+)
+{
+    int slideSteps = 0;
+    int targetX = downX + direction * perpendicularX;
+    int targetY = downY + direction * perpendicularY;
+    int upstreamX = downX - 2 * _GravityX;
+    int upstreamY = downY - 2 * _GravityY;
+    // Match CPU surface avalanches without opening wall-supported cavities.
+    bool surfaceAvalanche = IsInBounds(downX, downY)
+        && (_Current[downY * _Width + downX] & TYPE_MASK) == SAND_TYPE
+        && (!IsInBounds(upstreamX, upstreamY) || IsEmpty(upstreamX, upstreamY));
+
+    for (int step = 1;
+        step <= fallSpeed && IsEmpty(targetX, targetY);
+        step++)
+    {
+        int edgeX = targetX + _GravityX;
+        int edgeY = targetY + _GravityY;
+        bool edgeIsEmpty = IsEmpty(edgeX, edgeY);
+        if (edgeIsEmpty && _PreventTemporaryEdgeVacancies != 0 && !surfaceAvalanche)
+        {
+            break;
+        }
+
+        slideSteps = step;
+        if (edgeIsEmpty)
+        {
+            break;
+        }
+
+        targetX += _GravityX + direction * perpendicularX;
+        targetY += _GravityY + direction * perpendicularY;
+    }
+
+    return slideSteps;
+}
+
+bool TrySlide(
+    int sourceX,
+    int sourceY,
+    int fallSpeed,
+    out int targetX,
+    out int targetY
+)
+{
+    targetX = sourceX;
+    targetY = sourceY;
+    int perpendicularX = _GravityY;
+    int perpendicularY = _GravityX;
+    int downX = sourceX + _GravityX;
+    int downY = sourceY + _GravityY;
+    bool canSlidePositive = IsEmpty(
+        downX + perpendicularX,
+        downY + perpendicularY
+    );
+    bool canSlideNegative = IsEmpty(
+        downX - perpendicularX,
+        downY - perpendicularY
+    );
+
+    bool resolved = false;
+    if ((canSlidePositive || canSlideNegative) && CanSlide(sourceX, sourceY))
+    {
+        int direction = ResolveSlideDirection(
+            sourceX,
+            sourceY,
+            canSlidePositive,
+            canSlideNegative
+        );
+        int upstreamX = sourceX - _GravityX;
+        int upstreamY = sourceY - _GravityY;
+        if (_EnableVerticalSettle != 0 && (_Current[sourceY * _Width + sourceX] & UNSETTLED_MASK) == 0 && IsInBounds(downX, downY)
+            && (_Current[downY * _Width + downX] & TYPE_MASK) == SAND_TYPE
+            && (!IsInBounds(upstreamX, upstreamY) || IsEmpty(upstreamX, upstreamY)))
+        {
+            targetX = downX + direction * perpendicularX;
+            targetY = downY + direction * perpendicularY;
+            while (IsEmpty(targetX + _GravityX, targetY + _GravityY))
+            {
+                targetX += _GravityX;
+                targetY += _GravityY;
+            }
+            return true;
+        }
+        int slideSteps = GetSlideSteps(
+            downX,
+            downY,
+            perpendicularX,
+            perpendicularY,
+            direction,
+            fallSpeed
+        );
+        if (slideSteps > 0)
+        {
+            targetX = sourceX
+                + (_GravityX + direction * perpendicularX) * slideSteps;
+            targetY = sourceY
+                + (_GravityY + direction * perpendicularY) * slideSteps;
+            resolved = true;
+        }
+    }
+
+    return resolved;
+}
+
+void GetCoordinates(int index, out int x, out int y)
+{
+    uint unsignedIndex = (uint)index;
+    uint unsignedWidth = (uint)_Width;
+    x = (int)(unsignedIndex % unsignedWidth);
+    y = (int)(unsignedIndex / unsignedWidth);
+}
+
+bool TryResolveTarget(int sourceIndex, out int targetIndex)
+{
+    targetIndex = -1;
+    int cell = _Current[sourceIndex];
+    bool resolved = false;
+    if ((cell & TYPE_MASK) == SAND_TYPE)
+    {
+        int speedMultiplier = 1 + ((cell & FALL_SPEED_MULTIPLIER_MASK) >> FALL_SPEED_MULTIPLIER_SHIFT);
+        int fallSpeed = _ConstantFallSpeed;
+        if (_DisableGravity == 0)
+        {
+            fallSpeed = GetVelocity(cell) / speedMultiplier + _GravityPerStep;
+            if (fallSpeed > _MaxFallSpeed)
+            {
+                fallSpeed = _MaxFallSpeed;
+            }
+        }
+        fallSpeed = min(255, fallSpeed * speedMultiplier);
+
+        int sourceX = 0;
+        int sourceY = 0;
+        GetCoordinates(sourceIndex, sourceX, sourceY);
+        int freeRun = GetFreeRun(sourceX, sourceY, fallSpeed);
+        if (freeRun > 0)
+        {
+            int targetX = sourceX + _GravityX * freeRun;
+            int targetY = sourceY + _GravityY * freeRun;
+            targetIndex = targetY * _Width + targetX;
+            resolved = true;
+        }
+        else
+        {
+            int slideX = sourceX;
+            int slideY = sourceY;
+            if (TrySlide(sourceX, sourceY, fallSpeed, slideX, slideY))
+            {
+                targetIndex = slideY * _Width + slideX;
+                resolved = true;
+            }
+        }
+    }
+
+    return resolved;
+}
+
+bool IsDirect(int sourceIndex, int targetIndex)
+{
+    int sourceX = 0;
+    int sourceY = 0;
+    int targetX = 0;
+    int targetY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    GetCoordinates(targetIndex, targetX, targetY);
+    return (targetX - sourceX) * _GravityY
+        == (targetY - sourceY) * _GravityX;
+}
+
+int GetSlideSide(int sourceIndex, int targetIndex)
+{
+    int sourceX = 0;
+    int sourceY = 0;
+    int targetX = 0;
+    int targetY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    GetCoordinates(targetIndex, targetX, targetY);
+    int perpendicularX = _GravityY;
+    int perpendicularY = _GravityX;
+    int side = (targetX - sourceX) * perpendicularX
+        + (targetY - sourceY) * perpendicularY;
+    return side > 0 ? 1 : -1;
+}
+
+bool Outranks(int candidateSourceIndex, int incumbentSourceIndex, int targetIndex)
+{
+    bool candidateIsDirect = IsDirect(candidateSourceIndex, targetIndex);
+    bool incumbentIsDirect = IsDirect(incumbentSourceIndex, targetIndex);
+    bool candidateOutranks = candidateSourceIndex < incumbentSourceIndex;
+    if (candidateIsDirect != incumbentIsDirect)
+    {
+        candidateOutranks = candidateIsDirect;
+    }
+    else if (!candidateIsDirect)
+    {
+        int candidateSide = GetSlideSide(candidateSourceIndex, targetIndex);
+        int incumbentSide = GetSlideSide(incumbentSourceIndex, targetIndex);
+        if (candidateSide != incumbentSide)
+        {
+            int targetX = 0;
+            int targetY = 0;
+            GetCoordinates(targetIndex, targetX, targetY);
+            uint sideHash = MixHash(
+                targetX,
+                targetY,
+                _MixingSeed ^ _SimulationSeed,
+                1597334677u
+            );
+            int preferredSide = (sideHash & 1u) == 0 ? -1 : 1;
+            candidateOutranks = candidateSide == preferredSide;
+        }
+    }
+
+    return candidateOutranks;
+}
+
+void ClaimTarget(int sourceIndex, int targetIndex)
+{
+    int candidate = sourceIndex + 1;
+    int incumbent = 0;
+    InterlockedCompareExchange(_Engine[targetIndex], 0, 0, incumbent);
+
+    while (incumbent != candidate)
+    {
+        if (incumbent != 0)
+        {
+            if (!Outranks(sourceIndex, incumbent - 1, targetIndex))
+            {
+                return;
+            }
+        }
+
+        int observed = incumbent;
+        InterlockedCompareExchange(
+            _Engine[targetIndex],
+            incumbent,
+            candidate,
+            observed
+        );
+        if (observed == incumbent)
+        {
+            return;
+        }
+
+        incumbent = observed;
+    }
+}
+
+int GetGravityDistance(int sourceIndex, int targetIndex)
+{
+    int sourceX = 0;
+    int sourceY = 0;
+    int targetX = 0;
+    int targetY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    GetCoordinates(targetIndex, targetX, targetY);
+    return (targetX - sourceX) * _GravityX
+        + (targetY - sourceY) * _GravityY;
+}
+
+bool IsDependencyMove(int sourceIndex, int targetIndex)
+{
+    bool isDependencyMove = false;
+    bool indicesInBounds = IsInBoundsIndex(sourceIndex)
+        && IsInBoundsIndex(targetIndex);
+    if (indicesInBounds)
+    {
+        int sourceCell = _Current[sourceIndex];
+        int targetCell = _Current[targetIndex];
+        bool cellsAreSand = (sourceCell & TYPE_MASK) == SAND_TYPE
+            && (targetCell & TYPE_MASK) == SAND_TYPE;
+        if (cellsAreSand)
+        {
+            int sourceX = 0;
+            int sourceY = 0;
+            int targetX = 0;
+            int targetY = 0;
+            GetCoordinates(sourceIndex, sourceX, sourceY);
+            GetCoordinates(targetIndex, targetX, targetY);
+            int deltaX = targetX - sourceX;
+            int deltaY = targetY - sourceY;
+            int gravityDistance = deltaX * _GravityX + deltaY * _GravityY;
+            int sideDistance = deltaX * _GravityY + deltaY * _GravityX;
+            isDependencyMove = gravityDistance == 1
+                && sideDistance >= -1
+                && sideDistance <= 1;
+        }
+    }
+
+    return isDependencyMove;
+}
+
+bool IsResolvedMove(int sourceIndex, int targetIndex)
+{
+    bool isResolved = false;
+    if (IsInBoundsIndex(targetIndex))
+    {
+        if (_Current[targetIndex] == 0)
+        {
+            isResolved = _InputIntents[targetIndex] == sourceIndex + 1;
+        }
+        else
+        {
+            isResolved = IsDependencyMove(sourceIndex, targetIndex);
+        }
+    }
+
+    return isResolved;
+}
+
+bool IsConfirmedVacating(int sourceIndex)
+{
+    bool isConfirmedVacating = false;
+    if (IsInBoundsIndex(sourceIndex))
+    {
+        int targetPlusOne = _InputIntents[sourceIndex];
+        if (targetPlusOne != 0)
+        {
+            isConfirmedVacating = IsResolvedMove(
+                sourceIndex,
+                targetPlusOne - 1
+            );
+        }
+    }
+
+    return isConfirmedVacating;
+}
+
+int GetUpstreamSourceIndex(int targetIndex, int side)
+{
+    int targetX = 0;
+    int targetY = 0;
+    GetCoordinates(targetIndex, targetX, targetY);
+    int perpendicularX = _GravityY;
+    int perpendicularY = _GravityX;
+    int sourceX = targetX - _GravityX - side * perpendicularX;
+    int sourceY = targetY - _GravityY - side * perpendicularY;
+    return IsInBounds(sourceX, sourceY)
+        ? sourceY * _Width + sourceX
+        : -1;
+}
+
+int GetDependencyIncomingSource(int targetIndex)
+{
+    int incomingSource = -1;
+    for (int side = -1; side <= 1; side++)
+    {
+        int sourceIndex = GetUpstreamSourceIndex(targetIndex, side);
+        if (sourceIndex < 0)
+        {
+            continue;
+        }
+
+        if (_InputIntents[sourceIndex] != targetIndex + 1
+            || !IsDependencyMove(sourceIndex, targetIndex))
+        {
+            continue;
+        }
+
+        if (incomingSource < 0 || sourceIndex < incomingSource)
+        {
+            incomingSource = sourceIndex;
+        }
+    }
+
+    return incomingSource;
+}
+
+bool HasDependencyIncoming(int targetIndex)
+{
+    return GetDependencyIncomingSource(targetIndex) >= 0;
+}
+
+bool IsSafeLateralDependencySource(int sourceIndex, int side)
+{
+    if (_PreventTemporaryEdgeVacancies == 0 || side == 0)
+    {
+        return true;
+    }
+
+    int sourceX = 0;
+    int sourceY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    int perpendicularX = _GravityY;
+    int perpendicularY = _GravityX;
+    int downX = sourceX + _GravityX;
+    int downY = sourceY + _GravityY;
+    return !IsEmpty(downX, downY)
+        && !IsEmpty(
+            downX - side * perpendicularX,
+            downY - side * perpendicularY
+        );
+}
+
+int GetAvailableMixTarget(int sourceIndex, int side)
+{
+    int availableTarget = -1;
+    int sourceX = 0;
+    int sourceY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    int perpendicularX = _GravityY;
+    int perpendicularY = _GravityX;
+    int targetX = sourceX + _GravityX + side * perpendicularX;
+    int targetY = sourceY + _GravityY + side * perpendicularY;
+    if (IsInBounds(targetX, targetY))
+    {
+        int targetIndex = targetY * _Width + targetX;
+        bool targetAvailable = (_Current[targetIndex] & TYPE_MASK) == SAND_TYPE
+            && IsConfirmedVacating(targetIndex)
+            && !HasDependencyIncoming(targetIndex)
+            && IsSafeLateralDependencySource(sourceIndex, side);
+        if (targetAvailable)
+        {
+            availableTarget = targetIndex;
+        }
+    }
+
+    return availableTarget;
+}
+
+int GetPreferredMixTarget(int sourceIndex)
+{
+    if (!IsInBoundsIndex(sourceIndex))
+    {
+        return -1;
+    }
+
+    bool sourceCanMix = (_Current[sourceIndex] & TYPE_MASK) == SAND_TYPE
+        && !IsConfirmedVacating(sourceIndex);
+    if (!sourceCanMix)
+    {
+        return -1;
+    }
+
+    int directTarget = GetAvailableMixTarget(sourceIndex, 0);
+    // Keep parity with the CPU: allow mixing even with a direct vacancy.
+
+    int sourceX = 0;
+    int sourceY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    uint chanceHash = MixHash(
+        sourceX,
+        sourceY,
+        _MixingSeed ^ _SimulationSeed,
+        2769414579u
+    );
+    bool chooseDiagonal = (chanceHash & 0xFFFFu) < (uint)_LateralMixChance;
+    if (!chooseDiagonal)
+    {
+        return directTarget;
+    }
+
+    int negativeTarget = GetAvailableMixTarget(sourceIndex, -1);
+    int positiveTarget = GetAvailableMixTarget(sourceIndex, 1);
+    if (negativeTarget < 0 && positiveTarget < 0)
+    {
+        return directTarget;
+    }
+    if (negativeTarget < 0)
+    {
+        return positiveTarget;
+    }
+
+    if (positiveTarget < 0)
+    {
+        return negativeTarget;
+    }
+
+    uint sideHash = MixHash(
+        sourceX,
+        sourceY,
+        _MixingSeed ^ _SimulationSeed,
+        3266489917u
+    );
+    return (sideHash & 1u) == 0 ? negativeTarget : positiveTarget;
+}
+
+uint GetMixPriority(int sourceIndex, int targetIndex)
+{
+    int sourceX = 0;
+    int sourceY = 0;
+    GetCoordinates(sourceIndex, sourceX, sourceY);
+    uint salt = 668265263u ^ (uint)targetIndex * 374761393u;
+    return MixHash(
+        sourceX,
+        sourceY,
+        _MixingSeed ^ _SimulationSeed,
+        salt
+    );
+}
+
+int GetWinningMixSource(int targetIndex)
+{
+    int winningSource = -1;
+    if (IsInBoundsIndex(targetIndex))
+    {
+        uint winningPriority = 0xFFFFFFFFu;
+        for (int side = -1; side <= 1; side++)
+        {
+            int sourceIndex = GetUpstreamSourceIndex(targetIndex, side);
+            if (sourceIndex < 0)
+            {
+                continue;
+            }
+
+            if (GetPreferredMixTarget(sourceIndex) != targetIndex)
+            {
+                continue;
+            }
+
+            uint priority = GetMixPriority(sourceIndex, targetIndex);
+            if (winningSource < 0
+                || priority < winningPriority
+                || (priority == winningPriority && sourceIndex < winningSource))
+            {
+                winningSource = sourceIndex;
+                winningPriority = priority;
+            }
+        }
+    }
+
+    return winningSource;
+}
+
+int ResolveLateralIntentForSource(int sourceIndex)
+{
+    int resolvedIntent = _InputIntents[sourceIndex];
+    if ((_Current[sourceIndex] & TYPE_MASK) == SAND_TYPE
+        && !IsConfirmedVacating(sourceIndex))
+    {
+        int targetIndex = GetPreferredMixTarget(sourceIndex);
+        if (targetIndex >= 0)
+        {
+            if (GetWinningMixSource(targetIndex) == sourceIndex)
+            {
+                resolvedIntent = targetIndex + 1;
+            }
+        }
+    }
+
+    return resolvedIntent;
+}
+
+int GetCascadeIncomingCell(int targetIndex)
+{
+    int sourceIndex = GetDependencyIncomingSource(targetIndex);
+    int incomingCell = 0;
+    if (sourceIndex >= 0)
+    {
+        incomingCell = WithVelocity(_Current[sourceIndex], 1);
+    }
+
+    return incomingCell;
+}
+
+int GetIncomingCell(int targetIndex)
+{
+    int sourcePlusOne = _InputIntents[targetIndex];
+    int incomingCell = 0;
+    if (sourcePlusOne != 0)
+    {
+        int sourceIndex = sourcePlusOne - 1;
+        if (IsInBoundsIndex(sourceIndex))
+        {
+            bool sourceMovesHere = _InputIntents[sourceIndex]
+                == targetIndex + 1;
+            if (sourceMovesHere)
+            {
+                int sourceCell = _Current[sourceIndex];
+                int traveled = GetGravityDistance(sourceIndex, targetIndex);
+                if ((sourceCell & TYPE_MASK) == SAND_TYPE && traveled > 0)
+                {
+                    incomingCell = WithVelocity(
+                        sourceCell,
+                        traveled > 255 ? 255 : traveled
+                    );
+                }
+            }
+        }
+    }
+
+    return incomingCell;
+}
+
+bool IsOpenForReconciliation(int cell)
+{
+    int type = cell & TYPE_MASK;
+    // Falling grains are not a solid air seal. Keep this in sync with SandAlgorithmCore.
+    return type == 0 || (type == SAND_TYPE && (cell & UNSETTLED_MASK) != 0);
+}
+
+bool IsProjectedEmptyForReconciliation(int index)
+{
+    int cell = _Current[index];
+    int cellType = cell & TYPE_MASK;
+    bool projectedEmpty = false;
+    if (cellType == 0)
+    {
+        projectedEmpty = IsOpenForReconciliation(GetIncomingCell(index));
+    }
+    else if (cellType == SAND_TYPE)
+    {
+        if (!IsConfirmedVacating(index)) return (cell & UNSETTLED_MASK) != 0;
+        int incomingSource = GetDependencyIncomingSource(index);
+        if (incomingSource < 0) return true;
+        projectedEmpty = (_Current[incomingSource] & UNSETTLED_MASK) != 0;
+    }
+
+    return projectedEmpty;
+}
+
+void BuildProjectedStates()
+{
+    for (int index = 0; index < _CellCount; index++)
+    {
+        int baselineState = _ReconciliationStates[index]
+            & (BASELINE_EXTERIOR_BIT | HEADSPACE_ROOT_BIT | REJECTED_MOVEMENT_BIT);
+        int projectedState = IsProjectedEmptyForReconciliation(index)
+            ? PROJECTED_UNVISITED_EMPTY
+            : PROJECTED_OCCUPIED;
+        _ReconciliationStates[index] = baselineState | projectedState;
+    }
+}
+
+void BuildCurrentExteriorStates()
+{
+    for (int index = 0; index < _CellCount; index++)
+    {
+        _ReconciliationStates[index] = IsOpenForReconciliation(_Current[index])
+            ? PROJECTED_UNVISITED_EMPTY
+            : PROJECTED_OCCUPIED;
+    }
+}
+
+void CaptureBaselineExterior()
+{
+    for (int index = 0; index < _CellCount; index++)
+    {
+        _ReconciliationStates[index] = (_ReconciliationStates[index] & PROJECTED_STATE_MASK)
+            == PROJECTED_EXTERIOR_EMPTY
+            ? BASELINE_EXTERIOR_BIT | (_ReconciliationStates[index] & HEADSPACE_ROOT_BIT)
+            : 0;
+    }
+}
+
+void MarkExteriorNeighbor(int index, inout int queueTail)
+{
+    if ((_ReconciliationStates[index] & PROJECTED_STATE_MASK)
+        != PROJECTED_UNVISITED_EMPTY)
+    {
+        return;
+    }
+
+    _ReconciliationStates[index] = (_ReconciliationStates[index]
+        & ~PROJECTED_STATE_MASK) | PROJECTED_EXTERIOR_EMPTY;
+    _ReconciliationQueue[queueTail++] = index;
+}
+
+void MarkEnclosedHeadspaceRoots()
+{
+    int lineCount = _GravityX == 0 ? _Width : _Height;
+    int depthCount = _GravityX == 0 ? _Height : _Width;
+    for (int depth = 0; depth < depthCount; depth++)
+    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+    {
+        int x = _GravityX == 0 ? lineIndex : _GravityX > 0 ? depth : _Width - 1 - depth;
+        int y = _GravityY == 0 ? lineIndex : _GravityY > 0 ? depth : _Height - 1 - depth;
+        int root = y * _Width + x;
+        if ((_ReconciliationStates[root] & PROJECTED_STATE_MASK) != PROJECTED_UNVISITED_EMPTY) continue;
+        _ReconciliationStates[root] = PROJECTED_EXTERIOR_EMPTY | HEADSPACE_ROOT_BIT;
+        int head = 0;
+        int tail = 1;
+        _ReconciliationQueue[0] = root;
+        while (head < tail)
+        {
+            int index = _ReconciliationQueue[head++];
+            int cx = index % _Width;
+            int cy = index / _Width;
+            if (cx > 0) MarkExteriorNeighbor(index - 1, tail);
+            if (cx + 1 < _Width) MarkExteriorNeighbor(index + 1, tail);
+            if (cy > 0) MarkExteriorNeighbor(index - _Width, tail);
+            if (cy + 1 < _Height) MarkExteriorNeighbor(index + _Width, tail);
+        }
+    }
+}
+
+void MarkExteriorProjectedVacancies()
+{
+    int queueHead = 0;
+    int queueTail = 0;
+    for (int index = 0; index < _CellCount; index++)
+    {
+        int x = 0;
+        int y = 0;
+        GetCoordinates(index, x, y);
+        bool isBoundary = x == 0
+            || x == _Width - 1
+            || y == 0
+            || y == _Height - 1;
+        bool isHeadspaceRoot = (_ReconciliationStates[index] & HEADSPACE_ROOT_BIT) != 0;
+        if ((isBoundary || isHeadspaceRoot)
+            && (_ReconciliationStates[index] & PROJECTED_STATE_MASK)
+                == PROJECTED_UNVISITED_EMPTY)
+        {
+            _ReconciliationStates[index] = (_ReconciliationStates[index]
+                & ~PROJECTED_STATE_MASK) | PROJECTED_EXTERIOR_EMPTY;
+            _ReconciliationQueue[queueTail++] = index;
+        }
+    }
+
+    while (queueHead < queueTail)
+    {
+        int index = _ReconciliationQueue[queueHead++];
+        int x = 0;
+        int y = 0;
+        GetCoordinates(index, x, y);
+        if (x > 0)
+        {
+            MarkExteriorNeighbor(index - 1, queueTail);
+        }
+
+        if (x + 1 < _Width)
+        {
+            MarkExteriorNeighbor(index + 1, queueTail);
+        }
+
+        if (y > 0)
+        {
+            MarkExteriorNeighbor(index - _Width, queueTail);
+        }
+
+        if (y + 1 < _Height)
+        {
+            MarkExteriorNeighbor(index + _Width, queueTail);
+        }
+    }
+}
+
+bool IsAirborneMoveIntoEmpty(int sourceIndex)
+{
+    // Match SandAlgorithmCore: preserve only owned moves into truly empty cells.
+    // A dependency into sand may no longer be valid after that sand is canceled.
+    if ((_Current[sourceIndex] & UNSETTLED_MASK) == 0) return false;
+    int targetIndex = _InputIntents[sourceIndex] - 1;
+    if (targetIndex < 0 || targetIndex >= _CellCount) return false;
+    return _Current[targetIndex] == 0 && _InputIntents[targetIndex] == sourceIndex + 1;
+}
+
+void CancelMovementPath(int sourceIndex)
+{
+    for (int step = 0; step < _CellCount; step++)
+    {
+        int targetPlusOne = _InputIntents[sourceIndex];
+        if (targetPlusOne == 0)
+        {
+            return;
+        }
+
+        int targetIndex = targetPlusOne - 1;
+        if (!IsResolvedMove(sourceIndex, targetIndex))
+        {
+            return;
+        }
+
+        if (IsAirborneMoveIntoEmpty(sourceIndex)) return;
+        _ReconciliationStates[sourceIndex] |= REJECTED_MOVEMENT_BIT;
+        _InputIntents[sourceIndex] = 0;
+        if ((_Current[targetIndex] & TYPE_MASK) != SAND_TYPE
+            || !IsConfirmedVacating(targetIndex)
+            || GetDependencyIncomingSource(targetIndex) >= 0)
+        {
+            return;
+        }
+
+        sourceIndex = targetIndex;
+    }
+}
+
+bool HasEnclosedCreatedVacancy()
+{
+    for (int index = 0; index < _CellCount; index++)
+    {
+        bool isEnclosed = (_ReconciliationStates[index]
+            & PROJECTED_STATE_MASK) == PROJECTED_UNVISITED_EMPTY;
+        bool wasExterior = (_ReconciliationStates[index]
+            & BASELINE_EXTERIOR_BIT) != 0;
+        bool wasSand = (_Current[index] & TYPE_MASK) == SAND_TYPE;
+        if (isEnclosed && (wasExterior || wasSand))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void CancelBlockedDependencies()
+{
+    bool vertical = _GravityX == 0;
+    int lineCount = vertical ? _Width : _Height;
+    int depthCount = vertical ? _Height : _Width;
+    for (int depth = 0; depth < depthCount; depth++)
+    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+    {
+        int x = vertical ? lineIndex : _GravityX > 0 ? _Width - 1 - depth : depth;
+        int y = !vertical ? lineIndex : _GravityY > 0 ? _Height - 1 - depth : depth;
+        int index = y * _Width + x;
+        int target = _InputIntents[index] - 1;
+        if ((_Current[index] & TYPE_MASK) != SAND_TYPE || target < 0 || target >= _CellCount) continue;
+        if ((_Current[target] & TYPE_MASK) == SAND_TYPE && !IsConfirmedVacating(target))
+            _InputIntents[index] = 0;
+    }
+}
+
+void ClearSourceIntents()
+{
+    for (int index = 0; index < _CellCount; index++)
+    {
+        if ((_Current[index] & TYPE_MASK) == SAND_TYPE && !IsAirborneMoveIntoEmpty(index))
+        {
+            if (_InputIntents[index] != 0) _ReconciliationStates[index] |= REJECTED_MOVEMENT_BIT;
+            _InputIntents[index] = 0;
+        }
+    }
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void BuildReconciliationProjection(
+    uint3 dispatchThreadId : SV_DispatchThreadID
+)
+{
+    int index = (int)dispatchThreadId.x;
+    if (index < _CellCount)
+    {
+        _ReconciliationStates[index] =
+            IsProjectedEmptyForReconciliation(index)
+            ? PROJECTED_UNVISITED_EMPTY
+            : PROJECTED_OCCUPIED;
+    }
+}
+
+int AddProjectedRingCell(int x, int y, int bit, int mask)
+{
+    if (!IsInBounds(x, y))
+    {
+        return mask;
+    }
+
+    int index = y * _Width + x;
+    bool projectedEmpty = (_ReconciliationStates[index]
+        & PROJECTED_STATE_MASK) == PROJECTED_UNVISITED_EMPTY;
+    return projectedEmpty ? mask | (1 << bit) : mask;
+}
+
+int CountSetBits(int value)
+{
+    int count = 0;
+    while (value != 0)
+    {
+        value &= value - 1;
+        count++;
+    }
+
+    return count;
+}
+
+int BuildCurrentDirectEmptyMask(int x, int y)
+{
+    int mask = 0;
+    mask |= IsEmpty(x, y - 1) ? 1 << 0 : 0;
+    mask |= IsEmpty(x + 1, y) ? 1 << 2 : 0;
+    mask |= IsEmpty(x, y + 1) ? 1 << 4 : 0;
+    mask |= IsEmpty(x - 1, y) ? 1 << 6 : 0;
+    return mask;
+}
+
+bool CouldSealExteriorPassage(int x, int y)
+{
+    int ringMask = 0;
+    ringMask = AddProjectedRingCell(x, y - 1, 0, ringMask);
+    ringMask = AddProjectedRingCell(x + 1, y - 1, 1, ringMask);
+    ringMask = AddProjectedRingCell(x + 1, y, 2, ringMask);
+    ringMask = AddProjectedRingCell(x + 1, y + 1, 3, ringMask);
+    ringMask = AddProjectedRingCell(x, y + 1, 4, ringMask);
+    ringMask = AddProjectedRingCell(x - 1, y + 1, 5, ringMask);
+    ringMask = AddProjectedRingCell(x - 1, y, 6, ringMask);
+    ringMask = AddProjectedRingCell(x - 1, y - 1, 7, ringMask);
+
+    int projectedDirectMask = ringMask & 0x55;
+    int projectedDirectCount = CountSetBits(projectedDirectMask);
+    bool isBoundary = x == 0
+        || x == _Width - 1
+        || y == 0
+        || y == _Height - 1;
+    if (isBoundary && projectedDirectCount > 0)
+    {
+        return true;
+    }
+
+    int currentDirectMask = BuildCurrentDirectEmptyMask(x, y);
+    int survivingCurrentMask = currentDirectMask & projectedDirectMask;
+    int closingCurrentMask = currentDirectMask
+        & ~projectedDirectMask
+        & 0x55;
+    if (survivingCurrentMask != 0 && closingCurrentMask != 0)
+    {
+        return true;
+    }
+
+    int currentDirectCount = CountSetBits(currentDirectMask);
+    if (projectedDirectCount <= 1)
+    {
+        return currentDirectCount >= 2;
+    }
+
+    int reachableMask = projectedDirectMask & -projectedDirectMask;
+    for (int step = 0; step < 8; step++)
+    {
+        int adjacentMask = ((reachableMask << 1)
+            | (reachableMask >> 7)
+            | (reachableMask >> 1)
+            | (reachableMask << 7)) & 0xFF;
+        reachableMask |= adjacentMask & ringMask;
+    }
+
+    return (reachableMask & projectedDirectMask) != projectedDirectMask;
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void DetectReconciliationRisk(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int lineIndex = (int)dispatchThreadId.x;
+    bool vertical = _GravityX == 0;
+    int lineCount = vertical ? _Width : _Height;
+    if (lineIndex >= lineCount)
+    {
+        return;
+    }
+
+    int lineLength = vertical ? _Height : _Width;
+    int x = vertical ? lineIndex : 0;
+    int y = vertical ? 0 : lineIndex;
+    if (vertical && _GravityY < 0)
+    {
+        y = _Height - 1;
+    }
+    else if (!vertical && _GravityX < 0)
+    {
+        x = _Width - 1;
+    }
+
+    bool connectedToUpstream = true;
+    bool hasRisk = false;
+    for (int depth = 0; depth < lineLength; depth++)
+    {
+        int index = y * _Width + x;
+        bool projectedEmpty = (_ReconciliationStates[index]
+            & PROJECTED_STATE_MASK) == PROJECTED_UNVISITED_EMPTY;
+        if (!projectedEmpty
+            && (_Current[index] & TYPE_MASK) == 0
+            && CouldSealExteriorPassage(x, y))
+        {
+            hasRisk = true;
+        }
+
+        if (!projectedEmpty)
+        {
+            connectedToUpstream = false;
+        }
+        else if (!connectedToUpstream
+            && (_Current[index] & TYPE_MASK) == SAND_TYPE)
+        {
+            hasRisk = true;
+        }
+
+        x += _GravityX;
+        y += _GravityY;
+    }
+
+    _ReconciliationQueue[lineIndex] = hasRisk ? 1 : 0;
+}
+
+bool HasClearCavityRoof(int x, int y)
+{
+    if (!IsEmpty(x, y)) return false;
+    while (IsInBounds(x, y))
+    {
+        int index = y * _Width + x;
+        if ((_Current[index] & TYPE_MASK) == WALL_TYPE) return true;
+        if (_Current[index] != 0
+            || (_ReconciliationStates[index] & PROJECTED_STATE_MASK) != PROJECTED_UNVISITED_EMPTY) return false;
+        x -= _GravityX;
+        y -= _GravityY;
+    }
+    return false;
+}
+
+bool TryGetCavityLanding(int x, int y, out int landing)
+{
+    landing = -1;
+    while (IsEmpty(x, y))
+    {
+        int index = y * _Width + x;
+        if (GetIncomingCell(index) != 0) return false;
+        landing = index;
+        x += _GravityX;
+        y += _GravityY;
+    }
+    return landing >= 0;
+}
+
+bool TryGetStationaryStrandTop(int source, out int top)
+{
+    top = source;
+    int x = source % _Width;
+    int y = source / _Width;
+    while (IsInBounds(x, y))
+    {
+        int index = y * _Width + x;
+        int cell = _Current[index];
+        if ((cell & TYPE_MASK) == WALL_TYPE) return true;
+        if (cell == 0) return (_ReconciliationStates[index] & PROJECTED_STATE_MASK) == PROJECTED_UNVISITED_EMPTY;
+        if ((cell & TYPE_MASK) != SAND_TYPE || (cell & UNSETTLED_MASK) != 0
+            || IsConfirmedVacating(index) || HasDependencyIncoming(index)) return false;
+        top = index;
+        x -= _GravityX;
+        y -= _GravityY;
+    }
+    return true;
+}
+
+void RecoverRejectedCavityExits()
+{
+    bool hasRejectedMovement = false;
+    for (int index = 0; index < _CellCount; index++)
+    {
+        if ((_ReconciliationStates[index] & REJECTED_MOVEMENT_BIT) == 0) continue;
+        hasRejectedMovement = true;
+        break;
+    }
+    if (!hasRejectedMovement) return;
+
+    // Match the CPU recovery: retain every accepted move and retry only a
+    // rejected roofed-cavity exit with a fully refilled stationary strand.
+    BuildProjectedStates();
+    bool vertical = _GravityX == 0;
+    int lineCount = vertical ? _Width : _Height;
+    int depthCount = vertical ? _Height : _Width;
+    int gravityStride = _GravityY * _Width + _GravityX;
+    for (int depth = 0; depth < depthCount; depth++)
+    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+    {
+        int x = vertical ? lineIndex : _GravityX > 0 ? _Width - 1 - depth : depth;
+        int y = !vertical ? lineIndex : _GravityY > 0 ? _Height - 1 - depth : depth;
+        int source = y * _Width + x;
+        int originalTarget;
+        if ((_ReconciliationStates[source] & REJECTED_MOVEMENT_BIT) == 0
+            || (_Current[source] & TYPE_MASK) != SAND_TYPE
+            || (_Current[source] & UNSETTLED_MASK) != 0
+            || IsConfirmedVacating(source)
+            || !TryResolveTarget(source, originalTarget)) continue;
+
+        int side = (originalTarget % _Width - x) * _GravityY
+            + (originalTarget / _Width - y) * _GravityX;
+        if (side != -1 && side != 1) continue;
+        int downX = x + _GravityX;
+        int downY = y + _GravityY;
+        if (!IsInBounds(downX, downY)) continue;
+        int support = downY * _Width + downX;
+        int supportType = _Current[support] & TYPE_MASK;
+        if (supportType != WALL_TYPE
+            && (supportType != SAND_TYPE || (_Current[support] & UNSETTLED_MASK) != 0
+                || IsConfirmedVacating(support))) continue;
+
+        int entryX = downX + side * _GravityY;
+        int entryY = downY + side * _GravityX;
+        int landing;
+        int top;
+        if (!HasClearCavityRoof(entryX, entryY)
+            || !TryGetCavityLanding(entryX, entryY, landing)
+            || CouldSealExteriorPassage(landing % _Width, landing / _Width)
+            || !TryGetStationaryStrandTop(source, top)) continue;
+
+        _InputIntents[source] = landing + 1;
+        _InputIntents[landing] = source + 1;
+        _ReconciliationStates[landing] &= ~PROJECTED_STATE_MASK;
+        for (int index = source; index != top;)
+        {
+            int upstream = index - gravityStride;
+            _InputIntents[upstream] = index + 1;
+            _ReconciliationStates[index] &= ~PROJECTED_STATE_MASK;
+            index = upstream;
+        }
+        _ReconciliationStates[top] = (_ReconciliationStates[top] & ~PROJECTED_STATE_MASK)
+            | PROJECTED_UNVISITED_EMPTY;
+    }
+}
+
+void ReconcileExistingIntents()
+{
+    bool hasReconciliationRisk = false;
+    int lineCount = _GravityX == 0 ? _Width : _Height;
+    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+    {
+        if (_ReconciliationQueue[lineIndex] != 0)
+        {
+            hasReconciliationRisk = true;
+            break;
+        }
+    }
+
+    if (!hasReconciliationRisk)
+    {
+        return;
+    }
+
+    BuildCurrentExteriorStates();
+    MarkExteriorProjectedVacancies();
+    MarkEnclosedHeadspaceRoots();
+    CaptureBaselineExterior();
+    bool finished = false;
+    for (int reconciliationPass = 0;
+        reconciliationPass < MAX_RECONCILIATION_PASSES;
+        reconciliationPass++)
+    {
+        BuildProjectedStates();
+        MarkExteriorProjectedVacancies();
+        bool hasEnclosedVacancy = false;
+        bool canceledMovement = false;
+        for (int index = 0; index < _CellCount; index++)
+        {
+            bool isEnclosed = (_ReconciliationStates[index]
+                & PROJECTED_STATE_MASK) == PROJECTED_UNVISITED_EMPTY;
+            bool wasExterior = (_ReconciliationStates[index]
+                & BASELINE_EXTERIOR_BIT) != 0;
+            bool wasSand = (_Current[index] & TYPE_MASK) == SAND_TYPE;
+            if (!isEnclosed || (!wasExterior && !wasSand))
+            {
+                continue;
+            }
+
+            hasEnclosedVacancy = true;
+            if (!wasSand || !IsConfirmedVacating(index))
+            {
+                continue;
+            }
+
+            CancelMovementPath(index);
+            canceledMovement = true;
+        }
+
+        if (!hasEnclosedVacancy)
+        {
+            finished = true;
+            break;
+        }
+
+        if (!canceledMovement)
+        {
+            ClearSourceIntents();
+            finished = true;
+            break;
+        }
+    }
+
+    if (!finished)
+    {
+        BuildProjectedStates();
+        MarkExteriorProjectedVacancies();
+        if (HasEnclosedCreatedVacancy())
+        {
+            ClearSourceIntents();
+        }
+    }
+    CancelBlockedDependencies();
+}
+
+[numthreads(1, 1, 1)]
+void ReconcileIntents(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int lineCount = _GravityX == 0 ? _Width : _Height;
+    bool hasRisk = false;
+    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+    {
+        if (_ReconciliationQueue[lineIndex] == 0) continue;
+        hasRisk = true;
+        break;
+    }
+    if (!hasRisk) return;
+    ReconcileExistingIntents();
+    RecoverRejectedCavityExits();
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ClearEngine(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int index = (int)dispatchThreadId.x;
+    if (index < _CellCount)
+    {
+        _Engine[index] = 0;
+    }
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ResolveMovement(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int sourceIndex = (int)dispatchThreadId.x;
+    if (sourceIndex >= _CellCount)
+    {
+        return;
+    }
+
+    int targetIndex;
+    if (!TryResolveTarget(sourceIndex, targetIndex))
+    {
+        return;
+    }
+
+    _Engine[sourceIndex] = targetIndex + 1;
+    ClaimTarget(sourceIndex, targetIndex);
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ResolveLateralMixing(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int sourceIndex = (int)dispatchThreadId.x;
+    if (sourceIndex < _CellCount)
+    {
+        _OutputIntents[sourceIndex] = ResolveLateralIntentForSource(sourceIndex);
+    }
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ResolveCascade(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int lineIndex = (int)dispatchThreadId.x;
+    bool vertical = _GravityX == 0;
+    int lineCount = vertical ? _Width : _Height;
+    if (lineIndex >= lineCount)
+    {
+        return;
+    }
+
+    int scanLength = vertical ? _Height : _Width;
+    int x = vertical
+        ? lineIndex
+        : (_GravityX > 0 ? _Width - 1 : 0);
+    int y = vertical
+        ? (_GravityY > 0 ? _Height - 1 : 0)
+        : lineIndex;
+    int scanX = -_GravityX;
+    int scanY = -_GravityY;
+    int downstreamIndex = -1;
+    int downstreamVacates = 0;
+
+    for (int step = 0; step < scanLength; step++)
+    {
+        int index = y * _Width + x;
+        int cell = _Current[index];
+        int resolvedIntent = _InputIntents[index];
+        bool isSand = (cell & TYPE_MASK) == SAND_TYPE;
+        bool currentVacates = isSand && IsConfirmedVacating(index);
+        int currentTarget = resolvedIntent - 1;
+        bool movesIntoOtherCell = currentVacates
+            && currentTarget != downstreamIndex;
+        if (isSand
+            && (cell & UNSETTLED_MASK) == 0
+            && downstreamVacates != 0
+            && (!currentVacates
+                || (_PreserveExistingMoves == 0 && movesIntoOtherCell)))
+        {
+            resolvedIntent = downstreamIndex + 1;
+            currentVacates = true;
+        }
+
+        _OutputIntents[index] = resolvedIntent;
+        bool hasDependencyIncoming = currentVacates
+            && HasDependencyIncoming(index);
+        downstreamIndex = index;
+        downstreamVacates = currentVacates && !hasDependencyIncoming ? 1 : 0;
+        x += scanX;
+        y += scanY;
+    }
+}
+
+int SettleSupportedCell(int cell, int index)
+{
+    if ((cell & TYPE_MASK) != SAND_TYPE || (cell & UNSETTLED_MASK) == 0) return cell;
+    int x = index % _Width + _GravityX;
+    int y = index / _Width + _GravityY;
+    if (!IsInBounds(x, y)) return cell & ~UNSETTLED_MASK;
+    int support = _Current[y * _Width + x];
+    int type = support & TYPE_MASK;
+    return type == WALL_TYPE || (type == SAND_TYPE && (support & UNSETTLED_MASK) == 0)
+        ? cell & ~UNSETTLED_MASK : cell;
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CommitMovement(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int index = (int)dispatchThreadId.x;
+    if (index >= _CellCount)
+    {
+        return;
+    }
+
+    int cell = _Current[index];
+    if (cell == 0)
+    {
+        _Next[index] = SettleSupportedCell(GetIncomingCell(index), index);
+        return;
+    }
+
+    if ((cell & TYPE_MASK) != SAND_TYPE)
+    {
+        _Next[index] = cell;
+        return;
+    }
+
+    int targetPlusOne = _InputIntents[index];
+    if (targetPlusOne == 0)
+    {
+        _Next[index] = SettleSupportedCell(WithVelocity(cell, 0), index);
+        return;
+    }
+
+    int targetIndex = targetPlusOne - 1;
+    if (!IsResolvedMove(index, targetIndex))
+    {
+        _Next[index] = SettleSupportedCell(cell, index);
+        return;
+    }
+
+    _Next[index] = SettleSupportedCell(GetCascadeIncomingCell(index), index);
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ExtractView(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int wordIndex = (int)dispatchThreadId.x;
+    if (wordIndex >= _ViewWordCount)
+    {
+        return;
+    }
+
+    int cellIndex = wordIndex * 2;
+    uint packedView = 0u;
+    if (cellIndex < _CellCount)
+    {
+        packedView |= GetViewCell(_Current[cellIndex]);
+    }
+
+    if (cellIndex + 1 < _CellCount)
+    {
+        packedView |= GetViewCell(_Current[cellIndex + 1]) << 16;
+    }
+
+    _View[wordIndex] = packedView;
+}
+
+[numthreads(1, 1, 1)]
+void ClearCount(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _Count[0] = 0;
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CountCells(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int index = (int)dispatchThreadId.x;
+    if (index >= _CellCount)
+    {
+        return;
+    }
+
+    int cell = _Current[index];
+    bool shouldCount = _CountType == 0
+        ? cell != 0
+        : (cell & TYPE_MASK) == SAND_TYPE;
+    if (shouldCount)
+    {
+        int originalValue = 0;
+        InterlockedAdd(_Count[0], 1, originalValue);
+    }
+}

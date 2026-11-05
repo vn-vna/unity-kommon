@@ -1,0 +1,1987 @@
+#if !PLA_CREATIVE_BUILD
+using System;
+using Com.Scheherazade.Common.Frameworks.GridSystem;
+using SandIntBuffer = Unity.Collections.NativeArray<int>;
+
+namespace Com.Scheherazade.Common.Frameworks.SandEngine
+{
+    internal static class SandAlgorithmCore
+    {
+        public const int AlgorithmVersion = 16;
+        public const int TypeMask = 0xFF;
+        public const int VelocityShift = 8;
+        public const int VelocityMask = 0x0000FF00;
+
+        private const uint HashMultiplierX = 73856093u;
+        private const uint HashMultiplierY = 19349663u;
+        private const uint HashScramble = 2246822519u;
+        private const int HashShiftXor = 16;
+        private const int HashShiftFinal = 13;
+        private const uint MixSeedMultiplier = 2654435761u;
+        private const uint MixChanceSalt = 2769414579u;
+        private const uint MixSideSalt = 3266489917u;
+        private const uint MixPrioritySalt = 668265263u;
+        private const uint MixTargetMultiplier = 374761393u;
+        private const uint SlideChanceSalt = 362437u;
+        private const uint SlideDirectionSalt = 1013904223u;
+        private const uint SlidePrioritySalt = 1597334677u;
+        private const int ProjectedOccupied = 0;
+        private const int ProjectedUnvisitedEmpty = 1;
+        private const int ProjectedExteriorEmpty = 2;
+        private const int ProjectedStateMask = 3;
+        private const int BaselineExteriorBit = 4;
+        private const int HeadspaceRootBit = 8;
+        private const int RejectedMovementBit = 16;
+        private const int MaxIntentReconciliationPasses = 4;
+
+        public static SandStepSettings NormalizeStep(
+            StepParams stepParams,
+            int width,
+            int height,
+            int simulationSeed
+        )
+        {
+            int maxFallSpeed = Math.Max(1, Math.Min(255, stepParams.MaxFallSpeed));
+            int constantFallSpeed = Math.Max(
+                1,
+                Math.Min(255, stepParams.ConstantFallSpeed)
+            );
+            int gravityPerStep = Math.Max(
+                1,
+                Math.Min(maxFallSpeed, stepParams.GravityPerStep)
+            );
+            GridCoord gravityDirection = NormalizeGravityDirection(
+                stepParams.GravityDirection
+            );
+            return new SandStepSettings(
+                width,
+                height,
+                stepParams.DisableGravity,
+                constantFallSpeed,
+                gravityPerStep,
+                maxFallSpeed,
+                Math.Max(0, Math.Min(65536, stepParams.SlideChance)),
+                stepParams.PreventTemporaryEdgeVacancies,
+                stepParams.EnableLateralMixing,
+                Math.Max(0, Math.Min(65536, stepParams.LateralMixChance)),
+                Math.Max(1, Math.Min(3, stepParams.LateralMixPasses)),
+                stepParams.MixingSeed,
+                gravityDirection.x,
+                gravityDirection.y,
+                simulationSeed,
+                stepParams.EnableVerticalSettle
+            );
+        }
+
+        public static bool TryResolveTarget(
+            SandIntBuffer current,
+            int sourceIndex,
+            SandStepSettings settings,
+            out int targetIndex
+        )
+        {
+            int cell = current[sourceIndex];
+            if ((cell & TypeMask) != (int)ElementType.Sand)
+            {
+                targetIndex = -1;
+                return false;
+            }
+
+            int speedMultiplier = SandCell.GetFallSpeedMultiplier(cell);
+            int baseFallSpeed = settings.disableGravity
+                ? settings.constantFallSpeed
+                : GetAcceleratedFallSpeed(cell, settings, speedMultiplier);
+            int fallSpeed = Math.Min(255, baseFallSpeed * speedMultiplier);
+
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int freeRun = GetFreeRun(
+                current,
+                sourceX,
+                sourceY,
+                fallSpeed,
+                settings
+            );
+            if (freeRun > 0)
+            {
+                int targetX = sourceX + settings.gravityX * freeRun;
+                int targetY = sourceY + settings.gravityY * freeRun;
+                targetIndex = targetY * settings.width + targetX;
+                return true;
+            }
+
+            if (TrySlide(
+                current,
+                sourceX,
+                sourceY,
+                fallSpeed,
+                settings,
+                out int slideX,
+                out int slideY
+            ))
+            {
+                targetIndex = slideY * settings.width + slideX;
+                return true;
+            }
+
+            targetIndex = -1;
+            return false;
+        }
+
+        public static bool Outranks(
+            int candidateSourceIndex,
+            int incumbentSourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            bool candidateIsDirect = IsDirect(
+                candidateSourceIndex,
+                targetIndex,
+                settings
+            );
+            bool incumbentIsDirect = IsDirect(
+                incumbentSourceIndex,
+                targetIndex,
+                settings
+            );
+            if (candidateIsDirect != incumbentIsDirect)
+            {
+                return candidateIsDirect;
+            }
+
+            if (!candidateIsDirect)
+            {
+                int candidateSide = GetSlideSide(
+                    candidateSourceIndex,
+                    targetIndex,
+                    settings
+                );
+                int incumbentSide = GetSlideSide(
+                    incumbentSourceIndex,
+                    targetIndex,
+                    settings
+                );
+                if (candidateSide != incumbentSide)
+                {
+                    int targetX = targetIndex % settings.width;
+                    int targetY = targetIndex / settings.width;
+                    int preferredSide = GetRandomizedSide(
+                        targetX,
+                        targetY,
+                        settings,
+                        SlidePrioritySalt
+                    );
+                    return candidateSide == preferredSide;
+                }
+            }
+
+            return candidateSourceIndex < incumbentSourceIndex;
+        }
+
+        public static int GetGravityLineCount(SandStepSettings settings)
+        {
+            return settings.gravityX == 0 ? settings.width : settings.height;
+        }
+
+        public static int GetLateralMixPassCount(SandStepSettings settings)
+        {
+            return settings.enableLateralMixing
+                ? settings.lateralMixPasses
+                : 0;
+        }
+
+        public static int ResolveLateralIntentForSource(
+            SandIntBuffer current,
+            SandIntBuffer inputIntents,
+            int sourceIndex,
+            SandStepSettings settings
+        )
+        {
+            int existingIntent = inputIntents[sourceIndex];
+            if ((current[sourceIndex] & TypeMask) != (int)ElementType.Sand
+                || IsConfirmedVacating(
+                    current,
+                    inputIntents,
+                    sourceIndex,
+                    settings
+                ))
+            {
+                return existingIntent;
+            }
+
+            int targetIndex = GetPreferredMixTarget(
+                current,
+                inputIntents,
+                sourceIndex,
+                settings
+            );
+            if (targetIndex < 0)
+            {
+                return existingIntent;
+            }
+
+            int winningSource = GetWinningMixSource(
+                current,
+                inputIntents,
+                targetIndex,
+                settings
+            );
+            return winningSource == sourceIndex
+                ? targetIndex + 1
+                : existingIntent;
+        }
+
+        /// <summary>Stable O(n) compaction of eligible grains; fresh airborne grains delimit segments.</summary>
+        public static void CompactEligibleLine(SandIntBuffer grid, int line, SandStepSettings settings)
+        {
+            bool vertical=settings.gravityX==0;
+            int length=vertical?settings.height:settings.width;
+            int startX=vertical?line:(settings.gravityX>0?settings.width-1:0);
+            int startY=vertical?(settings.gravityY>0?settings.height-1:0):line;
+            int sx=-settings.gravityX,sy=-settings.gravityY,write=0;
+            for(int read=0;read<length;read++)
+            {
+                int index=(startY+read*sy)*settings.width+startX+read*sx;
+                int cell=grid[index];int type=cell&TypeMask;
+                if(type==(int)ElementType.Wall || type==(int)ElementType.Sand&&SandCell.IsUnsettled(cell)){write=read+1;continue;}
+                if(type!=(int)ElementType.Sand)continue;
+                int target=(startY+write*sy)*settings.width+startX+write*sx;
+                if(target!=index){grid[target]=WithVelocity(cell,0);grid[index]=0;}
+                write++;
+            }
+        }
+
+        public static void ResolveCascadeLine(
+            SandIntBuffer current,
+            SandIntBuffer inputIntents,
+            SandIntBuffer outputIntents,
+            int line,
+            SandStepSettings settings,
+            bool preserveExistingMoves
+        )
+        {
+            int lineCount = GetGravityLineCount(settings);
+            if (line < 0 || line >= lineCount) return;
+
+            bool vertical = settings.gravityX == 0;
+            int scanLength = vertical ? settings.height : settings.width;
+            int x = vertical
+                ? line
+                : (settings.gravityX > 0 ? settings.width - 1 : 0);
+            int y = vertical
+                ? (settings.gravityY > 0 ? settings.height - 1 : 0)
+                : line;
+            int scanX = -settings.gravityX;
+            int scanY = -settings.gravityY;
+            int downstreamIndex = -1;
+            bool downstreamOpen = false;
+
+            for (int step = 0; step < scanLength; step++)
+            {
+                int index = y * settings.width + x;
+                int cell = current[index];
+                int resolvedIntent = inputIntents[index];
+                bool isSand = (cell & TypeMask) == (int)ElementType.Sand;
+                bool currentVacates = isSand && IsConfirmedVacating(
+                    current,
+                    inputIntents,
+                    index,
+                    settings
+                );
+                int currentTarget = resolvedIntent - 1;
+                bool movesIntoOtherCell = currentVacates
+                    && currentTarget != downstreamIndex;
+                if (isSand
+                    && !SandCell.IsUnsettled(cell)
+                    && downstreamOpen
+                    && (!currentVacates
+                        || (!preserveExistingMoves && movesIntoOtherCell)))
+                {
+                    resolvedIntent = downstreamIndex + 1;
+                    currentVacates = true;
+                }
+
+                outputIntents[index] = resolvedIntent;
+                bool hasDependencyIncoming = currentVacates
+                    && HasDependencyIncoming(
+                        current,
+                        inputIntents,
+                        index,
+                        settings
+                    );
+                downstreamIndex = index;
+                downstreamOpen = currentVacates && !hasDependencyIncoming;
+                x += scanX;
+                y += scanY;
+            }
+        }
+
+        public static void ReconcileIntents(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates,
+            SandIntBuffer floodQueue,
+            SandStepSettings settings
+        )
+        {
+            int lineCount = GetGravityLineCount(settings);
+            bool hasReconciliationRisk = false;
+            for (int line = 0; line < lineCount; line++)
+            {
+                if (floodQueue[line] == 0)
+                {
+                    continue;
+                }
+
+                hasReconciliationRisk = true;
+                break;
+            }
+
+            if (!hasReconciliationRisk)
+            {
+                return;
+            }
+
+            ReconcileExistingIntents(current, intents, projectedStates, floodQueue, settings);
+            RecoverRejectedCavityExits(current, intents, projectedStates, settings);
+        }
+
+        private static void ReconcileExistingIntents(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates,
+            SandIntBuffer floodQueue,
+            SandStepSettings settings
+        )
+        {
+            BuildCurrentExteriorStates(current, projectedStates);
+            MarkExteriorProjectedVacancies(
+                current,
+                projectedStates,
+                floodQueue,
+                settings
+            );
+            MarkEnclosedHeadspaceRoots(projectedStates, floodQueue, settings);
+            CaptureBaselineExterior(projectedStates);
+            for (int pass = 0; pass < MaxIntentReconciliationPasses; pass++)
+            {
+                BuildProjectedStates(
+                    current,
+                    intents,
+                    projectedStates,
+                    settings
+                );
+                MarkExteriorProjectedVacancies(
+                    current,
+                    projectedStates,
+                    floodQueue,
+                    settings
+                );
+                bool hasEnclosedVacancy = false;
+                bool canceledMovement = false;
+                for (int index = 0; index < current.Length; index++)
+                {
+                    if (!IsProblematicProjectedVacancy(
+                        current,
+                        projectedStates,
+                        index
+                    ))
+                    {
+                        continue;
+                    }
+
+                    hasEnclosedVacancy = true;
+                    if ((current[index] & TypeMask) != (int)ElementType.Sand
+                        || !IsConfirmedVacating(
+                            current,
+                            intents,
+                            index,
+                            settings
+                        ))
+                    {
+                        continue;
+                    }
+
+                    CancelMovementPath(current, intents, projectedStates, index, settings);
+                    canceledMovement = true;
+                }
+
+                if (!hasEnclosedVacancy)
+                {
+                    CancelBlockedDependencies(current, intents, settings);
+                    return;
+                }
+
+                if (!canceledMovement)
+                {
+                    ClearSourceIntents(current, intents, projectedStates);
+                    return;
+                }
+            }
+
+            BuildProjectedStates(
+                current,
+                intents,
+                projectedStates,
+                settings
+            );
+            MarkExteriorProjectedVacancies(
+                current,
+                projectedStates,
+                floodQueue,
+                settings
+            );
+            if (HasEnclosedCreatedVacancy(current, projectedStates))
+            {
+                ClearSourceIntents(current, intents, projectedStates);
+            }
+            CancelBlockedDependencies(current, intents, settings);
+        }
+
+        private static void RecoverRejectedCavityExits(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates,
+            SandStepSettings settings
+        )
+        {
+            bool hasRejectedMovement = false;
+            for (int index = 0; index < current.Length; index++)
+            {
+                if ((projectedStates[index] & RejectedMovementBit) == 0) continue;
+                hasRejectedMovement = true;
+                break;
+            }
+            if (!hasRejectedMovement) return;
+
+            // Preserve the legacy result. Only a rejected, settled exit into a
+            // roofed compartment may retry, with its whole source strand refilled.
+            // This creates surface headspace, never a buried vacancy or an air seal.
+            BuildProjectedStates(current, intents, projectedStates, settings);
+            bool vertical = settings.gravityX == 0;
+            int lineCount = GetGravityLineCount(settings);
+            int depthCount = vertical ? settings.height : settings.width;
+            int gravityStride = settings.gravityY * settings.width + settings.gravityX;
+            for (int depth = 0; depth < depthCount; depth++)
+            for (int line = 0; line < lineCount; line++)
+            {
+                int x = vertical ? line : settings.gravityX > 0 ? settings.width - 1 - depth : depth;
+                int y = !vertical ? line : settings.gravityY > 0 ? settings.height - 1 - depth : depth;
+                int source = y * settings.width + x;
+                if ((projectedStates[source] & RejectedMovementBit) == 0
+                    || (current[source] & TypeMask) != (int)ElementType.Sand
+                    || SandCell.IsUnsettled(current[source])
+                    || IsConfirmedVacating(current, intents, source, settings)
+                    || !TryResolveTarget(current, source, settings, out int originalTarget)) continue;
+
+                int side = (originalTarget % settings.width - x) * settings.gravityY
+                    + (originalTarget / settings.width - y) * settings.gravityX;
+                if (side != -1 && side != 1) continue;
+                int downX = x + settings.gravityX;
+                int downY = y + settings.gravityY;
+                if (!InBounds(downX, downY, settings)) continue;
+                int support = downY * settings.width + downX;
+                int supportType = current[support] & TypeMask;
+                if (supportType != (int)ElementType.Wall
+                    && (supportType != (int)ElementType.Sand
+                        || SandCell.IsUnsettled(current[support])
+                        || IsConfirmedVacating(current, intents, support, settings))) continue;
+
+                int entryX = downX + side * settings.gravityY;
+                int entryY = downY + side * settings.gravityX;
+                if (!HasClearCavityRoof(current, projectedStates, entryX, entryY, settings)
+                    || !TryGetCavityLanding(current, intents, entryX, entryY, settings, out int landing)
+                    || CouldSealExteriorPassage(current, projectedStates,
+                        landing % settings.width, landing / settings.width, settings)
+                    || !TryGetStationaryStrandTop(current, intents, projectedStates,
+                        source, settings, out int top)) continue;
+
+                intents[source] = landing + 1;
+                intents[landing] = source + 1;
+                projectedStates[landing] &= ~ProjectedStateMask;
+                for (int index = source; index != top;)
+                {
+                    int upstream = index - gravityStride;
+                    intents[upstream] = index + 1;
+                    projectedStates[index] &= ~ProjectedStateMask;
+                    index = upstream;
+                }
+                projectedStates[top] = (projectedStates[top] & ~ProjectedStateMask)
+                    | ProjectedUnvisitedEmpty;
+            }
+        }
+
+        private static bool HasClearCavityRoof(
+            SandIntBuffer current, SandIntBuffer projectedStates,
+            int x, int y, SandStepSettings settings
+        )
+        {
+            if (!IsEmpty(current, x, y, settings)) return false;
+            while (InBounds(x, y, settings))
+            {
+                int index = y * settings.width + x;
+                if ((current[index] & TypeMask) == (int)ElementType.Wall) return true;
+                if (current[index] != 0
+                    || (projectedStates[index] & ProjectedStateMask) != ProjectedUnvisitedEmpty) return false;
+                x -= settings.gravityX;
+                y -= settings.gravityY;
+            }
+            return false;
+        }
+
+        private static bool TryGetCavityLanding(
+            SandIntBuffer current, SandIntBuffer intents,
+            int x, int y, SandStepSettings settings, out int landing
+        )
+        {
+            landing = -1;
+            while (IsEmpty(current, x, y, settings))
+            {
+                int index = y * settings.width + x;
+                if (GetIncomingCell(current, intents, index, settings) != 0) return false;
+                landing = index;
+                x += settings.gravityX;
+                y += settings.gravityY;
+            }
+            return landing >= 0;
+        }
+
+        private static bool TryGetStationaryStrandTop(
+            SandIntBuffer current, SandIntBuffer intents, SandIntBuffer projectedStates,
+            int source, SandStepSettings settings, out int top
+        )
+        {
+            top = source;
+            int x = source % settings.width;
+            int y = source / settings.width;
+            while (InBounds(x, y, settings))
+            {
+                int index = y * settings.width + x;
+                int cell = current[index];
+                if ((cell & TypeMask) == (int)ElementType.Wall) return true;
+                if (cell == 0) return (projectedStates[index] & ProjectedStateMask) == ProjectedUnvisitedEmpty;
+                if ((cell & TypeMask) != (int)ElementType.Sand || SandCell.IsUnsettled(cell)
+                    || IsConfirmedVacating(current, intents, index, settings)
+                    || HasDependencyIncoming(current, intents, index, settings)) return false;
+                top = index;
+                x -= settings.gravityX;
+                y -= settings.gravityY;
+            }
+            return true;
+        }
+
+        private static void CancelBlockedDependencies(
+            SandIntBuffer current, SandIntBuffer intents, SandStepSettings settings
+        )
+        {
+            // A canceled target no longer vacates. Propagate that cancellation
+            // upstream before commit, otherwise its incoming grain disappears.
+            // Every dependency advances one gravity step, so one downstream-to-
+            // upstream pass also covers dependencies between neighboring lines.
+            bool vertical = settings.gravityX == 0;
+            int lineCount = GetGravityLineCount(settings);
+            int depthCount = vertical ? settings.height : settings.width;
+            for (int depth = 0; depth < depthCount; depth++)
+            for (int line = 0; line < lineCount; line++)
+            {
+                int x = vertical ? line : settings.gravityX > 0 ? settings.width - 1 - depth : depth;
+                int y = !vertical ? line : settings.gravityY > 0 ? settings.height - 1 - depth : depth;
+                int index = y * settings.width + x;
+                int target = intents[index] - 1;
+                if ((current[index] & TypeMask) == (int)ElementType.Sand
+                    && InBounds(target, current.Length)
+                    && (current[target] & TypeMask) == (int)ElementType.Sand
+                    && !IsConfirmedVacating(current, intents, target, settings))
+                {
+                    intents[index] = 0;
+                }
+            }
+        }
+
+        public static int ProjectCellState(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int index,
+            SandStepSettings settings
+        )
+        {
+            return IsProjectedEmpty(current, intents, index, settings)
+                ? ProjectedUnvisitedEmpty
+                : ProjectedOccupied;
+        }
+
+        public static bool HasProjectedLineRisk(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates,
+            int line,
+            SandStepSettings settings
+        )
+        {
+            int lineCount = GetGravityLineCount(settings);
+            if (line < 0 || line >= lineCount) return false;
+
+            bool vertical = settings.gravityX == 0;
+            int lineLength = vertical ? settings.height : settings.width;
+            int x = vertical ? line : 0;
+            int y = vertical ? 0 : line;
+            if (vertical && settings.gravityY < 0)
+            {
+                y = settings.height - 1;
+            }
+            else if (!vertical && settings.gravityX < 0)
+            {
+                x = settings.width - 1;
+            }
+
+            bool connectedToUpstream = true;
+            for (int depth = 0; depth < lineLength; depth++)
+            {
+                int index = y * settings.width + x;
+                bool projectedEmpty = (projectedStates[index]
+                    & ProjectedStateMask) == ProjectedUnvisitedEmpty;
+                if (!projectedEmpty
+                    && (current[index] & TypeMask)
+                        == (int)ElementType.Empty
+                    && CouldSealExteriorPassage(
+                        current,
+                        projectedStates,
+                        x,
+                        y,
+                        settings
+                    ))
+                {
+                    return true;
+                }
+
+                if (!projectedEmpty)
+                {
+                    connectedToUpstream = false;
+                }
+                else if (!connectedToUpstream
+                    && (current[index] & TypeMask) == (int)ElementType.Sand)
+                {
+                    return true;
+                }
+
+                x += settings.gravityX;
+                y += settings.gravityY;
+            }
+
+            return false;
+        }
+
+        private static bool CouldSealExteriorPassage(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates,
+            int x,
+            int y,
+            SandStepSettings settings
+        )
+        {
+            int ringMask = 0;
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x,
+                y - 1,
+                0,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x + 1,
+                y - 1,
+                1,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x + 1,
+                y,
+                2,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x + 1,
+                y + 1,
+                3,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x,
+                y + 1,
+                4,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x - 1,
+                y + 1,
+                5,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x - 1,
+                y,
+                6,
+                ringMask,
+                settings
+            );
+            ringMask = AddProjectedRingCell(
+                projectedStates,
+                x - 1,
+                y - 1,
+                7,
+                ringMask,
+                settings
+            );
+
+            int projectedDirectMask = ringMask & 0x55;
+            int projectedDirectCount = CountSetBits(projectedDirectMask);
+            if ((x == 0
+                    || x == settings.width - 1
+                    || y == 0
+                    || y == settings.height - 1)
+                && projectedDirectCount > 0)
+            {
+                return true;
+            }
+
+            int currentDirectMask = BuildCurrentDirectEmptyMask(
+                current,
+                x,
+                y,
+                settings
+            );
+            int survivingCurrentMask = currentDirectMask
+                & projectedDirectMask;
+            int closingCurrentMask = currentDirectMask
+                & ~projectedDirectMask
+                & 0x55;
+            if (survivingCurrentMask != 0 && closingCurrentMask != 0)
+            {
+                return true;
+            }
+
+            int currentDirectCount = CountSetBits(currentDirectMask);
+            if (projectedDirectCount <= 1)
+            {
+                return currentDirectCount >= 2;
+            }
+
+            int reachableMask = projectedDirectMask
+                & -projectedDirectMask;
+            for (int step = 0; step < 8; step++)
+            {
+                int adjacentMask = ((reachableMask << 1)
+                    | (reachableMask >> 7)
+                    | (reachableMask >> 1)
+                    | (reachableMask << 7)) & 0xFF;
+                reachableMask |= adjacentMask & ringMask;
+            }
+
+            return (reachableMask & projectedDirectMask)
+                != projectedDirectMask;
+        }
+
+        private static int AddProjectedRingCell(
+            SandIntBuffer projectedStates,
+            int x,
+            int y,
+            int bit,
+            int mask,
+            SandStepSettings settings
+        )
+        {
+            if (!InBounds(x, y, settings)) return mask;
+
+            int index = y * settings.width + x;
+            bool projectedEmpty = (projectedStates[index]
+                & ProjectedStateMask) == ProjectedUnvisitedEmpty;
+            return projectedEmpty ? mask | (1 << bit) : mask;
+        }
+
+        private static int BuildCurrentDirectEmptyMask(
+            SandIntBuffer current,
+            int x,
+            int y,
+            SandStepSettings settings
+        )
+        {
+            int mask = 0;
+            if (IsEmpty(current, x, y - 1, settings)) mask |= 1 << 0;
+            if (IsEmpty(current, x + 1, y, settings)) mask |= 1 << 2;
+            if (IsEmpty(current, x, y + 1, settings)) mask |= 1 << 4;
+            if (IsEmpty(current, x - 1, y, settings)) mask |= 1 << 6;
+            return mask;
+        }
+
+        private static int CountSetBits(int value)
+        {
+            int count = 0;
+            while (value != 0)
+            {
+                value &= value - 1;
+                count++;
+            }
+
+            return count;
+        }
+
+        public static int CommitCell(
+            SandIntBuffer current,
+            SandIntBuffer engine,
+            int index,
+            SandStepSettings settings
+        )
+        {
+            int cell = current[index];
+            if (cell == 0)
+            {
+                return SettleSupportedCell(GetIncomingCell(current, engine, index, settings), current, index, settings);
+            }
+
+            if ((cell & TypeMask) != (int)ElementType.Sand)
+            {
+                return cell;
+            }
+
+            int targetPlusOne = engine[index];
+            if (targetPlusOne == 0)
+            {
+                return SettleSupportedCell(WithVelocity(cell, 0), current, index, settings);
+            }
+
+            int targetIndex = targetPlusOne - 1;
+            if (!IsResolvedMove(current, engine, index, targetIndex, settings))
+            {
+                return SettleSupportedCell(cell, current, index, settings);
+            }
+
+            return SettleSupportedCell(GetCascadeIncomingCell(current, engine, index, settings), current, index, settings);
+        }
+
+        private static int SettleSupportedCell(int cell, SandIntBuffer current, int index, SandStepSettings settings)
+        {
+            if ((cell & TypeMask) != (int)ElementType.Sand || !SandCell.IsUnsettled(cell)) return cell;
+            int x = index % settings.width + settings.gravityX;
+            int y = index / settings.width + settings.gravityY;
+            if (!InBounds(x, y, settings)) return SandCell.WithUnsettled(cell, false);
+            int support = current[y * settings.width + x];
+            ElementType type = SandCell.GetElementType(support);
+            return type == ElementType.Wall || type == ElementType.Sand && !SandCell.IsUnsettled(support)
+                ? SandCell.WithUnsettled(cell, false) : cell;
+        }
+
+        public static int CanonicalizeCell(int cell)
+        {
+            return (cell & TypeMask) == (int)ElementType.Empty ? 0 : cell;
+        }
+
+        public static int CalculateCellCount(int width, int height)
+        {
+            long cellCount = (long)width * height;
+            if (cellCount > int.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(width),
+                    "Sand grid dimensions exceed the supported cell count."
+                );
+            }
+
+            return (int)cellCount;
+        }
+
+        private static int GetIncomingCell(
+            SandIntBuffer current,
+            SandIntBuffer engine,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourcePlusOne = engine[targetIndex];
+            if (sourcePlusOne == 0)
+            {
+                return 0;
+            }
+
+            int sourceIndex = sourcePlusOne - 1;
+            if (!InBounds(sourceIndex, current.Length)
+                || engine[sourceIndex] != targetIndex + 1)
+            {
+                return 0;
+            }
+
+            int sourceCell = current[sourceIndex];
+            if ((sourceCell & TypeMask) != (int)ElementType.Sand)
+            {
+                return 0;
+            }
+
+            int traveled = GetGravityDistance(sourceIndex, targetIndex, settings);
+            if (traveled <= 0)
+            {
+                return 0;
+            }
+
+            return WithVelocity(sourceCell, traveled > 255 ? 255 : traveled);
+        }
+
+        private static void BuildProjectedStates(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates,
+            SandStepSettings settings
+        )
+        {
+            for (int index = 0; index < current.Length; index++)
+            {
+                int baselineState = projectedStates[index]
+                    & (BaselineExteriorBit | HeadspaceRootBit | RejectedMovementBit);
+                int projectedState = IsProjectedEmpty(
+                    current,
+                    intents,
+                    index,
+                    settings
+                )
+                    ? ProjectedUnvisitedEmpty
+                    : ProjectedOccupied;
+                projectedStates[index] = baselineState | projectedState;
+            }
+        }
+
+        private static void BuildCurrentExteriorStates(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates
+        )
+        {
+            for (int index = 0; index < current.Length; index++)
+            {
+                projectedStates[index] = IsOpenForReconciliation(current[index])
+                    ? ProjectedUnvisitedEmpty
+                    : ProjectedOccupied;
+            }
+        }
+
+        private static void CaptureBaselineExterior(
+            SandIntBuffer projectedStates
+        )
+        {
+            for (int index = 0; index < projectedStates.Length; index++)
+            {
+                projectedStates[index] = (projectedStates[index] & ProjectedStateMask)
+                    == ProjectedExteriorEmpty
+                    ? BaselineExteriorBit | (projectedStates[index] & HeadspaceRootBit)
+                    : 0;
+            }
+        }
+
+        private static bool IsProjectedEmpty(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int index,
+            SandStepSettings settings
+        )
+        {
+            int cell = current[index];
+            int cellType = cell & TypeMask;
+            if (cellType == (int)ElementType.Empty)
+            {
+                return IsOpenForReconciliation(GetIncomingCell(current, intents, index, settings));
+            }
+
+            if (cellType != (int)ElementType.Sand)
+            {
+                return false;
+            }
+            if (!IsConfirmedVacating(current, intents, index, settings))
+            {
+                return SandCell.IsUnsettled(cell);
+            }
+
+            int incomingSource = GetDependencyIncomingSource(
+                current,
+                intents,
+                index,
+                settings
+            );
+            return incomingSource < 0 || SandCell.IsUnsettled(current[incomingSource]);
+        }
+
+        // Airborne grains can temporarily surround air while falling. Treating
+        // them as a solid seal makes reconciliation cancel free fall forever in
+        // walled pools. This affects only air connectivity, not collision/movement.
+        private static bool IsOpenForReconciliation(int cell)
+        {
+            int type = cell & TypeMask;
+            return type == (int)ElementType.Empty
+                || type == (int)ElementType.Sand && SandCell.IsUnsettled(cell);
+        }
+
+        private static void MarkEnclosedHeadspaceRoots(
+            SandIntBuffer states, SandIntBuffer queue, SandStepSettings settings)
+        {
+            // One upstream anchor per existing air component inside a wall rim.
+            // Multiple anchors could wrongly permit a passage to split. Choose
+            // in gravity order so a surface grain rarely targets the anchor.
+            int lineCount = GetGravityLineCount(settings);
+            int depthCount = settings.gravityX == 0 ? settings.height : settings.width;
+            for (int depth = 0; depth < depthCount; depth++)
+            for (int line = 0; line < lineCount; line++)
+            {
+                int x = settings.gravityX == 0 ? line
+                    : settings.gravityX > 0 ? depth : settings.width - 1 - depth;
+                int y = settings.gravityY == 0 ? line
+                    : settings.gravityY > 0 ? depth : settings.height - 1 - depth;
+                int root = y * settings.width + x;
+                if ((states[root] & ProjectedStateMask) != ProjectedUnvisitedEmpty) continue;
+                states[root] = ProjectedExteriorEmpty | HeadspaceRootBit;
+                int head = 0;
+                int tail = 1;
+                queue[0] = root;
+                while (head < tail)
+                {
+                    int index = queue[head++];
+                    int cx = index % settings.width;
+                    int cy = index / settings.width;
+                    if (cx > 0) MarkExteriorNeighbor(index - 1, states, queue, ref tail);
+                    if (cx + 1 < settings.width) MarkExteriorNeighbor(index + 1, states, queue, ref tail);
+                    if (cy > 0) MarkExteriorNeighbor(index - settings.width, states, queue, ref tail);
+                    if (cy + 1 < settings.height) MarkExteriorNeighbor(index + settings.width, states, queue, ref tail);
+                }
+            }
+        }
+
+        private static void MarkExteriorProjectedVacancies(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates,
+            SandIntBuffer floodQueue,
+            SandStepSettings settings
+        )
+        {
+            int queueHead = 0;
+            int queueTail = 0;
+            for (int index = 0; index < projectedStates.Length; index++)
+            {
+                int x = index % settings.width;
+                int y = index / settings.width;
+                bool isBoundary = x == 0
+                    || x == settings.width - 1
+                    || y == 0
+                    || y == settings.height - 1;
+                bool isHeadspaceRoot = (projectedStates[index] & HeadspaceRootBit) != 0;
+                if ((isBoundary || isHeadspaceRoot)
+                    && (projectedStates[index] & ProjectedStateMask)
+                        == ProjectedUnvisitedEmpty)
+                {
+                    projectedStates[index] = (projectedStates[index]
+                        & ~ProjectedStateMask) | ProjectedExteriorEmpty;
+                    floodQueue[queueTail++] = index;
+                }
+            }
+
+            while (queueHead < queueTail)
+            {
+                int index = floodQueue[queueHead++];
+                int x = index % settings.width;
+                int y = index / settings.width;
+                if (x > 0)
+                {
+                    MarkExteriorNeighbor(
+                        index - 1,
+                        projectedStates,
+                        floodQueue,
+                        ref queueTail
+                    );
+                }
+
+                if (x + 1 < settings.width)
+                {
+                    MarkExteriorNeighbor(
+                        index + 1,
+                        projectedStates,
+                        floodQueue,
+                        ref queueTail
+                    );
+                }
+
+                if (y > 0)
+                {
+                    MarkExteriorNeighbor(
+                        index - settings.width,
+                        projectedStates,
+                        floodQueue,
+                        ref queueTail
+                    );
+                }
+
+                if (y + 1 < settings.height)
+                {
+                    MarkExteriorNeighbor(
+                        index + settings.width,
+                        projectedStates,
+                        floodQueue,
+                        ref queueTail
+                    );
+                }
+            }
+        }
+
+        private static void MarkExteriorNeighbor(
+            int index,
+            SandIntBuffer projectedStates,
+            SandIntBuffer floodQueue,
+            ref int queueTail
+        )
+        {
+            if ((projectedStates[index] & ProjectedStateMask)
+                != ProjectedUnvisitedEmpty)
+            {
+                return;
+            }
+
+            projectedStates[index] = (projectedStates[index]
+                & ~ProjectedStateMask) | ProjectedExteriorEmpty;
+            floodQueue[queueTail++] = index;
+        }
+
+        private static void CancelMovementPath(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates,
+            int sourceIndex,
+            SandStepSettings settings
+        )
+        {
+            for (int step = 0; step < current.Length; step++)
+            {
+                int targetPlusOne = intents[sourceIndex];
+                if (targetPlusOne == 0)
+                {
+                    return;
+                }
+
+                int targetIndex = targetPlusOne - 1;
+                if (!IsResolvedMove(
+                    current,
+                    intents,
+                    sourceIndex,
+                    targetIndex,
+                    settings
+                ))
+                {
+                    return;
+                }
+
+                if (IsAirborneMoveIntoEmpty(current, intents, sourceIndex)) return;
+                projectedStates[sourceIndex] |= RejectedMovementBit;
+                intents[sourceIndex] = 0;
+                if ((current[targetIndex] & TypeMask)
+                    != (int)ElementType.Sand
+                    || !IsConfirmedVacating(
+                        current,
+                        intents,
+                        targetIndex,
+                        settings
+                    )
+                    || GetDependencyIncomingSource(
+                        current,
+                        intents,
+                        targetIndex,
+                        settings
+                    ) >= 0)
+                {
+                    return;
+                }
+
+                sourceIndex = targetIndex;
+            }
+        }
+
+        private static bool HasEnclosedCreatedVacancy(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates
+        )
+        {
+            for (int index = 0; index < projectedStates.Length; index++)
+            {
+                if (IsProblematicProjectedVacancy(
+                    current,
+                    projectedStates,
+                    index
+                ))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsProblematicProjectedVacancy(
+            SandIntBuffer current,
+            SandIntBuffer projectedStates,
+            int index
+        )
+        {
+            bool isEnclosed = (projectedStates[index] & ProjectedStateMask)
+                == ProjectedUnvisitedEmpty;
+            bool wasExterior = (projectedStates[index] & BaselineExteriorBit)
+                != 0;
+            bool wasSand = (current[index] & TypeMask)
+                == (int)ElementType.Sand;
+            return isEnclosed && (wasExterior || wasSand);
+        }
+
+        private static bool IsAirborneMoveIntoEmpty(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int sourceIndex
+        )
+        {
+            // Reconciliation protects settled pile topology. An unrelated
+            // cavity must not cancel a falling grain's already-owned empty
+            // destination. Dependencies into sand still need cancellation.
+            return SandCell.IsUnsettled(current[sourceIndex])
+                && IsWinningMove(current, intents, sourceIndex, intents[sourceIndex] - 1);
+        }
+
+        private static void ClearSourceIntents(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            SandIntBuffer projectedStates
+        )
+        {
+            for (int index = 0; index < current.Length; index++)
+            {
+                if ((current[index] & TypeMask) == (int)ElementType.Sand
+                    && !IsAirborneMoveIntoEmpty(current, intents, index))
+                {
+                    if (intents[index] != 0) projectedStates[index] |= RejectedMovementBit;
+                    intents[index] = 0;
+                }
+            }
+        }
+
+        private static int GetAcceleratedFallSpeed(
+            int cell,
+            SandStepSettings settings,
+            int speedMultiplier
+        )
+        {
+            // Velocity stores actual traveled pixels; normalize before applying
+            // acceleration so the multiplier does not compound every tick.
+            int fallSpeed = GetVelocity(cell) / speedMultiplier + settings.gravityPerStep;
+            return fallSpeed > settings.maxFallSpeed
+                ? settings.maxFallSpeed
+                : fallSpeed;
+        }
+
+        private static bool IsConfirmedVacating(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int sourceIndex,
+            SandStepSettings settings
+        )
+        {
+            int targetPlusOne = intents[sourceIndex];
+            return targetPlusOne != 0
+                && IsResolvedMove(
+                    current,
+                    intents,
+                    sourceIndex,
+                    targetPlusOne - 1,
+                    settings
+                );
+        }
+
+        private static bool IsResolvedMove(
+            SandIntBuffer current,
+            SandIntBuffer engine,
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            if (!InBounds(targetIndex, current.Length)) return false;
+
+            return current[targetIndex] == 0
+                ? engine[targetIndex] == sourceIndex + 1
+                : IsDependencyMove(current, sourceIndex, targetIndex, settings);
+        }
+
+        private static bool IsDependencyMove(
+            SandIntBuffer current,
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            if ((current[sourceIndex] & TypeMask) != (int)ElementType.Sand
+                || (current[targetIndex] & TypeMask) != (int)ElementType.Sand)
+            {
+                return false;
+            }
+
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int targetX = targetIndex % settings.width;
+            int targetY = targetIndex / settings.width;
+            int deltaX = targetX - sourceX;
+            int deltaY = targetY - sourceY;
+            int gravityDistance = deltaX * settings.gravityX
+                + deltaY * settings.gravityY;
+            int sideDistance = deltaX * settings.gravityY
+                + deltaY * settings.gravityX;
+            return gravityDistance == 1
+                && sideDistance >= -1
+                && sideDistance <= 1;
+        }
+
+        private static int GetCascadeIncomingCell(
+            SandIntBuffer current,
+            SandIntBuffer engine,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourceIndex = GetDependencyIncomingSource(
+                current,
+                engine,
+                targetIndex,
+                settings
+            );
+            return sourceIndex >= 0
+                ? WithVelocity(current[sourceIndex], 1)
+                : 0;
+        }
+
+        private static int GetPreferredMixTarget(
+            SandIntBuffer current,
+            SandIntBuffer inputIntents,
+            int sourceIndex,
+            SandStepSettings settings
+        )
+        {
+            if ((current[sourceIndex] & TypeMask) != (int)ElementType.Sand
+                || IsConfirmedVacating(
+                    current,
+                    inputIntents,
+                    sourceIndex,
+                    settings
+                ))
+            {
+                return -1;
+            }
+
+            int directTarget = GetAvailableMixTarget(
+                current,
+                inputIntents,
+                sourceIndex,
+                0,
+                settings
+            );
+            // A direct vacancy is a fallback, not a veto on lateral mixing.
+
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int randomSeed = GetSimulationRandomSeed(settings);
+            uint chanceHash = MixHash(
+                sourceX,
+                sourceY,
+                randomSeed,
+                MixChanceSalt
+            );
+            bool chooseDiagonal = (chanceHash & 0xFFFFu)
+                < (uint)settings.lateralMixChance;
+            if (!chooseDiagonal) return directTarget;
+
+            int negativeTarget = GetAvailableMixTarget(
+                current,
+                inputIntents,
+                sourceIndex,
+                -1,
+                settings
+            );
+            int positiveTarget = GetAvailableMixTarget(
+                current,
+                inputIntents,
+                sourceIndex,
+                1,
+                settings
+            );
+            if (negativeTarget < 0 && positiveTarget < 0)
+            {
+                return directTarget;
+            }
+
+            if (negativeTarget < 0) return positiveTarget;
+            if (positiveTarget < 0) return negativeTarget;
+
+            uint sideHash = MixHash(
+                sourceX,
+                sourceY,
+                randomSeed,
+                MixSideSalt
+            );
+            return (sideHash & 1u) == 0 ? negativeTarget : positiveTarget;
+        }
+
+        private static int GetAvailableMixTarget(
+            SandIntBuffer current,
+            SandIntBuffer inputIntents,
+            int sourceIndex,
+            int side,
+            SandStepSettings settings
+        )
+        {
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int perpendicularX = settings.gravityY;
+            int perpendicularY = settings.gravityX;
+            int targetX = sourceX + settings.gravityX + side * perpendicularX;
+            int targetY = sourceY + settings.gravityY + side * perpendicularY;
+            if (!InBounds(targetX, targetY, settings)) return -1;
+
+            int targetIndex = targetY * settings.width + targetX;
+            bool targetAvailable = (current[targetIndex] & TypeMask)
+                == (int)ElementType.Sand
+                && IsConfirmedVacating(
+                    current,
+                    inputIntents,
+                    targetIndex,
+                    settings
+                )
+                && !HasDependencyIncoming(
+                    current,
+                    inputIntents,
+                    targetIndex,
+                    settings
+                )
+                && IsSafeLateralDependencySource(
+                    current,
+                    sourceIndex,
+                    side,
+                    settings
+                );
+            return targetAvailable ? targetIndex : -1;
+        }
+
+        internal static bool IsSafeLateralDependencySource(
+            SandIntBuffer current,
+            int sourceIndex,
+            int side,
+            SandStepSettings settings
+        )
+        {
+            if (!settings.preventTemporaryEdgeVacancies || side == 0)
+            {
+                return true;
+            }
+
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int perpendicularX = settings.gravityY;
+            int perpendicularY = settings.gravityX;
+            int downX = sourceX + settings.gravityX;
+            int downY = sourceY + settings.gravityY;
+            return !IsEmpty(current, downX, downY, settings)
+                && !IsEmpty(
+                    current,
+                    downX - side * perpendicularX,
+                    downY - side * perpendicularY,
+                    settings
+                );
+        }
+
+        private static int GetWinningMixSource(
+            SandIntBuffer current,
+            SandIntBuffer inputIntents,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int winningSource = -1;
+            uint winningPriority = uint.MaxValue;
+            for (int side = -1; side <= 1; side++)
+            {
+                int sourceIndex = GetUpstreamSourceIndex(
+                    targetIndex,
+                    side,
+                    settings
+                );
+                if (sourceIndex < 0
+                    || GetPreferredMixTarget(
+                        current,
+                        inputIntents,
+                        sourceIndex,
+                        settings
+                    ) != targetIndex)
+                {
+                    continue;
+                }
+
+                uint priority = GetMixPriority(
+                    sourceIndex,
+                    targetIndex,
+                    settings
+                );
+                if (winningSource < 0
+                    || priority < winningPriority
+                    || (priority == winningPriority
+                        && sourceIndex < winningSource))
+                {
+                    winningSource = sourceIndex;
+                    winningPriority = priority;
+                }
+            }
+
+            return winningSource;
+        }
+
+        private static bool HasDependencyIncoming(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            return GetDependencyIncomingSource(
+                current,
+                intents,
+                targetIndex,
+                settings
+            ) >= 0;
+        }
+
+        private static int GetDependencyIncomingSource(
+            SandIntBuffer current,
+            SandIntBuffer intents,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int incomingSource = -1;
+            for (int side = -1; side <= 1; side++)
+            {
+                int sourceIndex = GetUpstreamSourceIndex(
+                    targetIndex,
+                    side,
+                    settings
+                );
+                if (sourceIndex < 0
+                    || intents[sourceIndex] != targetIndex + 1
+                    || !IsDependencyMove(
+                        current,
+                        sourceIndex,
+                        targetIndex,
+                        settings
+                    ))
+                {
+                    continue;
+                }
+
+                if (incomingSource < 0 || sourceIndex < incomingSource)
+                {
+                    incomingSource = sourceIndex;
+                }
+            }
+
+            return incomingSource;
+        }
+
+        private static int GetUpstreamSourceIndex(
+            int targetIndex,
+            int side,
+            SandStepSettings settings
+        )
+        {
+            int targetX = targetIndex % settings.width;
+            int targetY = targetIndex / settings.width;
+            int perpendicularX = settings.gravityY;
+            int perpendicularY = settings.gravityX;
+            int sourceX = targetX - settings.gravityX - side * perpendicularX;
+            int sourceY = targetY - settings.gravityY - side * perpendicularY;
+            return InBounds(sourceX, sourceY, settings)
+                ? sourceY * settings.width + sourceX
+                : -1;
+        }
+
+        private static uint GetMixPriority(
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            uint salt = MixPrioritySalt
+                ^ (uint)targetIndex * MixTargetMultiplier;
+            return MixHash(
+                sourceX,
+                sourceY,
+                GetSimulationRandomSeed(settings),
+                salt
+            );
+        }
+
+        private static bool IsWinningMove(
+            SandIntBuffer current,
+            SandIntBuffer engine,
+            int sourceIndex,
+            int targetIndex
+        )
+        {
+            return InBounds(targetIndex, current.Length)
+                && current[targetIndex] == 0
+                && engine[targetIndex] == sourceIndex + 1;
+        }
+
+        private static int GetFreeRun(
+            SandIntBuffer current,
+            int sourceX,
+            int sourceY,
+            int fallSpeed,
+            SandStepSettings settings
+        )
+        {
+            int freeRun = 0;
+            int probeX = sourceX + settings.gravityX;
+            int probeY = sourceY + settings.gravityY;
+
+            while (freeRun < fallSpeed
+                && IsEmpty(current, probeX, probeY, settings))
+            {
+                freeRun++;
+                probeX += settings.gravityX;
+                probeY += settings.gravityY;
+            }
+
+            return freeRun;
+        }
+
+        private static bool TrySlide(
+            SandIntBuffer current,
+            int sourceX,
+            int sourceY,
+            int fallSpeed,
+            SandStepSettings settings,
+            out int targetX,
+            out int targetY
+        )
+        {
+            targetX = sourceX;
+            targetY = sourceY;
+
+            int perpendicularX = settings.gravityY;
+            int perpendicularY = settings.gravityX;
+            int downX = sourceX + settings.gravityX;
+            int downY = sourceY + settings.gravityY;
+            bool canSlidePositive = IsEmpty(
+                current,
+                downX + perpendicularX,
+                downY + perpendicularY,
+                settings
+            );
+            bool canSlideNegative = IsEmpty(
+                current,
+                downX - perpendicularX,
+                downY - perpendicularY,
+                settings
+            );
+
+            if ((!canSlidePositive && !canSlideNegative)
+                || !CanSlide(
+                    sourceX,
+                    sourceY,
+                    settings.slideChance,
+                    settings.mixingSeed ^ settings.simulationSeed
+                ))
+            {
+                return false;
+            }
+
+            int direction = ResolveSlideDirection(
+                sourceX,
+                sourceY,
+                canSlidePositive,
+                canSlideNegative,
+                settings
+            );
+            int upstreamX = sourceX - settings.gravityX;
+            int upstreamY = sourceY - settings.gravityY;
+            if (settings.enableVerticalSettle
+                && !SandCell.IsUnsettled(current[sourceY * settings.width + sourceX])
+                && InBounds(downX, downY, settings)
+                && (current[downY * settings.width + downX] & TypeMask) == (int)ElementType.Sand
+                && (!InBounds(upstreamX, upstreamY, settings)
+                    || IsEmpty(current, upstreamX, upstreamY, settings)))
+            {
+                // Complete the vertical part of an exposed avalanche in this
+                // cascade. Pausing above a notch seals its air passage, causing
+                // reconciliation to reject the same slide on every tick.
+                targetX = downX + direction * perpendicularX;
+                targetY = downY + direction * perpendicularY;
+                while (IsEmpty(current, targetX + settings.gravityX,
+                    targetY + settings.gravityY, settings))
+                {
+                    targetX += settings.gravityX;
+                    targetY += settings.gravityY;
+                }
+                return true;
+            }
+            int slideSteps = GetSlideSteps(
+                current,
+                downX,
+                downY,
+                perpendicularX,
+                perpendicularY,
+                direction,
+                fallSpeed,
+                settings
+            );
+            if (slideSteps == 0)
+            {
+                return false;
+            }
+
+            targetX = sourceX
+                + (settings.gravityX + direction * perpendicularX) * slideSteps;
+            targetY = sourceY
+                + (settings.gravityY + direction * perpendicularY) * slideSteps;
+            return true;
+        }
+
+        private static int ResolveSlideDirection(
+            int sourceX,
+            int sourceY,
+            bool canSlidePositive,
+            bool canSlideNegative,
+            SandStepSettings settings
+        )
+        {
+            if (canSlidePositive && canSlideNegative)
+            {
+                return GetRandomizedSide(
+                    sourceX,
+                    sourceY,
+                    settings,
+                    SlideDirectionSalt
+                );
+            }
+
+            return canSlideNegative ? -1 : 1;
+        }
+
+        private static int GetSlideSteps(
+            SandIntBuffer current,
+            int downX,
+            int downY,
+            int perpendicularX,
+            int perpendicularY,
+            int direction,
+            int fallSpeed,
+            SandStepSettings settings
+        )
+        {
+            int slideSteps = 0;
+            int targetX = downX + direction * perpendicularX;
+            int targetY = downY + direction * perpendicularY;
+            int upstreamX = downX - 2 * settings.gravityX;
+            int upstreamY = downY - 2 * settings.gravityY;
+            // Edge protection must not pin the exposed top of a sand cliff.
+            // Let its grain roll into free fall; retain protection for buried
+            // grains and for wall-supported entrances to narrow cavities.
+            bool surfaceAvalanche = InBounds(downX, downY, settings)
+                && (current[downY * settings.width + downX] & TypeMask) == (int)ElementType.Sand
+                && (!InBounds(upstreamX, upstreamY, settings)
+                    || IsEmpty(current, upstreamX, upstreamY, settings));
+
+            for (int step = 1;
+                step <= fallSpeed && IsEmpty(current, targetX, targetY, settings);
+                step++)
+            {
+                int edgeX = targetX + settings.gravityX;
+                int edgeY = targetY + settings.gravityY;
+                bool edgeIsEmpty = IsEmpty(current, edgeX, edgeY, settings);
+                if (edgeIsEmpty && settings.preventTemporaryEdgeVacancies && !surfaceAvalanche)
+                {
+                    break;
+                }
+
+                slideSteps = step;
+                if (edgeIsEmpty)
+                {
+                    break;
+                }
+
+                targetX += settings.gravityX + direction * perpendicularX;
+                targetY += settings.gravityY + direction * perpendicularY;
+            }
+
+            return slideSteps;
+        }
+
+        private static bool IsDirect(
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int targetX = targetIndex % settings.width;
+            int targetY = targetIndex / settings.width;
+            return (targetX - sourceX) * settings.gravityY
+                == (targetY - sourceY) * settings.gravityX;
+        }
+
+        private static int GetSlideSide(
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int targetX = targetIndex % settings.width;
+            int targetY = targetIndex / settings.width;
+            int perpendicularX = settings.gravityY;
+            int perpendicularY = settings.gravityX;
+            int side = (targetX - sourceX) * perpendicularX
+                + (targetY - sourceY) * perpendicularY;
+            return side > 0 ? 1 : -1;
+        }
+
+        private static int GetGravityDistance(
+            int sourceIndex,
+            int targetIndex,
+            SandStepSettings settings
+        )
+        {
+            int sourceX = sourceIndex % settings.width;
+            int sourceY = sourceIndex / settings.width;
+            int targetX = targetIndex % settings.width;
+            int targetY = targetIndex / settings.width;
+            return (targetX - sourceX) * settings.gravityX
+                + (targetY - sourceY) * settings.gravityY;
+        }
+
+        private static bool IsEmpty(
+            SandIntBuffer current,
+            int x,
+            int y,
+            SandStepSettings settings
+        )
+        {
+            return InBounds(x, y, settings)
+                && current[y * settings.width + x] == 0;
+        }
+
+        private static bool InBounds(int x, int y, SandStepSettings settings)
+        {
+            return x >= 0 && x < settings.width && y >= 0 && y < settings.height;
+        }
+
+        private static bool InBounds(int index, int cellCount)
+        {
+            return index >= 0 && index < cellCount;
+        }
+
+        private static bool CanSlide(
+            int x,
+            int y,
+            int slideChance,
+            int randomSeed
+        )
+        {
+            return (MixHash(x, y, randomSeed, SlideChanceSalt) & 0xFFFFu)
+                < (uint)slideChance;
+        }
+
+        private static int GetRandomizedSide(
+            int x,
+            int y,
+            SandStepSettings settings,
+            uint salt
+        )
+        {
+            uint sideHash = MixHash(
+                x,
+                y,
+                GetSimulationRandomSeed(settings),
+                salt
+            );
+            return (sideHash & 1u) == 0 ? -1 : 1;
+        }
+
+        private static int GetSimulationRandomSeed(SandStepSettings settings)
+        {
+            return settings.mixingSeed ^ settings.simulationSeed;
+        }
+
+        private static int GetVelocity(int cell)
+        {
+            return (cell & VelocityMask) >> VelocityShift;
+        }
+
+        private static int WithVelocity(int cell, int velocity)
+        {
+            return (cell & ~VelocityMask) | ((velocity & 0xFF) << VelocityShift);
+        }
+
+        internal static GridCoord NormalizeGravityDirection(GridCoord direction)
+        {
+            long absoluteX = Math.Abs((long)direction.x);
+            long absoluteY = Math.Abs((long)direction.y);
+            if (absoluteX >= absoluteY && direction.x != 0)
+            {
+                return new GridCoord(direction.x > 0 ? 1 : -1, 0);
+            }
+
+            if (direction.y != 0)
+            {
+                return new GridCoord(0, direction.y > 0 ? 1 : -1);
+            }
+
+            return new GridCoord(0, 1);
+        }
+
+        private static uint Hash(int x, int y)
+        {
+            unchecked
+            {
+                uint value = (uint)x * HashMultiplierX ^ (uint)y * HashMultiplierY;
+                value ^= value >> HashShiftXor;
+                value *= HashScramble;
+                value ^= value >> HashShiftFinal;
+                return value;
+            }
+        }
+
+        private static uint MixHash(int x, int y, int seed, uint salt)
+        {
+            unchecked
+            {
+                uint value = (uint)x * HashMultiplierX
+                    ^ (uint)y * HashMultiplierY
+                    ^ (uint)seed * MixSeedMultiplier
+                    ^ salt;
+                value ^= value >> HashShiftXor;
+                value *= HashScramble;
+                value ^= value >> HashShiftFinal;
+                return value;
+            }
+        }
+    }
+}
+#endif

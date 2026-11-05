@@ -1,0 +1,7 @@
+{
+    "name": "Com.Scheherazade.SandEngine",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.SandEngine",
+    "references": ["Com.Scheherazade.Common", "Com.Scheherazade.GridSystem", "Unity.Collections", "Unity.Burst"],
+    "allowUnsafeCode": true,
+    "autoReferenced": true
+}

@@ -1,0 +1,8 @@
+{
+    "name": "Com.Scheherazade.SandEngine.ConsumerTests",
+    "references": ["Com.Scheherazade.SandEngine", "Com.Scheherazade.Common", "Com.Scheherazade.GridSystem", "Unity.Collections"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}
