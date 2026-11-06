@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     /// <summary>
     /// Stable, deterministic hashing helpers for identity values.

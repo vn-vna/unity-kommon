@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Extensions
+namespace Com.Scheherazade.Common.Extensions
 {
     public static class ScalarValueExtensions
     {

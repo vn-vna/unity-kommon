@@ -1,6 +1,6 @@
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.AsyncResourceLoader;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels
 {
     public interface IPuzzleLevelData
     {
@@ -10,5 +10,6 @@ namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels
         string GetText();
         byte[] GetBytes();
         T GetParsed<T>();
+        bool TryGetParsed<T>(out T value, out System.Exception error);
     }
 }

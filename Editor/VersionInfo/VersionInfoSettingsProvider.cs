@@ -4,15 +4,15 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.NoBuild.Editor;
-using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
-using Com.Hapiga.Scheherazade.Common.VIC;
-using Com.Hapiga.Scheherazade.Common.VIC.Consumers;
-using Com.Hapiga.Scheherazade.Common.VIC.Providers;
+using Com.Scheherazade.Common.NoBuild.Editor;
+using Com.Scheherazade.Common.Editor.ScriptGeneration;
+using Com.Scheherazade.Common.VIC;
+using Com.Scheherazade.Common.VIC.Consumers;
+using Com.Scheherazade.Common.VIC.Providers;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
+namespace Com.Scheherazade.Common.VIC.Editor
 {
     internal sealed class VersionInfoSettingsProvider : SettingsProvider
     {
@@ -911,6 +911,14 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
             foreach (string guid in guids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
+                string normalizedPath = path.Replace('\\', '/');
+                if (!normalizedPath.StartsWith(
+                        AssetFolder + "/",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 ScriptableObject asset = AssetDatabase.LoadAssetAtPath(
                     path,
                     assetType
@@ -953,28 +961,27 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 return;
             }
 
-            bool confirmed = EditorUtility.DisplayDialog(
-                "Delete Asset",
-                $"Delete '{asset.name}' at '{assetPath}'?\n\n"
-                + "This cannot be undone.",
-                "Delete",
-                "Cancel"
-            );
-
-            if (!confirmed)
+            if (!ConfirmAssetDeletion(asset, assetPath))
             {
                 return;
             }
 
+            UnityEngine.Object previousReference = prop.objectReferenceValue;
             prop.objectReferenceValue = null;
             _serializedSettings.ApplyModifiedProperties();
             EditorUtility.SetDirty(_serializedSettings.targetObject);
 
             if (!AssetDatabase.DeleteAsset(assetPath))
             {
+                prop.objectReferenceValue = previousReference;
+                _serializedSettings.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_serializedSettings.targetObject);
+                AssetDatabase.SaveAssets();
+
                 EditorUtility.DisplayDialog(
                     "Delete Failed",
-                    $"Unity could not delete '{assetPath}'.",
+                    $"Unity could not delete '{assetPath}'. "
+                    + "The configuration reference was restored.",
                     "OK"
                 );
                 return;
@@ -1000,34 +1007,91 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 return;
             }
 
-            bool confirmed = EditorUtility.DisplayDialog(
-                "Delete Asset",
-                $"Delete '{asset.name}' at '{assetPath}'?\n\n"
-                + "This cannot be undone.",
-                "Delete",
-                "Cancel"
-            );
-
-            if (!confirmed)
+            if (!ConfirmAssetDeletion(asset, assetPath))
             {
                 return;
             }
 
+            List<UnityEngine.Object> previousReferences =
+                CaptureObjectReferences(listProp);
+            int previousSize = listProp.arraySize;
             listProp.DeleteArrayElementAtIndex(index);
+            if (listProp.arraySize == previousSize)
+            {
+                listProp.DeleteArrayElementAtIndex(index);
+            }
+
             _serializedSettings.ApplyModifiedProperties();
             EditorUtility.SetDirty(_serializedSettings.targetObject);
 
             if (!AssetDatabase.DeleteAsset(assetPath))
             {
+                RestoreObjectReferences(listProp, previousReferences);
+                _serializedSettings.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_serializedSettings.targetObject);
+                AssetDatabase.SaveAssets();
+
                 EditorUtility.DisplayDialog(
                     "Delete Failed",
-                    $"Unity could not delete '{assetPath}'.",
+                    $"Unity could not delete '{assetPath}'. "
+                    + "The configuration list was restored.",
                     "OK"
                 );
                 return;
             }
 
             AssetDatabase.SaveAssets();
+        }
+
+        private static bool ConfirmAssetDeletion(
+            ScriptableObject asset,
+            string assetPath)
+        {
+            string normalizedPath = assetPath.Replace('\\', '/');
+            bool isManagedAsset = normalizedPath.StartsWith(
+                AssetFolder + "/",
+                StringComparison.OrdinalIgnoreCase
+            );
+            string warning = isManagedAsset
+                ? ""
+                : "Warning: This asset is outside '" + AssetFolder
+                    + "'. Other systems may reference it.\n\n";
+
+            return EditorUtility.DisplayDialog(
+                "Delete Asset",
+                warning
+                + $"Delete '{asset.name}' at '{assetPath}'?\n\n"
+                + "This cannot be undone.",
+                "Delete",
+                "Cancel"
+            );
+        }
+
+        private static List<UnityEngine.Object> CaptureObjectReferences(
+            SerializedProperty listProp)
+        {
+            List<UnityEngine.Object> references =
+                new List<UnityEngine.Object>(listProp.arraySize);
+            for (int i = 0; i < listProp.arraySize; i++)
+            {
+                references.Add(
+                    listProp.GetArrayElementAtIndex(i).objectReferenceValue
+                );
+            }
+
+            return references;
+        }
+
+        private static void RestoreObjectReferences(
+            SerializedProperty listProp,
+            IReadOnlyList<UnityEngine.Object> references)
+        {
+            listProp.arraySize = references.Count;
+            for (int i = 0; i < references.Count; i++)
+            {
+                listProp.GetArrayElementAtIndex(i).objectReferenceValue =
+                    references[i];
+            }
         }
 
         private static void EnsureAssetFolder()
@@ -1203,12 +1267,35 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
 
             public static string Resolve(string template)
             {
-                return Resolve(template, null);
+                return Resolve(
+                    template,
+                    null,
+                    EditorUserBuildSettings.activeBuildTarget
+                );
             }
 
             public static string Resolve(
                 string template,
                 IEnumerable<IVersionNamePlaceholderProvider> extraProviders)
+            {
+                return Resolve(
+                    template,
+                    extraProviders,
+                    EditorUserBuildSettings.activeBuildTarget
+                );
+            }
+
+            public static string Resolve(
+                string template,
+                BuildTarget buildTarget)
+            {
+                return Resolve(template, null, buildTarget);
+            }
+
+            public static string Resolve(
+                string template,
+                IEnumerable<IVersionNamePlaceholderProvider> extraProviders,
+                BuildTarget buildTarget)
             {
                 if (string.IsNullOrEmpty(template))
                 {
@@ -1234,7 +1321,13 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                     }
 
                     return TryResolve(
-                        key, format, raw, match.Value, extraProviders);
+                        key,
+                        format,
+                        raw,
+                        match.Value,
+                        extraProviders,
+                        buildTarget
+                    );
                 });
             }
 
@@ -1243,7 +1336,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 string format,
                 string raw,
                 string fallback,
-                IEnumerable<IVersionNamePlaceholderProvider> extraProviders)
+                IEnumerable<IVersionNamePlaceholderProvider> extraProviders,
+                BuildTarget buildTarget)
             {
                 // 1. Extra providers (from config) take top priority
                 if (extraProviders != null)
@@ -1269,11 +1363,21 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 }
 
                 // 3. Built-in resolvers
-                return ResolveBuiltIn(key, format, raw, fallback);
+                return ResolveBuiltIn(
+                    key,
+                    format,
+                    raw,
+                    fallback,
+                    buildTarget
+                );
             }
 
             private static string ResolveBuiltIn(
-                string key, string format, string raw, string fallback)
+                string key,
+                string format,
+                string raw,
+                string fallback,
+                BuildTarget buildTarget)
             {
                 switch (key)
                 {
@@ -1282,7 +1386,7 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                     case "app-name":
                         return Application.productName;
                     case "app-bundle":
-                        return ResolveAppBundle();
+                        return ResolveAppBundle(buildTarget);
                     case "build-type":
                         return ResolveBuildType();
                     case "date":
@@ -1303,8 +1407,7 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                     case "git-commit-full":
                         return GitUtility.FullCommitHash;
                     case "platform":
-                        return EditorUserBuildSettings.activeBuildTarget
-                            .ToString();
+                        return buildTarget.ToString();
                     default:
                         return ResolveDynamicKey(key, raw, fallback);
                 }
@@ -1354,7 +1457,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
 
                 foreach (FlagDefinition flag in settings.flagDefinitions)
                 {
-                    if (string.Equals(
+                    if (flag != null
+                        && string.Equals(
                             flag.id,
                             id,
                             StringComparison.OrdinalIgnoreCase))
@@ -1458,7 +1562,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
 
                 foreach (ScriptDefinitionSlot slot in set.slots)
                 {
-                    if (string.Equals(
+                    if (slot != null
+                        && string.Equals(
                         slot.defineSymbol,
                         symbol,
                         StringComparison.OrdinalIgnoreCase))
@@ -1532,7 +1637,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 foreach (ScriptDefinitionSlot slot
                     in profileSet.slots)
                 {
-                    if (string.Equals(
+                    if (slot != null
+                        && string.Equals(
                             slot.defineSymbol,
                             "PRODUCTION_BUILD",
                             StringComparison.OrdinalIgnoreCase))
@@ -1546,15 +1652,18 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Editor
                 return null;
             }
 
-            private static string ResolveAppBundle()
+            private static string ResolveAppBundle(BuildTarget buildTarget)
             {
-#if UNITY_ANDROID
-                return PlayerSettings.Android.bundleVersionCode.ToString();
-#elif UNITY_IOS
-                return PlayerSettings.iOS.buildNumber;
-#else
-                return PlayerSettings.bundleVersion;
-#endif
+                switch (buildTarget)
+                {
+                    case BuildTarget.Android:
+                        return PlayerSettings.Android.bundleVersionCode
+                            .ToString();
+                    case BuildTarget.iOS:
+                        return PlayerSettings.iOS.buildNumber;
+                    default:
+                        return PlayerSettings.bundleVersion;
+                }
             }
 
             private static string ResolveProjectName()

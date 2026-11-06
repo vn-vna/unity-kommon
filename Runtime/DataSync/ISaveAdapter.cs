@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync
+namespace Com.Scheherazade.Common.DataSync
 {
     public interface ISaveAdapter
     {

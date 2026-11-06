@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
     /// <summary>
     /// Represents a mapping of input actions.

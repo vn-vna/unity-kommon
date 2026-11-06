@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     public enum LoadingStatus
     {
@@ -12,6 +12,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
     {
         Unknown,
         Loaded,
-        Failed
+        Failed,
+        Canceled
     }
 }

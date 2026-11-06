@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync
+namespace Com.Scheherazade.Common.DataSync
 {
     /// <summary>
     /// How the director resolves which adapter's data to use on load.

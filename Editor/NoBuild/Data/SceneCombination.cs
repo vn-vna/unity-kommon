@@ -8,7 +8,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// A configurable shortcut target that maps a keyboard key [1]..[9]
@@ -51,19 +51,41 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 || sceneReferences == null)
                 return result;
 
-            foreach (SceneReference r in sceneReferences)
+            foreach (SceneReference reference in sceneReferences)
             {
-                if (r.enabled
-                    && r.sceneIndex >= 0
-                    && r.sceneIndex < parentSet.scenes.Count)
+                if (!reference.enabled) continue;
+
+                SceneSlot slot = ResolveSceneSlot(
+                    reference,
+                    parentSet);
+                if (slot != null && slot.IsValid)
                 {
-                    SceneSlot slot = parentSet.scenes[r.sceneIndex];
-                    if (slot != null && slot.IsValid)
-                        result.Add(slot);
+                    result.Add(slot);
                 }
             }
 
             return result;
+        }
+
+        private static SceneSlot ResolveSceneSlot(
+            SceneReference reference,
+            SceneSet parentSet)
+        {
+            if (reference.scene != null)
+            {
+                return parentSet.scenes.FirstOrDefault(
+                    slot => slot != null
+                        && slot.scene == reference.scene);
+            }
+
+            if (reference.sceneIndex < 0
+                || reference.sceneIndex
+                >= parentSet.scenes.Count)
+            {
+                return null;
+            }
+
+            return parentSet.scenes[reference.sceneIndex];
         }
     }
 }

@@ -1,7 +1,7 @@
 using System;
 using System.Text.RegularExpressions;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     [Serializable]
     public class SegmentationMatchingConfiguration

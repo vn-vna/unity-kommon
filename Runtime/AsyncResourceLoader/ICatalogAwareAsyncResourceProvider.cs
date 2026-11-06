@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     public interface ICatalogAwareAsyncResourceProvider
     {

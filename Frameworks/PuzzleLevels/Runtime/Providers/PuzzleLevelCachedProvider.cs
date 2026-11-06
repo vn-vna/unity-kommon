@@ -1,7 +1,7 @@
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.AsyncResourceLoader;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
+namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Providers
 {
     [CreateAssetMenu(
         fileName = "PuzzleLevelCachedProvider",

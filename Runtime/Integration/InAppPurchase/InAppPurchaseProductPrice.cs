@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     public struct InAppPurchaseProductPrice
     {

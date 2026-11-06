@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
+namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 {
     [Serializable]
     public sealed class GitHubReleaseInfo
@@ -11,6 +11,10 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
         public string PublishedAt;
         public string Body;
         public string DownloadUrl;
+        public string GitUrl;
+        public bool IsPrerelease;
+        public string ReleaseUrl;
+        public bool IsZipArchive;
     }
 
     [Serializable]
@@ -29,5 +33,15 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
         public string Version;
         public string InstalledAt;
         public List<string> TrackedFiles;
+        public List<TrackedAssetFingerprint> Fingerprints;
+        public bool HasFingerprints;
+    }
+
+    [Serializable]
+    public sealed class TrackedAssetFingerprint
+    {
+        public string Path;
+        public string Hash;
+        public string MetaHash;
     }
 }

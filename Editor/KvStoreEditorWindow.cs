@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.Common.DataSync;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync.Editor
+namespace Com.Scheherazade.Common.DataSync.Editor
 {
     public class KvStoreEditorWindow : EditorWindow
     {

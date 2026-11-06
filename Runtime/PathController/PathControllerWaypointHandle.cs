@@ -2,7 +2,7 @@ using Unity.Collections;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
     public class PathControllerWaypointHandle : MonoBehaviour
     {

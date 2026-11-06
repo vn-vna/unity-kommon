@@ -6,7 +6,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Shared state container for all NoBuild toolbar elements.

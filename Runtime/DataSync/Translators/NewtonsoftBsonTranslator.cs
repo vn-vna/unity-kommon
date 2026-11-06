@@ -9,7 +9,7 @@ using Newtonsoft.Json.Bson;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync
+namespace Com.Scheherazade.Common.DataSync
 {
     [CreateAssetMenu(
         fileName = "NewtonsoftBsonTranslator",

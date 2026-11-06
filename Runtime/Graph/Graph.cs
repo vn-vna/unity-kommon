@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Graph
+namespace Com.Scheherazade.Common.Graph
 {
     public class Graph<T>
         where T : class

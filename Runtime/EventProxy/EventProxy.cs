@@ -5,7 +5,7 @@ using System.Reflection;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.EventProxy
+namespace Com.Scheherazade.Common.EventProxy
 {
 
     [AddComponentMenu("Scheherazade/Event Proxy")]

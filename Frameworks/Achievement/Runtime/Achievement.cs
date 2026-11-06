@@ -1,9 +1,9 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 
-namespace Com.Hapiga.Scheherazade.Common.Achievement
+namespace Com.Scheherazade.Common.Achievement
 {
     public class Achievement
     {

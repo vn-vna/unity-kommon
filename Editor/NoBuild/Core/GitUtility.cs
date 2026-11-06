@@ -4,17 +4,20 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Retrieves git metadata by shelling out to the <c>git</c> CLI.
     /// Results are cached for 30 seconds. Gracefully returns <c>"unknown"</c>
     /// if git is unavailable or the project is not a git repository.
     /// </summary>
+    [InitializeOnLoad]
     internal static class GitUtility
     {
         // ══════════════════════════════════════════════════
@@ -33,12 +36,67 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         private static string _cachedFullHash;
         private static string _cachedBranch;
         private static DateTime _lastFetchTime = DateTime.MinValue;
-        private static bool _gitAvailable = true;
 
         private static readonly Dictionary<string, SubmoduleGitInfo>
             _submoduleCache = new(StringComparer.OrdinalIgnoreCase);
 
-        private static readonly object _lock = new();
+        private static Task<string[]> _rootFetch;
+        private static readonly Dictionary<string, Task<SubmoduleGitInfo>> _submoduleFetches = new();
+        private static readonly CancellationTokenSource _lifetime = new();
+        public static bool IsRefreshing => _rootFetch != null || _submoduleFetches.Count > 0;
+
+        static GitUtility()
+        {
+            EditorApplication.update += HandleFetches;
+            AssemblyReloadEvents.beforeAssemblyReload += () => _lifetime.Cancel();
+            EditorApplication.quitting += () => _lifetime.Cancel();
+        }
+
+        private static void HandleFetches()
+        {
+            if (_rootFetch == null && _submoduleFetches.Count == 0) return;
+            bool changed = false;
+            if (_rootFetch?.IsCompleted == true)
+            {
+                try
+                {
+                    string[] values = _rootFetch.GetAwaiter().GetResult();
+                    _cachedShortHash = values[0]; _cachedFullHash = values[1]; _cachedBranch = values[2];
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception exception)
+                {
+                    SetAllToFallback();
+                    Debug.LogWarning("[NoBuild] Git metadata unavailable: " + exception.Message);
+                }
+                _rootFetch = null;
+                changed = true;
+            }
+            foreach (string key in new List<string>(_submoduleFetches.Keys))
+            {
+                Task<SubmoduleGitInfo> task = _submoduleFetches[key];
+                if (!task.IsCompleted) continue;
+                try
+                {
+                    _submoduleCache[key] = task.GetAwaiter().GetResult() ?? new SubmoduleGitInfo
+                    {
+                        shortHash = FallbackValue, fullHash = FallbackValue, fetchTime = DateTime.UtcNow
+                    };
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception exception)
+                {
+                    _submoduleCache[key] = new SubmoduleGitInfo
+                    {
+                        shortHash = FallbackValue, fullHash = FallbackValue, fetchTime = DateTime.UtcNow
+                    };
+                    Debug.LogWarning($"[NoBuild] Submodule '{key}' unavailable: {exception.Message}");
+                }
+                _submoduleFetches.Remove(key);
+                changed = true;
+            }
+            if (changed) NoBuildToolbarState.RequestRepaint();
+        }
 
         // ══════════════════════════════════════════════════
         // ── Properties
@@ -49,7 +107,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedShortHash;
+                return _cachedShortHash ?? FallbackValue;
             }
         }
 
@@ -58,7 +116,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedFullHash;
+                return _cachedFullHash ?? FallbackValue;
             }
         }
 
@@ -67,7 +125,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             get
             {
                 RefreshCacheIfNeeded();
-                return _cachedBranch;
+                return _cachedBranch ?? FallbackValue;
             }
         }
 
@@ -80,9 +138,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         /// </summary>
         public static string GetSubmoduleCommit(string submoduleName)
         {
-            SubmoduleGitInfo info =
-                ResolveSubmoduleInfo(submoduleName);
-            return info?.shortHash ?? FallbackValue;
+            try
+            {
+                SubmoduleGitInfo info =
+                    ResolveSubmoduleInfo(submoduleName);
+                return info?.shortHash ?? FallbackValue;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[NoBuild] Could not resolve git submodule "
+                    + $"'{submoduleName}': {exception.Message}");
+                return FallbackValue;
+            }
         }
 
         /// <summary>
@@ -91,9 +159,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         public static string GetSubmoduleFullCommit(
             string submoduleName)
         {
-            SubmoduleGitInfo info =
-                ResolveSubmoduleInfo(submoduleName);
-            return info?.fullHash ?? FallbackValue;
+            try
+            {
+                SubmoduleGitInfo info =
+                    ResolveSubmoduleInfo(submoduleName);
+                return info?.fullHash ?? FallbackValue;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning(
+                    $"[NoBuild] Could not resolve git submodule "
+                    + $"'{submoduleName}': {exception.Message}");
+                return FallbackValue;
+            }
         }
 
         // ══════════════════════════════════════════════════
@@ -102,45 +180,16 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         private static void RefreshCacheIfNeeded()
         {
-            lock (_lock)
+            if (_rootFetch != null || (DateTime.UtcNow - _lastFetchTime).TotalMilliseconds < CacheTtlMs) return;
+            _lastFetchTime = DateTime.UtcNow;
+            string projectPath = System.IO.Path.GetDirectoryName(Application.dataPath);
+            if (string.IsNullOrEmpty(projectPath)) { SetAllToFallback(); return; }
+            _rootFetch = Task.Run(() => new[]
             {
-                if ((DateTime.UtcNow - _lastFetchTime).TotalMilliseconds < CacheTtlMs)
-                {
-                    return;
-                }
-
-                _lastFetchTime = DateTime.UtcNow;
-
-                if (!_gitAvailable)
-                {
-                    SetAllToFallback();
-                    return;
-                }
-
-                // Project root is one level above Application.dataPath (Assets/)
-                string projectPath = System.IO.Path.GetDirectoryName(Application.dataPath);
-                if (string.IsNullOrEmpty(projectPath))
-                {
-                    _gitAvailable = false;
-                    SetAllToFallback();
-                    return;
-                }
-
-                try
-                {
-                    _cachedShortHash = RunGitCommand(projectPath, "rev-parse --short HEAD");
-                    _cachedFullHash  = RunGitCommand(projectPath, "rev-parse HEAD");
-                    _cachedBranch    = RunGitCommand(projectPath, "rev-parse --abbrev-ref HEAD");
-                }
-                catch (Exception ex)
-                {
-                    _gitAvailable = false;
-                    SetAllToFallback();
-                    Debug.LogWarning(
-                        $"[NoBuild] GitUtility failed to retrieve git info: {ex.Message}"
-                    );
-                }
-            }
+                RunGitCommand(projectPath, "rev-parse --short HEAD"),
+                RunGitCommand(projectPath, "rev-parse HEAD"),
+                RunGitCommand(projectPath, "rev-parse --abbrev-ref HEAD")
+            }, _lifetime.Token);
         }
 
         private static void SetAllToFallback()
@@ -150,43 +199,45 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             _cachedBranch    = FallbackValue;
         }
 
-        private static string RunGitCommand(string workingDirectory, string arguments)
+        private static string RunGitCommand(
+            string workingDirectory,
+            string arguments)
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            ProcessExecutionResult result =
+                NoBuildProcessRunner.Run(
+                    "git",
+                    arguments,
+                    ProcessTimeoutMs,
+                    workingDirectory, _lifetime.Token);
+            if (result.TimedOut)
             {
-                FileName               = "git",
-                Arguments              = arguments,
-                WorkingDirectory       = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true
-            };
-
-            using Process process = Process.Start(startInfo);
-            if (process == null)
-            {
-                throw new InvalidOperationException("Failed to start git process.");
+                throw new TimeoutException(
+                    $"Git command timed out after "
+                    + $"{ProcessTimeoutMs}ms.");
             }
 
-            process.WaitForExit(ProcessTimeoutMs);
-
-            if (!process.HasExited)
+            if (result.ExitCode != 0)
             {
-                process.Kill();
-                throw new TimeoutException($"Git command timed out after {ProcessTimeoutMs}ms.");
+                throw new InvalidOperationException(
+                    $"Git exited with code {result.ExitCode}: "
+                    + result.StandardError);
             }
 
-            string output = process.StandardOutput.ReadToEnd().Trim();
+            string output = result.StandardOutput.Trim();
 
-            // git rev-parse --abbrev-ref HEAD returns "HEAD" in detached state
-            if (arguments.Contains("abbrev-ref") && output == "HEAD")
+            // git rev-parse --abbrev-ref HEAD returns
+            // "HEAD" in detached state.
+            if (arguments.Contains("abbrev-ref")
+                && output == "HEAD")
             {
-                // Try to get tag or commit for detached HEAD
-                output = RunGitCommand(workingDirectory, "rev-parse --short HEAD");
+                output = RunGitCommand(
+                    workingDirectory,
+                    "rev-parse --short HEAD");
             }
 
-            return string.IsNullOrEmpty(output) ? FallbackValue : output;
+            return string.IsNullOrEmpty(output)
+                ? FallbackValue
+                : output;
         }
 
         private static SubmoduleGitInfo ResolveSubmoduleInfo(
@@ -195,24 +246,21 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             if (string.IsNullOrEmpty(submoduleName))
                 return null;
 
-            lock (_lock)
-            {
-                if (_submoduleCache.TryGetValue(
-                        submoduleName,
-                        out SubmoduleGitInfo cached)
-                    && (DateTime.UtcNow - cached.fetchTime)
-                        .TotalMilliseconds < CacheTtlMs)
-                {
-                    return cached;
-                }
-            }
-
-            // Find the submodule path via .gitmodules
+            _submoduleCache.TryGetValue(submoduleName, out SubmoduleGitInfo cached);
+            if (cached != null && (DateTime.UtcNow - cached.fetchTime).TotalMilliseconds < CacheTtlMs) return cached;
+            if (_submoduleFetches.ContainsKey(submoduleName)) return cached;
             string projectRoot =
                 System.IO.Path.GetDirectoryName(
                     Application.dataPath);
             if (string.IsNullOrEmpty(projectRoot))
                 return null;
+
+            _submoduleFetches[submoduleName] = Task.Run(() => FetchSubmodule(submoduleName, projectRoot), _lifetime.Token);
+            return cached;
+        }
+
+        private static SubmoduleGitInfo FetchSubmodule(string submoduleName, string projectRoot)
+        {
 
             string subPath = RunGitCommand(
                 projectRoot,
@@ -239,11 +287,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 fullHash  = fullHash,
                 fetchTime = DateTime.UtcNow
             };
-
-            lock (_lock)
-            {
-                _submoduleCache[submoduleName] = info;
-            }
 
             return info;
         }

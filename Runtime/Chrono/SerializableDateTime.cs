@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     [Serializable]
     public struct SerializableDateTime : ISerializationCallbackReceiver

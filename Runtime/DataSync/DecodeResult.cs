@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.DataSync
+namespace Com.Scheherazade.Common.DataSync
 {
     public readonly struct DecodeResult
     {

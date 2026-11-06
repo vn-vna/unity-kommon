@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
+namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 {
     [Serializable]
     public sealed class GooglePackageInfo
@@ -39,6 +39,7 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
         public string Version;
         public string TarballUrl;
         public bool IsTransitive;
+        public bool IsZipArchive;
     }
 
     [Serializable]

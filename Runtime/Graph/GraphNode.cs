@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.Graph
+namespace Com.Scheherazade.Common.Graph
 {
     public class GraphNode<T>
     {

@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     [Serializable]
     public class TemplatedTrackingParameter

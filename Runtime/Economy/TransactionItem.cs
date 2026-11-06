@@ -1,12 +1,12 @@
 using System;
 
-using Com.Hapiga.FallAway.Economy;
-using Com.Hapiga.FallAway.Inventory;
-using Com.Hapiga.Schehrazade.IS;
+using Com.Scheherazade.FallAway.Economy;
+using Com.Scheherazade.FallAway.Inventory;
+using Com.Scheherazade.IS;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     [Serializable]
     public class TransactionItem

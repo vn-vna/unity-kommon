@@ -8,7 +8,7 @@ using UnityEditor;
 using UnityEditor.AssetImporters;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Editor.TextureAdjustment
+namespace Com.Scheherazade.Editor.TextureAdjustment
 {
     [ScriptedImporter(1, "texadj")]
     public class TextureAdjustmentImporter : ScriptedImporter

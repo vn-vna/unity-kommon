@@ -1,8 +1,8 @@
 using System;
 
-using Com.Hapiga.Scheherazade.Common.DataSync;
+using Com.Scheherazade.Common.DataSync;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     [Serializable]
     [CurrentDataVersion("0.0.1")]

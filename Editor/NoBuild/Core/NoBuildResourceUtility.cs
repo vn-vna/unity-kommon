@@ -6,7 +6,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Centralized utility for loading, creating, and caching the

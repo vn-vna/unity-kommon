@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
+namespace Com.Scheherazade.Common.Integration.RemoteConfig
 {
     [AttributeUsage(AttributeTargets.Property)]
     public class RemoteConfigAttribute : Attribute

@@ -7,7 +7,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration
+namespace Com.Scheherazade.Common.Editor.ScriptGeneration
 {
     /// <summary>
     /// Generates C# script templates for manager, provider, consumer,

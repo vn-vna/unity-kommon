@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.ImplicitDeps
+namespace Com.Scheherazade.Common.ImplicitDeps
 {
     /// <summary>
     /// Attribute to mark methods that are implicitly called somewhere.

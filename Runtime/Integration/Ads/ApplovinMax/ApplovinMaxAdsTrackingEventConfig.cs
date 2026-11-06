@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Integration.Tracking;
+using Com.Scheherazade.Common.Integration.Tracking;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Ads
+namespace Com.Scheherazade.Common.Integration.Ads
 {
     [Serializable]
     public class ApplovinMaxAdsTrackingEventConfig

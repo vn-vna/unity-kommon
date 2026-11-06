@@ -6,7 +6,7 @@ using System;
 #endif
 
 #if !FAKE_ODIN_NAMESPACE && !ODIN_INSPECTOR
-namespace Com.Hapiga.Scheherazade.Common.OdinInspector
+namespace Com.Scheherazade.Common.OdinInspector
 #else
 namespace Sirenix.OdinInspector
 #endif

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     /// <summary>
     /// Per-platform list of identity providers. List order is the priority:

@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard
+namespace Com.Scheherazade.Common.Leaderboard
 {
     /// <summary>
     /// Bitmask of features a <see cref="ILeaderboardProvider"/> supports.

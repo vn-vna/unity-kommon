@@ -2,7 +2,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono.Editor
+namespace Com.Scheherazade.Common.Chrono.Editor
 {
     [CustomPropertyDrawer(typeof(SerializableDateTime))]
     public class SerializableDateTimeDrawer : PropertyDrawer

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
     public class PathFollower : MonoBehaviour
     {

@@ -4,7 +4,7 @@
 
 using System.Text.RegularExpressions;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
+namespace Com.Scheherazade.Common.Editor.Toolkit
 {
     /// <summary>
     /// Shared string utilities for editor GUI display.

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Hapiga.Core.Runtime.Extensions
+namespace Com.Scheherazade.Common.Extensions
 {
     public static class DictionaryExtenstions
     {

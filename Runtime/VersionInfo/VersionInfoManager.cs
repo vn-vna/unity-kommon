@@ -1,7 +1,7 @@
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC
+namespace Com.Scheherazade.Common.VIC
 {
     [AddComponentMenu("")]
     public class VersionInfoManager : MonoBehaviour
@@ -18,6 +18,12 @@ namespace Com.Hapiga.Scheherazade.Common.VIC
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
+            if (Object.FindAnyObjectByType<VersionInfoManager>(
+                    FindObjectsInactive.Include) != null)
+            {
+                return;
+            }
+
             GameObject go = new GameObject("[Scheherazade Version Info]");
             go.hideFlags = HideFlags.HideInHierarchy;
             go.AddComponent<KeepAliveComponent>();
@@ -41,12 +47,20 @@ namespace Com.Hapiga.Scheherazade.Common.VIC
         #region Private Methods
         private string ResolveVersion()
         {
-            if (_config != null && _config.Provider != null)
+            if (_config?.Provider == null)
+            {
+                return $"v{Application.version}";
+            }
+
+            try
             {
                 return _config.Provider.GetVersionInfo();
             }
-
-            return $"v{Application.version}";
+            catch (System.Exception exception)
+            {
+                Debug.LogException(exception);
+                return $"v{Application.version}";
+            }
         }
 
         private void DispatchToConsumers(string version)
@@ -58,9 +72,24 @@ namespace Com.Hapiga.Scheherazade.Common.VIC
 
             foreach (ScriptableObject asset in _config.ConsumerAssets)
             {
-                if (asset is IVersionInfoConsumer consumer && consumer.IsActive)
+                if (asset is not IVersionInfoConsumer consumer)
                 {
-                    consumer.Consume(version);
+                    continue;
+                }
+
+                try
+                {
+                    if (consumer.IsActive)
+                    {
+                        consumer.Consume(version);
+                    }
+                }
+                catch (System.Exception exception)
+                {
+                    Debug.LogError(
+                        $"[VersionInfo] Consumer "
+                        + $"'{asset.name}' failed.");
+                    Debug.LogException(exception);
                 }
             }
         }

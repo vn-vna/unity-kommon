@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
+namespace Com.Scheherazade.Common.Integration.InAppPurchase
 {
     /// <summary>
     /// Static facade over the registered <see cref="IInAppPurchaseManager"/>.
@@ -148,14 +148,12 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
 
         #region Buy Product
 
-        public static void BuyProduct(string productId)
+        public static PurchaseHandle BuyProduct(string productId)
         {
-            if (!TryGetManager(out IInAppPurchaseManager manager))
-            {
-                return;
-            }
-
-            manager.BuyProduct(productId);
+            if (TryGetManager(out IInAppPurchaseManager manager)) return manager.BuyProduct(productId);
+            var unavailable = new PurchaseHandleSource(productId);
+            unavailable.TryComplete(PurchaseStatus.Unavailable, "In-App Purchase manager is not registered.");
+            return unavailable.Handle;
         }
 
         public static IEnumerator BuyProductCoroutine(
@@ -216,52 +214,30 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase
             float timeoutSeconds
         )
         {
-            bool completed = false;
-            bool success = false;
-            float deadline = Time.time + timeoutSeconds;
-
-            void Complete(bool ok)
-            {
-                success = ok;
-                completed = true;
-            }
-
-            void HandleSucceeded(IInAppPurchaseProduct product) => Complete(true);
-            void HandleFailed(IInAppPurchaseProduct product) => Complete(false);
-            void HandleDeferred(IInAppPurchaseProduct product) => Complete(false);
-
+            PurchaseHandle handle;
             try
             {
-                manager.PurchaseSucceeded += HandleSucceeded;
-                manager.PurchaseFailed += HandleFailed;
-                manager.PurchaseDeferred += HandleDeferred;
-                manager.BuyProduct(productId);
+                handle = manager.BuyProduct(productId);
             }
             catch (Exception ex)
             {
-                manager.PurchaseSucceeded -= HandleSucceeded;
-                manager.PurchaseFailed -= HandleFailed;
-                manager.PurchaseDeferred -= HandleDeferred;
                 QuickLog.Error<InAppPurchases>("Buy product '{0}' failed: {1}", productId, ex);
                 onResult?.Invoke(false);
                 yield break;
             }
 
-            while (!completed && Time.time < deadline)
-            {
-                yield return null;
-            }
+            float deadline = Time.time + timeoutSeconds;
+            while (!handle.IsCompleted && Time.time < deadline) yield return null;
 
-            manager.PurchaseSucceeded -= HandleSucceeded;
-            manager.PurchaseFailed -= HandleFailed;
-            manager.PurchaseDeferred -= HandleDeferred;
-
-            if (!completed)
+            if (!handle.IsCompleted)
             {
                 QuickLog.Warning<InAppPurchases>("Buy product '{0}' timed out.", productId);
+                onResult?.Invoke(false);
+                yield break;
             }
 
-            onResult?.Invoke(success);
+            PurchaseResult result = handle.Completion.Result;
+            onResult?.Invoke(result.Status == PurchaseStatus.Confirmed);
         }
 
         private static bool TryGetManager(out IInAppPurchaseManager manager)

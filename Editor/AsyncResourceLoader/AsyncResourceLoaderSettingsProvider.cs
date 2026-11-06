@@ -5,13 +5,13 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
-using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
+using Com.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.Editor.ScriptGeneration;
 using UnityEditor;
 using UnityEditor.Callbacks;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
+namespace Com.Scheherazade.Common.AsyncResourceLoader.Editor
 {
     public class AsyncResourceLoaderSettingsProvider : SettingsProvider
     {
@@ -1038,7 +1038,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 if (attr != null && type.IsGenericTypeDefinition
                     && type.Namespace != null
                     && type.Namespace.StartsWith(
-                        "Com.Hapiga.Scheherazade.Common.AsyncResourceLoader"))
+                        "Com.Scheherazade.Common.AsyncResourceLoader"))
                 {
                     templateTypes.Add(type);
                 }
@@ -1547,7 +1547,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
             if (_catalogConfig == null)
             {
                 EditorGUILayout.HelpBox(
-                    "CatalogBuilderConfig asset not found. Create one via the Catalog Builder window.",
+                    "CatalogBuilderConfig asset not found. Create one via Assets/Create/Scheherazade/Async Resource Loader/Catalog Builder Config.",
                     MessageType.Warning);
                 return;
             }
@@ -1610,9 +1610,9 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
 
             GUILayout.Space(8);
 
-            if (GUILayout.Button("Open Catalog Builder Window", GUILayout.Height(30)))
+            if (GUILayout.Button("Select Catalog Builder Config", GUILayout.Height(30)))
             {
-                CatalogBuilderWindow.Open();
+                CatalogBuilderConfigEditor.Open();
             }
         }
 

@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     [AddComponentMenu("Scheherazade/Chrono Director")]
     public class ChronoDirector : SingletonBehavior<ChronoDirector>

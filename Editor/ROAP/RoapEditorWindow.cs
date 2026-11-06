@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.ROAP.Editor
+namespace Com.Scheherazade.Common.ROAP.Editor
 {
     public sealed class RoapEditorWindow : EditorWindow
     {

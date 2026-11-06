@@ -4,7 +4,7 @@
 
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Editor.Toolkit
+namespace Com.Scheherazade.Common.Editor.Toolkit
 {
     /// <summary>
     /// Shared color constants for editor GUI elements.

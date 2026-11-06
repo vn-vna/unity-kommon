@@ -10,10 +10,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard
+namespace Com.Scheherazade.Common.Leaderboard
 {
     /// <summary>
     /// Apple Game Center provider.

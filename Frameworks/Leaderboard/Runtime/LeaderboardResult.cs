@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard
+namespace Com.Scheherazade.Common.Leaderboard
 {
     [Serializable]
     public readonly struct LeaderboardResult

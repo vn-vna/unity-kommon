@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Threading;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     public abstract class TrackingManagerBase<T> :
         SingletonScriptableObject<T>,

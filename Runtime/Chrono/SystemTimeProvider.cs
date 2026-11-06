@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Chrono
+namespace Com.Scheherazade.Common.Chrono
 {
     [CreateAssetMenu(fileName = "SystemTimeProvider", menuName = "Scheherazade/Chrono/System Time Provider")]
     public class SystemTimeProvider : TimeProviderBase

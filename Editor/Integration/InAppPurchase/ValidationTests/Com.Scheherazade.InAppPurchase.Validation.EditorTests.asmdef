@@ -1,0 +1,15 @@
+{
+  "name": "Com.Scheherazade.InAppPurchase.Validation.EditorTests",
+  "rootNamespace": "Com.Scheherazade.Common.Integration.InAppPurchase.Validation.Editor.Tests",
+  "references": ["Com.Scheherazade.Common"],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": ["TestAssemblies"]
+}

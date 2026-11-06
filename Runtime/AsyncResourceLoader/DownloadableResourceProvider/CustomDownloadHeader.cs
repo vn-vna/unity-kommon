@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     [Serializable]
     public struct CustomDownloadHeader

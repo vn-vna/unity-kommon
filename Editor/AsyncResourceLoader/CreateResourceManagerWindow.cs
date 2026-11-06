@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Com.Hapiga.Scheherazade.Common.Editor.ScriptGeneration;
+using Com.Scheherazade.Common.Editor.ScriptGeneration;
 using UnityEditor;
 using UnityEngine;
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
+namespace Com.Scheherazade.Common.AsyncResourceLoader.Editor
 {
     public class CreateResourceManagerWindow : EditorWindow
     {
@@ -322,7 +322,7 @@ namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader.Editor
                 sb.AppendLine(extraUsing);
             }
 
-            sb.AppendLine("using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;");
+            sb.AppendLine("using Com.Scheherazade.Common.AsyncResourceLoader;");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine();
 

@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.UserIdentity;
+using Com.Scheherazade.Common.UserIdentity;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity.Editor
+namespace Com.Scheherazade.Common.UserIdentity.Editor
 {
     internal sealed class UserIdentitySettingsProvider : SettingsProvider
     {

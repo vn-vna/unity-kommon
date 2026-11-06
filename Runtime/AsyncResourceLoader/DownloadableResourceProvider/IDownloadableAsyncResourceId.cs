@@ -1,6 +1,6 @@
-using Com.Hapiga.Scheherazade.Common.AsyncResourceLoader;
+using Com.Scheherazade.Common.AsyncResourceLoader;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     public interface IDownloadableAsyncResourceId : IAsyncResourceId
     {

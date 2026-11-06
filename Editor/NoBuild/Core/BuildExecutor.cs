@@ -12,7 +12,7 @@ using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Executes a build based on a <see cref="BuildProfile"/>.
@@ -21,12 +21,6 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
     /// </summary>
     internal static class BuildExecutor
     {
-        // ══════════════════════════════════════════════════
-        // ── Constants
-        // ══════════════════════════════════════════════════
-
-        private const string DefaultBuildDir = "Builds";
-
         // ══════════════════════════════════════════════════
         // ── Events & Delegates
         // ══════════════════════════════════════════════════
@@ -66,8 +60,9 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             }
 
             // ── Validate ──────────────────────
-            string validationError =
-                ValidateProfile(profile, settings);
+            BuildPreflightResult preflight = BuildPreflight.Evaluate(profile, settings);
+            string validationError = preflight.Errors.FirstOrDefault()
+                ?? (preflight.IsRefreshingGit ? "Wait for Git metadata to refresh, then start the build again." : null);
             if (validationError != null)
             {
                 FireFailed(profile, validationError);
@@ -90,10 +85,41 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         .NamedBuildTarget
                         .FromBuildTargetGroup(targetGroup);
 
+            string[] blockedDefines = preflight.DefinesToRemove;
+            if (blockedDefines.Length > 0)
+            {
+                bool applyNow = EditorUtility.DisplayDialog(
+                    "NoBuild — Defines Need Compilation",
+                    $"Profile '{profile.profileName}' disables "
+                    + "defines that are currently active:\n\n"
+                    + string.Join(", ", blockedDefines)
+                    + "\n\nApply its define set now? Unity "
+                    + "must finish compiling before you start "
+                    + "the build again.",
+                    "Apply Defines",
+                    "Cancel");
+                if (applyNow)
+                {
+                    if (NoBuildEditorState.ApplyDefines(settings,
+                            profile.scriptDefinitionSetIndex, targetGroup))
+                    {
+                        EditorUtility.DisplayDialog(
+                            "NoBuild — Defines Applied",
+                            "Wait for Unity to finish compiling, "
+                            + "then start the build again.",
+                            "OK");
+                    }
+                }
+
+                return null;
+            }
+
             // ── Snapshot ──────────────────────
             BuildStateSnapshot snapshot =
                 CaptureBuildState(namedTarget,
                     targetGroup);
+            BuildReport successfulReport = null;
+            bool restoreSucceeded = true;
 
             try
             {
@@ -108,23 +134,23 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     profile.profileName,
                     "Saving scenes...",
                     0.05f);
-                EditorSceneManager
-                    .SaveCurrentModifiedScenesIfUserWantsTo();
-
-                // ── Phase 2: Apply defines ─────
-                if (profile.HasValidDefineSet(settings))
+                if (!EditorSceneManager
+                        .SaveCurrentModifiedScenesIfUserWantsTo())
                 {
-                    ShowProgress(
-                        profile.profileName,
-                        "Applying script defines...",
-                        0.10f);
-                    ScriptDefinitionSet defineSet =
-                        settings.scriptDefinitionSets[
-                            profile
-                                .scriptDefinitionSetIndex];
-                    ScriptDefinitionSwitcher.ApplySet(
-                        defineSet, targetGroup);
+                    Debug.Log(
+                        "[NoBuild] Build cancelled while "
+                        + "saving modified scenes.");
+                    NoBuildEditorState.SetResult("Build cancelled while saving scenes.");
+                    return null;
                 }
+
+                // ── Phase 2: Prepare build defines ─
+                // Profile-enabled symbols are passed directly to
+                // BuildPlayer, avoiding a domain reload and keeping
+                // the editor's active define set unchanged.
+                string[] buildDefines = GetBuildExtraDefines(
+                    profile,
+                    settings);
 
                 // ── Phase 3: Build config ─────
                 ShowProgress(
@@ -139,31 +165,14 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     profile.profileName,
                     "Resolving build output...",
                     0.20f);
-                string[] scenePaths =
-                    GetScenePaths(profile, settings);
+                string[] scenePaths = preflight.ScenePaths;
                 if (scenePaths.Length == 0)
                 {
                     throw new InvalidOperationException(
                         "No valid scenes to build.");
                 }
 
-                string resolvedFolder =
-                    BuildNameResolver.Resolve(
-                        profile.buildFolder?.template
-                            ?? "{project-root}/Builds",
-                        profile, settings);
-                string resolvedName =
-                    BuildNameResolver.Resolve(
-                        profile.buildNameTemplate
-                            ?.template
-                            ?? "{app-version}",
-                        profile, settings);
-                string resolvedOutputPath = outputPath
-                    ?? Path.Combine(
-                        resolvedFolder,
-                        resolvedName
-                        + GetPlatformExtension(
-                            buildTarget));
+                string resolvedOutputPath = outputPath ?? preflight.OutputPath;
 
                 // Ensure output directory exists
                 string outputDir =
@@ -187,7 +196,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         locationPathName =
                             resolvedOutputPath,
                         target = buildTarget,
-                        options = BuildOptions.None
+                        options = BuildOptions.None,
+                        extraScriptingDefines = buildDefines
                     };
 
                 if (config.developmentBuild)
@@ -196,16 +206,44 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         BuildOptions.Development;
                 }
 
-                if (config.allowDebugging)
+                if (config.developmentBuild
+                    && config.allowDebugging)
                 {
                     buildOptions.options |=
                         BuildOptions.AllowDebugging;
                 }
 
-                if (config.connectWithProfiler)
+                if (config.developmentBuild
+                    && config.connectWithProfiler)
                 {
                     buildOptions.options |=
                         BuildOptions.ConnectWithProfiler;
+                }
+
+                if (buildTarget == BuildTarget.StandaloneWindows
+                    || buildTarget
+                    == BuildTarget.StandaloneWindows64)
+                {
+                    if (config.windowsCreateVSProject)
+                    {
+                        buildOptions.options |= BuildOptions
+                            .AcceptExternalModificationsToPlayer;
+                    }
+                }
+
+                if (buildTarget == BuildTarget.iOS)
+                {
+                    if (config.iosSymlinkFramework)
+                    {
+                        buildOptions.options |=
+                            BuildOptions.SymlinkSources;
+                    }
+
+                    if (config.iosRunInXcode)
+                    {
+                        buildOptions.options |=
+                            BuildOptions.AutoRunPlayer;
+                    }
                 }
 
                 Debug.Log(
@@ -229,22 +267,27 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                         + $"{summary.totalSize / 1024 / 1024}"
                         + " MB, "
                         + $"Time: {summary.totalTime}");
-                    BuildCompleted?.Invoke(
-                        profile, report);
-                    return report;
+                    successfulReport = report;
                 }
-
-                string errorMsg =
-                    $"Build failed with "
-                    + $"{summary.totalErrors} error(s). "
-                    + $"Result: {summary.result}";
-                Debug.LogError(
-                    $"[NoBuild] {errorMsg}");
-                BuildFailed?.Invoke(profile, errorMsg);
-                EditorUtility.DisplayDialog(
-                    "NoBuild — Build Failed",
-                    errorMsg, "OK");
-                return null;
+                else if (summary.result == BuildResult.Cancelled)
+                {
+                    NoBuildEditorState.SetResult("Build cancelled: " + profile.profileName);
+                    return null;
+                }
+                else
+                {
+                    string errorMsg =
+                        $"Build failed with "
+                        + $"{summary.totalErrors} error(s). "
+                        + $"Result: {summary.result}";
+                    Debug.LogError(
+                        $"[NoBuild] {errorMsg}");
+                    NotifyBuildFailed(profile, errorMsg);
+                    EditorUtility.DisplayDialog(
+                        "NoBuild — Build Failed",
+                        errorMsg, "OK");
+                    return null;
+                }
             }
             catch (Exception ex)
             {
@@ -268,12 +311,37 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     "Restoring editor state...",
                     0.80f);
 
-                RestoreBuildState(
-                    snapshot, namedTarget,
-                    targetGroup);
+                restoreSucceeded = RestoreBuildState(
+                    snapshot,
+                    namedTarget);
 
                 EditorUtility.ClearProgressBar();
             }
+
+            if (!restoreSucceeded)
+            {
+                NotifyBuildFailed(
+                    profile,
+                    "Build succeeded, but restoring editor "
+                    + "settings failed. Installation was cancelled.");
+                return null;
+            }
+
+            try
+            {
+                BuildCompleted?.Invoke(
+                    profile,
+                    successfulReport);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "[NoBuild] A BuildCompleted listener "
+                    + "threw an exception.");
+                Debug.LogException(exception);
+            }
+
+            return successfulReport;
         }
 
         /// <summary>Device selection mode for Build &amp; Run.</summary>
@@ -292,311 +360,125 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             DeviceOption deviceOption,
             string specificSerial = null)
         {
-            if (profile.buildConfiguration.platform
+            if (profile == null
+                || profile.buildConfiguration == null
+                || profile.buildConfiguration.platform
                 != BuildTarget.Android)
             {
-                EditorUtility.DisplayDialog("NoBuild",
-                    "Build & Run currently only supports Android.",
+                EditorUtility.DisplayDialog(
+                    "NoBuild",
+                    "Build & Run currently only supports "
+                    + "Android profiles.",
                     "OK");
                 return;
             }
 
-            string tempApksPath = null;
-            bool isAab =
-                profile.buildConfiguration
-                    .androidBuildAppBundle;
-
-            try
-            {
-                // 1 ── Build ─────────────────
-                BuildReport? report = Build(profile);
-                if (report == null
-                    || report.summary.result
-                    != BuildResult.Succeeded)
-                {
-                    // Build() already showed a failure
-                    // dialog — just abort the run
-                    return;
-                }
-
-                // 2 ── Get devices ───────────
-                ShowProgress(
-                    profile.profileName,
-                    "Detecting devices...",
-                    0f);
-                var devices = AdbUtility.GetDevices();
-                if (devices.Count == 0)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "No Android device connected "
-                        + "via ADB.",
-                        "OK");
-                    return;
-                }
-
-                // 3 ── Select target devices ──
-                List<AdbDeviceInfo> targets = new();
-                switch (deviceOption)
-                {
-                    case DeviceOption.FirstDevice:
-                        targets.Add(devices[0]);
-                        break;
-                    case DeviceOption.AllDevices:
-                        targets.AddRange(devices);
-                        break;
-                    case DeviceOption.SpecificDevice:
-                        var match = devices.Find(
-                            d => d.Serial
-                                == specificSerial);
-                        if (match.Serial == null)
-                        {
-                            EditorUtility.DisplayDialog(
-                                "NoBuild",
-                                $"Device "
-                                + $"'{specificSerial}' "
-                                + "not found.",
-                                "OK");
-                            return;
-                        }
-
-                        targets.Add(match);
-                        break;
-                }
-
-                // 4 ── Resolve output path ───
-                ShowProgress(
-                    profile.profileName,
-                    "Resolving build output path...",
-                    0f);
-                NoBuildSettings s =
-                    NoBuildResourceUtility.GetSettings();
-                string folder =
-                    BuildNameResolver.Resolve(
-                        profile.buildFolder?.template
-                            ?? "{project-root}/Build",
-                        profile, s);
-                string name =
-                    BuildNameResolver.Resolve(
-                        profile.buildNameTemplate
-                            ?.template
-                            ?? "{app-version}",
-                        profile, s);
-
-                string extension =
-                    GetPlatformExtension(
-                        profile.buildConfiguration
-                            .platform,
-                        profile.buildConfiguration);
-                string outputPath = Path.Combine(
-                    folder, name + extension);
-
-                if (!File.Exists(outputPath))
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "Build output not found at:\n"
-                        + $"{outputPath}",
-                        "OK");
-                    return;
-                }
-
-                string installPath = outputPath;
-
-                // 5 ── AAB → APKS conversion ─
-                if (isAab)
-                {
-                    // BuildApks() manages its own
-                    // progress bar internally
-                    tempApksPath =
-                        AabUtility.BuildApks(
-                            outputPath);
-                    installPath = tempApksPath;
-                }
-
-                // 6 ── Install + Launch ──────
-                string packageName =
-                    AdbUtility.GetPackageName();
-                int successCount = 0;
-                int failCount = 0;
-
-                foreach (var device in targets)
-                {
-                    ShowProgress(
-                        profile.profileName,
-                        $"Installing to "
-                        + $"{device.DisplayName} "
-                        + $"[{successCount + 1}/"
-                        + $"{targets.Count}]...",
-                        (float)successCount
-                        / targets.Count);
-
-                    bool installed =
-                        DeviceInstaller.InstallWithRecovery(
-                            device.Serial,
-                            device.DisplayName,
-                            packageName,
-                            () => isAab
-                                ? AabUtility.InstallApks(
-                                    tempApksPath,
-                                    device.Serial)
-                                : AdbUtility.InstallApk(
-                                    installPath,
-                                    device.Serial));
-
-                    if (!installed)
-                    {
-                        failCount++;
-                        Debug.LogError(
-                            $"[NoBuild] Install failed "
-                            + "on "
-                            + $"{device.DisplayName}");
-                        continue;
-                    }
-
-                    bool launched =
-                        AdbUtility.LaunchApp(
-                            device.Serial,
-                            packageName);
-                    if (launched)
-                    {
-                        successCount++;
-                        Debug.Log(
-                            $"[NoBuild] Launched on "
-                            + $"{device.DisplayName} "
-                            + $"({device.Serial})");
-                        EditorPrefs.SetString(
-                            "NoBuild_LastAdbDevice",
-                            device.Serial);
-                    }
-                    else
-                    {
-                        failCount++;
-                        Debug.LogError(
-                            $"[NoBuild] Launch failed "
-                            + "on "
-                            + $"{device.DisplayName}");
-                    }
-                }
-
-                // 7 ── Summary ───────────────
-                if (failCount > 0
-                    && successCount == 0)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        "Failed to install/launch "
-                        + "on all "
-                        + $"{targets.Count} "
-                        + "device(s).",
-                        "OK");
-                }
-                else if (failCount > 0)
-                {
-                    EditorUtility.DisplayDialog(
-                        "NoBuild",
-                        $"{successCount} device(s) "
-                        + "succeeded, "
-                        + $"{failCount} failed.",
-                        "OK");
-                }
-                // All succeeded — silent (log only)
-            }
-            catch (Exception ex)
+            if (profile.buildConfiguration.androidExportProject)
             {
                 EditorUtility.DisplayDialog(
-                    "NoBuild — Error",
-                    "An error occurred during "
-                    + $"Build & Run:\n{ex.Message}",
+                    "NoBuild",
+                    "Build & Run cannot install an exported "
+                    + "Android Gradle project. Disable "
+                    + "'Export Project' for this profile.",
                     "OK");
-                Debug.LogException(ex);
+                return;
             }
-            finally
+
+            NoBuildDeviceOperations.Start("Detecting build target devices…", async token =>
             {
-                // ── Cleanup is inevitable ────
-                ShowProgress(
-                    profile.profileName,
-                    "Cleaning up temporary files...",
-                    0f);
-
-                if (isAab
-                    && !string.IsNullOrEmpty(
-                        tempApksPath))
+                List<AdbDeviceInfo> devices = (await AdbUtility.GetDevicesAsync(token))
+                    .Where(device => device.State == "device").ToList();
+                List<AdbDeviceInfo> targets = deviceOption switch
                 {
-                    AabUtility.Cleanup(tempApksPath);
+                    DeviceOption.AllDevices => devices,
+                    DeviceOption.FirstDevice => devices.Take(1).ToList(),
+                    _ => devices.Where(device => device.Serial == specificSerial).ToList()
+                };
+                if (targets.Count == 0) throw new InvalidOperationException("The selected Android device is no longer connected or authorized.");
+                token.ThrowIfCancellationRequested();
+                bool aab = profile.buildConfiguration.androidBuildAppBundle;
+                string package = ResolveAndroidPackageName(profile);
+                NoBuildDeviceOperations.SetStatus("Building " + profile.profileName + "…");
+                BuildReport report = Build(profile);
+                if (report == null) return;
+                string path = report.summary.outputPath;
+                if (!File.Exists(path)) throw new FileNotFoundException("Build artifact not found: " + path);
+                string apks = null;
+                try
+                {
+                    if (aab)
+                    {
+                        NoBuildDeviceOperations.SetStatus("Converting AAB to APKS…");
+                        apks = await AabUtility.BuildApksAsync(path, token);
+                    }
+                    var outcomes = new List<string>();
+                    int success = 0;
+                    foreach (AdbDeviceInfo device in targets)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        NoBuildDeviceOperations.SetStatus("Installing to " + device.DisplayName + "…");
+                        bool installed = await DeviceInstaller.InstallWithRecoveryAsync(device.Serial, device.DisplayName, package,
+                            () => aab ? AabUtility.InstallApksAsync(apks, device.Serial, token)
+                                : AdbUtility.InstallApkAsync(path, device.Serial, token), token);
+                        if (!installed)
+                        {
+                            outcomes.Add(device.DisplayName + ": install cancelled");
+                            continue;
+                        }
+                        ProcessExecutionResult launch = await AdbUtility.RunAsync(
+                            $"-s \"{device.Serial}\" shell monkey -p \"{package}\" -c android.intent.category.LAUNCHER 1", cancellationToken: token);
+                        bool launched = !launch.TimedOut && launch.ExitCode == 0 && !launch.CombinedOutput.Contains("Error");
+                        outcomes.Add(device.DisplayName + (launched ? ": installed and launched" : ": installed; launch failed"));
+                        if (launched)
+                        {
+                            success++;
+                            EditorPrefs.SetString(NoBuildDeviceOperations.RememberedDeviceKey, device.Serial);
+                        }
+                    }
+                    NoBuildEditorState.SetResult($"Deployment: {success}/{targets.Count} succeeded · {profile.profileName}\n"
+                        + string.Join("\n", outcomes), path, success != targets.Count);
                 }
-
-                EditorUtility.ClearProgressBar();
-            }
+                finally
+                {
+                    if (apks != null) AabUtility.Cleanup(apks);
+                }
+            });
         }
 
         // ══════════════════════════════════════════════════
         // ── Private Methods
         // ══════════════════════════════════════════════════
 
-        private static string ValidateProfile(BuildProfile profile, NoBuildSettings settings)
+        private static string ResolveAndroidPackageName(
+            BuildProfile profile)
         {
-            if (!profile.HasValidSceneSet(settings))
-            {
-                return $"Build profile '{profile.profileName}' has an invalid scene set reference.";
-            }
-
-            SceneSet sceneSet = settings.sceneSets[profile.sceneSetIndex];
-            if (!sceneSet.HasContent)
-            {
-                return $"Scene set '{sceneSet.setName}' has no scenes configured.";
-            }
-
-            int validCount = 0;
-            foreach (SceneSlot slot in sceneSet.scenes)
-            {
-                if (slot.enabled && slot.IsValid) validCount++;
-            }
-
-            if (validCount == 0)
-            {
-                return $"No valid, enabled scenes in set '{sceneSet.setName}'.";
-            }
-
-            return null;
+            string profileOverride = profile?.buildConfiguration
+                ?.bundleIdentifierOverride;
+            return !string.IsNullOrWhiteSpace(profileOverride)
+                ? profileOverride.Trim()
+                : AdbUtility.GetPackageName();
         }
 
-        private static string[] GetScenePaths(BuildProfile profile, NoBuildSettings settings)
+        private static string[] GetBuildExtraDefines(
+            BuildProfile profile,
+            NoBuildSettings settings)
         {
-            SceneSet sceneSet = settings.sceneSets[profile.sceneSetIndex];
-
-            // Use buildOrderOverride if available, otherwise use scenes in natural order
-            List<SceneSlot> orderedSlots = sceneSet.buildOrderOverride.Count > 0
-                ? sceneSet.buildOrderOverride
-                : sceneSet.scenes;
-
-            List<string> paths = new();
-            foreach (SceneSlot slot in orderedSlots)
+            if (!profile.HasValidDefineSet(settings))
             {
-                if (slot.enabled && slot.IsValid)
-                {
-                    paths.Add(slot.ScenePath);
-                }
+                return Array.Empty<string>();
             }
 
-            if (paths.Count == 0)
-            {
-                // Fallback: use currently open scenes
-                Debug.LogWarning(
-                    "[NoBuild] No valid scenes in set — falling back to currently open scenes."
-                );
-                for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
-                {
-                    string path =
-                        UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).path;
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        paths.Add(path);
-                    }
-                }
-            }
-
-            return paths.ToArray();
+            ScriptDefinitionSet set =
+                settings.scriptDefinitionSets[
+                    profile.scriptDefinitionSetIndex];
+            return set.slots
+                .Where(slot => slot != null
+                    && slot.enabled
+                    && !string.IsNullOrWhiteSpace(
+                        slot.defineSymbol))
+                .Select(slot => slot.defineSymbol.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
         }
 
         private static BuildStateSnapshot CaptureBuildState(
@@ -615,18 +497,24 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 connectProfiler = EditorUserBuildSettings.connectProfiler,
                 bundleIdentifier = PlayerSettings.GetApplicationIdentifier(namedTarget),
                 productName = PlayerSettings.productName,
+                androidArchitecture =
+                    PlayerSettings.Android.targetArchitectures,
+                androidExportProject = EditorUserBuildSettings
+                    .exportAsGoogleAndroidProject,
+                androidBuildAppBundle =
+                    EditorUserBuildSettings.buildAppBundle,
+                androidSplitBinary = PlayerSettings.Android
+                    .splitApplicationBinary,
 #if UNITY_ANDROID
-                androidArchitecture = PlayerSettings.Android.targetArchitectures,
-                androidExportProject = EditorUserBuildSettings.exportAsGoogleAndroidProject,
-                androidBuildAppBundle = EditorUserBuildSettings.buildAppBundle,
-                androidSplitBinary = PlayerSettings.Android.splitApplicationBinary,
-                debugSymbolLevel = UnityEditor.Android.UserBuildSettings.DebugSymbols.level,
-                debugSymbolFormat = UnityEditor.Android.UserBuildSettings.DebugSymbols.format,
+                debugSymbolLevel = UnityEditor.Android
+                    .UserBuildSettings.DebugSymbols.level,
+                debugSymbolFormat = UnityEditor.Android
+                    .UserBuildSettings.DebugSymbols.format,
 #endif
-#if UNITY_IOS
-                iosTeamId = PlayerSettings.iOS.appleDeveloperTeamID,
-                iosAutomaticSigning = PlayerSettings.iOS.appleEnableAutomaticSigning,
-#endif
+                iosTeamId = PlayerSettings.iOS
+                    .appleDeveloperTeamID,
+                iosAutomaticSigning = PlayerSettings.iOS
+                    .appleEnableAutomaticSigning,
             };
         }
 
@@ -641,132 +529,209 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             PlayerSettings.SetManagedStrippingLevel(namedTarget, config.strippingLevel);
             PlayerSettings.stripEngineCode = config.stripEngineCode;
 
-            EditorUserBuildSettings.development = config.developmentBuild;
-            EditorUserBuildSettings.allowDebugging = config.allowDebugging;
-            EditorUserBuildSettings.connectProfiler = config.connectWithProfiler;
+            EditorUserBuildSettings.development =
+                config.developmentBuild;
+            EditorUserBuildSettings.allowDebugging =
+                config.developmentBuild
+                && config.allowDebugging;
+            EditorUserBuildSettings.connectProfiler =
+                config.developmentBuild
+                && config.connectWithProfiler;
 
-            if (!string.IsNullOrEmpty(config.bundleIdentifierOverride))
+            if (!string.IsNullOrWhiteSpace(config.bundleIdentifierOverride))
             {
-                PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride);
+                PlayerSettings.SetApplicationIdentifier(namedTarget, config.bundleIdentifierOverride.Trim());
             }
 
-            if (!string.IsNullOrEmpty(config.productNameOverride))
+            if (!string.IsNullOrWhiteSpace(config.productNameOverride))
             {
                 PlayerSettings.productName = config.productNameOverride;
             }
 
+            if (config.platform == BuildTarget.Android)
+            {
+                PlayerSettings.Android.targetArchitectures =
+                    config.androidTargetArchitecture;
+                EditorUserBuildSettings
+                    .exportAsGoogleAndroidProject =
+                    config.androidExportProject;
+                EditorUserBuildSettings.buildAppBundle =
+                    config.androidBuildAppBundle;
+                PlayerSettings.Android.splitApplicationBinary =
+                    config.androidSplitBinary;
 #if UNITY_ANDROID
-            PlayerSettings.Android.targetArchitectures = config.androidTargetArchitecture;
-            EditorUserBuildSettings.exportAsGoogleAndroidProject = config.androidExportProject;
-            EditorUserBuildSettings.buildAppBundle = config.androidBuildAppBundle;
-            PlayerSettings.Android.splitApplicationBinary = config.androidSplitBinary;
-            UnityEditor.Android.UserBuildSettings.DebugSymbols.level = config.debugSymbolLevel;
-            UnityEditor.Android.UserBuildSettings.DebugSymbols.format = config.debugSymbolFormat;
+                UnityEditor.Android.UserBuildSettings.DebugSymbols
+                    .level = config.debugSymbolLevel;
+                UnityEditor.Android.UserBuildSettings.DebugSymbols
+                    .format = config.debugSymbolFormat;
 #endif
+            }
 
 #if UNITY_STANDALONE_WIN || UNITY_STANDALONE
             // Windows-specific
             // createVSProject is handled via BuildOptions
 #endif
 
-#if UNITY_IOS
-            if (!string.IsNullOrEmpty(config.iosTeamId)) PlayerSettings.iOS.appleDeveloperTeamID = config.iosTeamId;
-            PlayerSettings.iOS.appleEnableAutomaticSigning = config.iosAutomaticSigning;
-#endif
+            if (config.platform == BuildTarget.iOS)
+            {
+                PlayerSettings.iOS.appleDeveloperTeamID =
+                    config.iosTeamId ?? string.Empty;
+                PlayerSettings.iOS.appleEnableAutomaticSigning =
+                    config.iosAutomaticSigning;
+            }
         }
 
-        private static void RestoreBuildState(
+        private static bool RestoreBuildState(
             BuildStateSnapshot snapshot,
-            UnityEditor.Build.NamedBuildTarget namedTarget,
-            BuildTargetGroup targetGroup)
+            UnityEditor.Build.NamedBuildTarget namedTarget)
         {
-            if (snapshot == null) return;
+            if (snapshot == null) return true;
 
-            try
+            var failures = new List<string>();
+            void TryRestore(string setting, Action restore)
             {
-                PlayerSettings.SetScriptingDefineSymbols(
-                    namedTarget,
-                    snapshot.scriptDefines ?? ""
-                );
-
-                PlayerSettings.SetScriptingBackend(namedTarget, snapshot.scriptingBackend);
-                PlayerSettings.SetIl2CppCodeGeneration(namedTarget, snapshot.il2CppCodeGeneration);
-                PlayerSettings.SetManagedStrippingLevel(namedTarget, snapshot.strippingLevel);
-                PlayerSettings.stripEngineCode = snapshot.stripEngineCode;
-                EditorUserBuildSettings.development = snapshot.developmentBuild;
-                EditorUserBuildSettings.allowDebugging = snapshot.allowDebugging;
-                EditorUserBuildSettings.connectProfiler = snapshot.connectProfiler;
-
-                if (!string.IsNullOrEmpty(snapshot.bundleIdentifier))
-                    PlayerSettings.SetApplicationIdentifier(namedTarget, snapshot.bundleIdentifier);
-                if (!string.IsNullOrEmpty(snapshot.productName))
-                    PlayerSettings.productName = snapshot.productName;
-
-#if UNITY_ANDROID
-                PlayerSettings.Android.targetArchitectures = snapshot.androidArchitecture;
-                EditorUserBuildSettings.exportAsGoogleAndroidProject = snapshot.androidExportProject;
-                EditorUserBuildSettings.buildAppBundle = snapshot.androidBuildAppBundle;
-                PlayerSettings.Android.splitApplicationBinary = snapshot.androidSplitBinary;
-                UnityEditor.Android.UserBuildSettings.DebugSymbols.level = snapshot.debugSymbolLevel;
-                UnityEditor.Android.UserBuildSettings.DebugSymbols.format = snapshot.debugSymbolFormat;
-#endif
-#if UNITY_IOS
-                if (!string.IsNullOrEmpty(snapshot.iosTeamId)) 
+                try
                 {
-                    PlayerSettings.iOS.appleDeveloperTeamID = snapshot.iosTeamId;
+                    restore();
                 }
+                catch (Exception exception)
+                {
+                    failures.Add(
+                        $"{setting}: {exception.Message}");
+                    Debug.LogException(exception);
+                }
+            }
 
-                PlayerSettings.iOS.appleEnableAutomaticSigning = snapshot.iosAutomaticSigning;
+            TryRestore("Scripting defines", () =>
+            {
+                string originalDefines =
+                    snapshot.scriptDefines ?? string.Empty;
+                string currentDefines = PlayerSettings
+                    .GetScriptingDefineSymbols(namedTarget);
+                if (!string.Equals(
+                        currentDefines,
+                        originalDefines,
+                        StringComparison.Ordinal))
+                {
+                    PlayerSettings.SetScriptingDefineSymbols(
+                        namedTarget,
+                        originalDefines);
+                }
+            });
+            TryRestore(
+                "Scripting backend",
+                () => PlayerSettings.SetScriptingBackend(
+                    namedTarget,
+                    snapshot.scriptingBackend));
+            TryRestore(
+                "IL2CPP code generation",
+                () => PlayerSettings.SetIl2CppCodeGeneration(
+                    namedTarget,
+                    snapshot.il2CppCodeGeneration));
+            TryRestore(
+                "Managed stripping level",
+                () => PlayerSettings.SetManagedStrippingLevel(
+                    namedTarget,
+                    snapshot.strippingLevel));
+            TryRestore(
+                "Build flags",
+                () =>
+                {
+                    PlayerSettings.stripEngineCode =
+                        snapshot.stripEngineCode;
+                    EditorUserBuildSettings.development =
+                        snapshot.developmentBuild;
+                    EditorUserBuildSettings.allowDebugging =
+                        snapshot.allowDebugging;
+                    EditorUserBuildSettings.connectProfiler =
+                        snapshot.connectProfiler;
+                });
+            TryRestore(
+                "Application identifier",
+                () => PlayerSettings.SetApplicationIdentifier(
+                    namedTarget,
+                    snapshot.bundleIdentifier ?? string.Empty));
+            TryRestore(
+                "Product name",
+                () => PlayerSettings.productName =
+                    snapshot.productName ?? string.Empty);
+            TryRestore(
+                "Android settings",
+                () =>
+                {
+                    PlayerSettings.Android.targetArchitectures =
+                        snapshot.androidArchitecture;
+                    EditorUserBuildSettings
+                        .exportAsGoogleAndroidProject =
+                        snapshot.androidExportProject;
+                    EditorUserBuildSettings.buildAppBundle =
+                        snapshot.androidBuildAppBundle;
+                    PlayerSettings.Android.splitApplicationBinary =
+                        snapshot.androidSplitBinary;
+                });
+#if UNITY_ANDROID
+            TryRestore(
+                "Android debug symbols",
+                () =>
+                {
+                    UnityEditor.Android.UserBuildSettings.DebugSymbols
+                        .level = snapshot.debugSymbolLevel;
+                    UnityEditor.Android.UserBuildSettings.DebugSymbols
+                        .format = snapshot.debugSymbolFormat;
+                });
 #endif
-            }
-            catch (Exception ex)
+            TryRestore(
+                "iOS signing",
+                () =>
+                {
+                    PlayerSettings.iOS.appleDeveloperTeamID =
+                        snapshot.iosTeamId ?? string.Empty;
+                    PlayerSettings.iOS.appleEnableAutomaticSigning =
+                        snapshot.iosAutomaticSigning;
+                });
+
+            if (failures.Count == 0)
             {
-                Debug.LogError(
-                    $"[NoBuild] Failed to restore build state: {ex.Message}"
-                );
+                return true;
             }
+
+            string message =
+                "Failed to restore some editor build settings "
+                + "after the build. Installation was cancelled. "
+                + "Review Player Settings before starting another "
+                + "build.\n\n"
+                + string.Join("\n", failures);
+            Debug.LogError($"[NoBuild] {message}");
+            EditorUtility.DisplayDialog(
+                "NoBuild — Restore Failed",
+                message,
+                "OK");
+            return false;
         }
 
-        private static string GetPlatformExtension(BuildTarget target)
-        {
-            return GetPlatformExtension(target, null);
-        }
-
-        /// <summary>
-        /// Returns the platform file extension. When <paramref name="config"/>
-        /// is provided, uses the profile's AAB flag instead of the (possibly
-        /// restored) global EditorUserBuildSettings value.
-        /// </summary>
-        private static string GetPlatformExtension(
-            BuildTarget target, BuildConfiguration config
-        )
-        {
-            switch (target)
-            {
-                case BuildTarget.Android:
-                    if (config != null)
-                        return config.androidBuildAppBundle
-                            ? ".aab" : ".apk";
-                    return EditorUserBuildSettings.buildAppBundle
-                        ? ".aab" : ".apk";
-                case BuildTarget.StandaloneWindows:
-                case BuildTarget.StandaloneWindows64:
-                    return ".exe";
-                case BuildTarget.StandaloneOSX:
-                    return ".app";
-                case BuildTarget.iOS:
-                    return ""; // iOS builds to a folder
-                case BuildTarget.WebGL:
-                    return ""; // WebGL builds to a folder
-                default:
-                    return "";
-            }
-        }
-
-        private static void FireFailed(BuildProfile profile, string message)
+        private static void FireFailed(
+            BuildProfile profile,
+            string message)
         {
             Debug.LogError($"[NoBuild] {message}");
-            BuildFailed?.Invoke(profile, message);
+            NotifyBuildFailed(profile, message);
+        }
+
+        private static void NotifyBuildFailed(
+            BuildProfile profile,
+            string message)
+        {
+            try
+            {
+                BuildFailed?.Invoke(profile, message);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "[NoBuild] A BuildFailed listener "
+                    + "threw an exception.");
+                Debug.LogException(exception);
+            }
         }
 
         /// <summary>

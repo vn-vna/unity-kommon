@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     public interface IUserSegmentationProvider
     {

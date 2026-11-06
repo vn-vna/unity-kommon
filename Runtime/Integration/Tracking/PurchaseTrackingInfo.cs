@@ -4,7 +4,7 @@ using System;
 using Newtonsoft.Json;
 #endif
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Tracking
+namespace Com.Scheherazade.Common.Integration.Tracking
 {
     public struct PurchaseTrackingInfo : ITrackingData
     {

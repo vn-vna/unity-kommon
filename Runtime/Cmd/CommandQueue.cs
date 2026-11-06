@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 
-namespace Com.Hapiga.Scheherazade.Common
+namespace Com.Scheherazade.Common
 {
     public class CommandInfoAttribute : Attribute
     {

@@ -2,7 +2,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     /// <summary>
     /// Always-available anonymous identity. The user id is not owned by this

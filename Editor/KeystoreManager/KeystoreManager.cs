@@ -8,7 +8,7 @@ using UnityEngine;
 using UnityEditor.Build.Profile;
 #endif
 
-namespace Com.Hapiga.Scheherazade.Common.KeystoreManager
+namespace Com.Scheherazade.Common.KeystoreManager
 {
     public class KeystoreManagerWindow : EditorWindow
     {

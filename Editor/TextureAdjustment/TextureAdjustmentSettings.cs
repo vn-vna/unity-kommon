@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Editor.TextureAdjustment
+namespace Com.Scheherazade.Editor.TextureAdjustment
 {
     public class TextureAdjustmentSettings : ScriptableObject
     {

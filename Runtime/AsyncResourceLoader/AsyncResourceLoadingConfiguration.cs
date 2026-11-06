@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace Com.Hapiga.Scheherazade.Common.AsyncResourceLoader
+namespace Com.Scheherazade.Common.AsyncResourceLoader
 {
     [CreateAssetMenu(
         fileName = "AsyncResourceLoaderConfiguration",

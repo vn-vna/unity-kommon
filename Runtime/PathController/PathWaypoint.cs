@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.PathController
+namespace Com.Scheherazade.Common.PathController
 {
     [Serializable]
     public struct PathWaypoint

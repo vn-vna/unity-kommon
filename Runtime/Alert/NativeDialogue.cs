@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Alert
+namespace Com.Scheherazade.Common.Alert
 {
 
     public class NativeDialogue : MonoBehaviour
@@ -32,7 +32,7 @@ namespace Com.Hapiga.Scheherazade.Common.Alert
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
-            using (AndroidJavaClass nativeDialog = new AndroidJavaClass("com.hapiga.scheherazade.android.NativeDialog"))
+            using (AndroidJavaClass nativeDialog = new AndroidJavaClass("com.scheherazade.android.NativeDialog"))
             {
                 nativeDialog.CallStatic("showSimpleAlert", title, message);
             }
@@ -64,7 +64,7 @@ namespace Com.Hapiga.Scheherazade.Common.Alert
             instance.OnPositiveButtonClicked = onPositive;
             instance. OnNegativeButtonClicked = onNegative;
 
-            using (AndroidJavaClass nativeDialog = new AndroidJavaClass("com.hapiga.scheherazade.android.NativeDialog"))
+            using (AndroidJavaClass nativeDialog = new AndroidJavaClass("com.scheherazade.android.NativeDialog"))
             {
                 nativeDialog.CallStatic("showAlert", title, message, positiveButton, negativeButton, "AndroidNativeDialog", "OnDialogCallback");
             }

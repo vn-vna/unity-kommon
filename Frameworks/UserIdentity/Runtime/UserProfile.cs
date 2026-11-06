@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     /// <summary>
     /// The canonical user: a stable local GUID plus every identity this user

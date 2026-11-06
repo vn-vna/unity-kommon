@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
+namespace Com.Scheherazade.Common.VIC.Consumers
 {
     [CreateAssetMenu(
         fileName = "DefaultCanvasConsumer",
@@ -74,6 +74,8 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
 
         #region Private Fields
         private Text _versionText;
+
+        private RectTransform _backgroundRect;
         #endregion
 
         #region IVersionInfoConsumer
@@ -85,6 +87,7 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
             if (_versionText != null)
             {
                 _versionText.text = versionInfo;
+                ResizeBackgroundToText();
             }
         }
         #endregion
@@ -99,8 +102,7 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
 
             GameObject canvasGO = new GameObject(
                 "[Version Info Canvas]",
-                typeof(Canvas),
-                typeof(GraphicRaycaster)
+                typeof(Canvas)
             );
             Object.DontDestroyOnLoad(canvasGO);
 
@@ -132,8 +134,10 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
 
             Image bgImage = bgGO.GetComponent<Image>();
             bgImage.color = _backgroundColor;
+            bgImage.raycastTarget = false;
 
-            RectTransform bgRT = bgGO.GetComponent<RectTransform>();
+            _backgroundRect = bgGO.GetComponent<RectTransform>();
+            RectTransform bgRT = _backgroundRect;
             bgRT.anchorMin = AnchorFromTextAnchor();
             bgRT.anchorMax = AnchorFromTextAnchor();
             bgRT.pivot = PivotFromTextAnchor();
@@ -158,6 +162,7 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
             _versionText.alignment = _anchor;
             _versionText.fontSize = _fontSize;
             _versionText.color = _textColor;
+            _versionText.raycastTarget = false;
             _versionText.font = _font != null
                 ? _font
                 : Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -169,6 +174,23 @@ namespace Com.Hapiga.Scheherazade.Common.VIC.Consumers
             textRT.anchorMax = Vector2.one;
             textRT.offsetMin = Vector2.zero;
             textRT.offsetMax = Vector2.zero;
+        }
+
+        private void ResizeBackgroundToText()
+        {
+            if (_versionText == null || _backgroundRect == null)
+            {
+                return;
+            }
+
+            _backgroundRect.SetSizeWithCurrentAnchors(
+                RectTransform.Axis.Horizontal,
+                _versionText.preferredWidth
+                + _backgroundPadding.x);
+            _backgroundRect.SetSizeWithCurrentAnchors(
+                RectTransform.Axis.Vertical,
+                _versionText.preferredHeight
+                + _backgroundPadding.y);
         }
 
         private Vector2 AnchorFromTextAnchor()

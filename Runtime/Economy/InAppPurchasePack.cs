@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 
-using Com.Hapiga.FallAway.Economy;
-using Com.Hapiga.Scheherazade.Common.Integration.InAppPurchase;
+using Com.Scheherazade.FallAway.Economy;
+using Com.Scheherazade.Common.Integration.InAppPurchase;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Economy
+namespace Com.Scheherazade.Economy
 {
     [CreateAssetMenu(fileName = "InAppPurchasePack", menuName = "FallAway/Economy/In App Purchase Pack")]
     public class InAppPurchasePack :

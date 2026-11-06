@@ -3,15 +3,17 @@
 // ═══════════════════════════════════════════════════════════
 
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Converts an Android App Bundle (.aab) to an APK Set (.apks)
@@ -93,9 +95,28 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             apksOutputPath ??=
                 GetTempApksPath(aabPath);
 
+            string outputDirectory = Path.GetDirectoryName(
+                apksOutputPath);
+            if (!string.IsNullOrEmpty(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            if (File.Exists(apksOutputPath))
+            {
+                File.Delete(apksOutputPath);
+            }
+
             string javaPath = ResolveJava();
             string bundletoolPath =
                 ResolveBundletool();
+            if (string.IsNullOrEmpty(bundletoolPath))
+            {
+                throw new FileNotFoundException(
+                    "bundletool.jar could not be resolved. "
+                    + "Configure NoBuild_BundletoolPath "
+                    + "or check the download error above.");
+            }
 
             string args = BuildApksCommandArgs(
                 aabPath, apksOutputPath);
@@ -108,8 +129,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             try
             {
                 Debug.Log(
-                    $"[NoBuild] build-apks: {javaPath} "
-                    + $"-jar \"{bundletoolPath}\" {args}");
+                    $"[NoBuild] Converting AAB to APKS: "
+                    + $"{aabPath} → {apksOutputPath}");
 
                 string output = RunProcess(
                     javaPath,
@@ -184,15 +205,15 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     $"[NoBuild] Installing APKS to "
                     + $"{deviceSerial}...");
 
-                var result = RunProcessVerbose(
-                    javaPath,
-                    $"-jar \"{bundletoolPath}\" {args}",
-                    ProcessTimeout);
+                ProcessExecutionResult result =
+                    RunProcessVerbose(
+                        javaPath,
+                        $"-jar \"{bundletoolPath}\" {args}",
+                        ProcessTimeout);
 
-                string combined = result.stdout
-                    + "\n" + result.stderr;
+                string combined = result.CombinedOutput;
 
-                bool success = result.exitCode == 0
+                bool success = result.ExitCode == 0
                     || combined.Contains(
                         "The APKs have been installed")
                     || combined.Contains(
@@ -216,7 +237,7 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 Debug.LogError(
                     $"[NoBuild] APKS install failed on "
                     + $"{deviceSerial}"
-                    + $" (exit={result.exitCode})"
+                    + $" (exit={result.ExitCode})"
                     + $":\n{Truncate(combined, 2000)}");
                 return new InstallResult
                 {
@@ -473,7 +494,8 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                     $"[NoBuild] Downloading: "
                     + $"{downloadUrl}");
 
-                using var client = new WebClient();
+                using var client =
+                    new TimeoutWebClient(WebTimeout);
                 client.Headers.Add(
                     HttpRequestHeader.UserAgent,
                     "NoBuild-Unity");
@@ -709,86 +731,59 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
 
         /// <summary>
         /// Runs a process and returns its stdout.
-        /// Throws if exit code is non-zero.
+        /// Throws if the process times out or exits non-zero.
         /// </summary>
         private static string RunProcess(
-            string fileName, string arguments,
+            string fileName,
+            string arguments,
             int timeoutMs)
         {
-            var result = RunProcessVerbose(
-                fileName, arguments, timeoutMs);
+            ProcessExecutionResult result =
+                RunProcessVerbose(
+                    fileName,
+                    arguments,
+                    timeoutMs);
 
-            if (result.exitCode != 0)
+            if (result.TimedOut)
+            {
+                throw new TimeoutException(
+                    $"Process timed out after "
+                    + $"{timeoutMs}ms: {fileName}");
+            }
+
+            if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException(
                     "Process exited with code "
-                    + $"{result.exitCode}.\n"
+                    + $"{result.ExitCode}.\n"
                     + "stderr:\n"
-                    + $"{Truncate(result.stderr, 1000)}");
+                    + Truncate(
+                        result.StandardError,
+                        1000));
             }
 
-            return result.stdout;
+            return result.StandardOutput;
         }
 
-        /// <summary>
-        /// Runs a process and returns both stdout, stderr,
-        /// and exit code. Never throws on non-zero exit.
-        /// </summary>
-        private static ProcessResult RunProcessVerbose(
-            string fileName, string arguments,
-            int timeoutMs)
+        private static ProcessExecutionResult
+            RunProcessVerbose(
+                string fileName,
+                string arguments,
+                int timeoutMs)
         {
-            var psi = new ProcessStartInfo
+            ProcessExecutionResult result =
+                NoBuildProcessRunner.Run(
+                    fileName,
+                    arguments,
+                    timeoutMs);
+            if (result.TimedOut)
             {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding =
-                    Encoding.UTF8,
-                StandardErrorEncoding =
-                    Encoding.UTF8
-            };
-
-            using var process =
-                Process.Start(psi);
-            if (process == null)
-            {
-                throw new InvalidOperationException(
-                    "Failed to start process: "
-                    + $"{fileName}");
-            }
-
-            string stdout =
-                process.StandardOutput.ReadToEnd();
-            string stderr =
-                process.StandardError.ReadToEnd();
-
-            if (!process.WaitForExit(timeoutMs))
-            {
-                try { process.Kill(); }
-                catch { /* best effort */ }
                 throw new TimeoutException(
                     $"Process timed out after "
-                    + $"{timeoutMs}ms: "
-                    + $"{fileName} {arguments}");
+                    + $"{timeoutMs}ms: {fileName}");
             }
 
-            return new ProcessResult
-            {
-                stdout = stdout ?? "",
-                stderr = stderr ?? "",
-                exitCode = process.ExitCode
-            };
-        }
-
-        private struct ProcessResult
-        {
-            public string stdout;
-            public string stderr;
-            public int exitCode;
+            return result;
         }
 
         // ══════════════════════════════════════════════════
@@ -868,10 +863,132 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         // ── Nested Types
         // ══════════════════════════════════════════════════
 
+        private sealed class TimeoutWebClient : WebClient
+        {
+            private readonly int _timeoutMs;
+
+            public TimeoutWebClient(int timeoutMs)
+            {
+                _timeoutMs = timeoutMs;
+            }
+
+            protected override WebRequest GetWebRequest(
+                Uri address)
+            {
+                WebRequest request = base.GetWebRequest(address);
+                if (request != null)
+                {
+                    request.Timeout = _timeoutMs;
+                    if (request is HttpWebRequest httpRequest)
+                    {
+                        httpRequest.ReadWriteTimeout = _timeoutMs;
+                    }
+                }
+
+                return request;
+            }
+        }
+
         private sealed class GitHubRelease
         {
             public string tagName;
             public string jarUrl;
+        }
+
+        public static async Task<string> GetPackageNameAsync(string path, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                $"-jar \"{bundletool}\" dump manifest --bundle=\"{path}\" --xpath=\"/manifest/@package\"",
+                ProcessTimeout, cancellationToken: cancellationToken);
+            string package = result.StandardOutput.Trim().Trim('"', '\'');
+            if (result.TimedOut || result.ExitCode != 0 || !AdbUtility.IsValidPackageName(package))
+                throw new InvalidOperationException("Cannot read AAB package: " + result.StandardError);
+            return package;
+        }
+
+        public static async Task<string> BuildApksAsync(string path, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            string output = Path.Combine(Path.GetTempPath(), "NoBuild", Guid.NewGuid().ToString("N") + ".apks");
+            Directory.CreateDirectory(Path.GetDirectoryName(output));
+            string args = BuildApksCommandArgs(path, output);
+            try
+            {
+                ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                    $"-jar \"{bundletool}\" {args}", ProcessTimeout, cancellationToken: cancellationToken);
+                if (result.TimedOut || result.ExitCode != 0 || !File.Exists(output))
+                    throw new InvalidOperationException("AAB conversion failed: " + result.CombinedOutput);
+                return output;
+            }
+            catch
+            {
+                Cleanup(output);
+                throw;
+            }
+        }
+
+        public static async Task<InstallResult> InstallApksAsync(string path, string serial, CancellationToken cancellationToken)
+        {
+            (string java, string bundletool) = await ResolveToolsAsync(cancellationToken);
+            ProcessExecutionResult result = await NoBuildProcessRunner.RunAsync(java,
+                $"-jar \"{bundletool}\" install-apks --apks=\"{path}\" --device-id=\"{serial}\" --adb=\"{AdbUtility.AdbPath}\"",
+                ProcessTimeout, cancellationToken: cancellationToken);
+            return AdbUtility.ToInstallResult(result);
+        }
+
+        private static async Task<(string java, string bundletool)> ResolveToolsAsync(CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrEmpty(CustomJavaPath) && !File.Exists(CustomJavaPath))
+                throw new FileNotFoundException("Custom Java path is invalid. Update the Devices environment settings.");
+            if (!string.IsNullOrEmpty(CustomBundletoolPath) && !File.Exists(CustomBundletoolPath))
+                throw new FileNotFoundException("Custom bundletool path is invalid. Update the Devices environment settings.");
+            string java = ResolveJava();
+            string tool = string.IsNullOrEmpty(CustomBundletoolPath)
+                ? FindCachedBundletool() ?? FindBundletoolInSdk() : CustomBundletoolPath;
+            if (tool != null) return (java, tool);
+
+            string cacheDirectory = GetNoBuildCacheDir();
+            Directory.CreateDirectory(cacheDirectory);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(WebTimeout) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("NoBuild-Unity");
+            string url = FallbackDownloadUrl;
+            string version = FallbackVersion;
+            try
+            {
+                using HttpResponseMessage releaseResponse = await client.GetAsync(GithubApiUrl, cancellationToken);
+                releaseResponse.EnsureSuccessStatusCode();
+                GitHubRelease release = ParseGitHubRelease(await releaseResponse.Content.ReadAsStringAsync());
+                if (!string.IsNullOrEmpty(release?.jarUrl))
+                {
+                    url = release.jarUrl;
+                    version = release.tagName;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception) { /* The pinned release also works when the release API is unavailable. */ }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            string destination = Path.Combine(cacheDirectory, "bundletool-all-" + Path.GetFileName(version) + ".jar");
+            if (File.Exists(destination)) return (java, destination);
+            string partial = destination + "." + Guid.NewGuid().ToString("N") + ".download";
+            try
+            {
+                using HttpResponseMessage response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+                using (Stream input = await response.Content.ReadAsStreamAsync())
+                using (var output = new FileStream(partial, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, true))
+                {
+                    await input.CopyToAsync(output, 81920, cancellationToken);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!File.Exists(destination)) File.Move(partial, destination);
+                return (java, destination);
+            }
+            finally
+            {
+                if (File.Exists(partial)) File.Delete(partial);
+            }
         }
     }
 }

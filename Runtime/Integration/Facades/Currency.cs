@@ -1,9 +1,9 @@
-﻿using System.Collections;
+﻿﻿using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Converter
+namespace Com.Scheherazade.Common.Integration.Converter
 {
     /// <summary>
     /// Static facade over the registered <see cref="ICurrencyConverter"/>.

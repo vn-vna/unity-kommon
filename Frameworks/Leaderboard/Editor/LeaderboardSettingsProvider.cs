@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Leaderboard;
+using Com.Scheherazade.Common.Leaderboard;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard.Editor
+namespace Com.Scheherazade.Common.Leaderboard.Editor
 {
     internal sealed class LeaderboardSettingsProvider : SettingsProvider
     {

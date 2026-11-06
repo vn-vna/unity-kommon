@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.UserIdentity
+namespace Com.Scheherazade.Common.UserIdentity
 {
     public class UserIdentityException : Exception
     {

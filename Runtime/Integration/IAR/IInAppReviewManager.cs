@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.IAR
+namespace Com.Scheherazade.Common.Integration.IAR
 {
     public interface IInAppReviewManager
     {

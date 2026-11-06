@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Lazy
+namespace Com.Scheherazade.Common.Lazy
 {
     public class LazyValue<T>
     {

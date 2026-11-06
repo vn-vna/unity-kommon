@@ -3,17 +3,17 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
+namespace Com.Scheherazade.Common.DependenciesDownloader.Editor
 {
     public static class GoogleArchiveParser
     {
         private const string ArchiveUrl = "https://developers.google.com/unity/archive.md.txt";
-        private const string TarballBasePattern = "https://dl.google.com/games/registry/unity/";
 
         private static string CacheFilePath =>
             Path.GetFullPath(Path.Combine(
@@ -22,11 +22,19 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
 
         private static GoogleArchiveCache _cachedArchive;
 
+        public static string LastFetchError { get; private set; }
+        public static bool LastFetchCanceled { get; private set; }
+        public static bool LastFetchUsedCache { get; private set; }
+
+        private static readonly Regex PackageNameRegex = new Regex(
+            @"^`(com\.google\.[^`]+)`", RegexOptions.Compiled);
         private static readonly Regex VersionRowRegex = new Regex(
-            @"\| (\d+\.\d+\.\d+(?:\.\d+)?) \| (\d{4}-\d{2}) \| (\S+?) \|",
+            @"(?<![\d.])(?<version>\d+\.\d+\.\d+(?:\.\d+)?)\s+" +
+            @"(?<date>\d{4}-\d{2})\s+" +
+            @"(?<unity>\S+)\s+" +
+            @"(?:\[\.unitypackage\]\([^)]+\)\s+)?" +
+            @"\[\.tgz\]\((?<tarball>[^)]+\.tgz)\)",
             RegexOptions.Compiled);
-        private static readonly Regex TarballLinkRegex = new Regex(
-            @"\[\.tgz\]\(([^)]+\.tgz)\)", RegexOptions.Compiled);
         private static readonly Regex DependencyLinkRegex = new Regex(
             @"\[(com\.[a-z]+(?:\.[a-z0-9_-]+)*)\]\(([^)]+)\)",
             RegexOptions.Compiled);
@@ -41,38 +49,60 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
             return _cachedArchive;
         }
 
-        public static async Task<GoogleArchiveCache> FetchAndParseArchiveAsync()
+        public static async Task<GoogleArchiveCache> FetchAndParseArchiveAsync(
+            CancellationToken cancellationToken = default,
+            Action<float> reportProgress = null)
         {
+            LastFetchError = string.Empty;
+            LastFetchCanceled = false;
+            LastFetchUsedCache = false;
+
             using var request = UnityWebRequest.Get(ArchiveUrl);
+            request.timeout = 30;
             var operation = request.SendWebRequest();
 
             while (!operation.isDone)
             {
-                if (EditorUtility.DisplayCancelableProgressBar(
-                    "Fetching Google Archive",
-                    "Downloading package registry...",
-                    operation.progress))
+                reportProgress?.Invoke(request.downloadProgress);
+                if (cancellationToken.IsCancellationRequested)
                 {
                     request.Abort();
-                    EditorUtility.ClearProgressBar();
+                    LastFetchCanceled = true;
+                    LastFetchUsedCache = _cachedArchive != null;
                     return _cachedArchive;
                 }
 
-                await Task.Yield();
+                await Task.Delay(50);
             }
-
-            EditorUtility.ClearProgressBar();
 
             if (request.result != UnityWebRequest.Result.Success)
             {
+                LastFetchError = request.error;
+                var fallback = _cachedArchive ?? LoadCacheFromDisk();
+                LastFetchUsedCache = fallback != null;
                 Debug.LogError(
                     $"[DependenciesDownloader] Failed to fetch archive: " +
-                    $"{request.error}");
-                return _cachedArchive ?? LoadCacheFromDisk();
+                    $"{request.error}"
+                );
+                return fallback;
             }
 
             var rawText = request.downloadHandler.text;
             var packages = ParseArchive(rawText);
+            if (packages.Count == 0)
+            {
+                LastFetchError =
+                    "No packages could be parsed; the source format may have changed.";
+                var fallback = _cachedArchive ?? LoadCacheFromDisk();
+                LastFetchUsedCache = fallback != null;
+                Debug.LogError(
+                    "[DependenciesDownloader] Google archive was downloaded " +
+                    "but no packages could be parsed. The source format may " +
+                    "have changed."
+                );
+                return fallback;
+            }
+
             _cachedArchive = new GoogleArchiveCache
             {
                 FetchedAt = DateTime.UtcNow.ToString(
@@ -168,8 +198,7 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
                     continue;
                 }
 
-                var nameMatch =
-                    Regex.Match(line, @"^`(com\.google\.[^`]+)`$");
+                var nameMatch = PackageNameRegex.Match(line);
                 if (!nameMatch.Success)
                 {
                     if (pendingDescription == null &&
@@ -200,7 +229,7 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
                 };
 
                 var versions =
-                    ParseVersionsForPackage(lines, i + 1, packageName);
+                    ParseVersionsForPackage(lines, i, packageName);
                 packageInfo.Versions = versions;
 
                 if (versions.Count > 0)
@@ -232,70 +261,58 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
         private static List<GooglePackageVersion> ParseVersionsForPackage(
             string[] lines, int startIndex, string packageName)
         {
-            var versions = new List<GooglePackageVersion>();
-
+            var section = new System.Text.StringBuilder();
             for (int i = startIndex; i < lines.Length; i++)
             {
                 var line = lines[i].Trim();
-
-                if (string.IsNullOrEmpty(line)) continue;
-
-                if (Regex.IsMatch(line, @"^`com\.google\.[^`]+`$")) break;
-                if (Regex.IsMatch(line, @"^### ")) break;
-                if (Regex.IsMatch(line, @"^## ")) break;
-
-                var versionMatch = VersionRowRegex.Match(line);
-                if (!versionMatch.Success) continue;
-
-                var version = versionMatch.Groups[1].Value;
-                var date = versionMatch.Groups[2].Value;
-                var minUnity = versionMatch.Groups[3].Value;
-
-                var rowText = line;
-                for (int j = i + 1; j < lines.Length; j++)
+                if (i > startIndex &&
+                    (PackageNameRegex.IsMatch(line) ||
+                     Regex.IsMatch(line, @"^### |^## ")))
                 {
-                    var nextLine = lines[j].Trim();
-                    if (string.IsNullOrEmpty(nextLine)) break;
-                    if (VersionRowRegex.IsMatch(nextLine) ||
-                        Regex.IsMatch(
-                            nextLine, @"^`com\.google\.[^`]+`$") ||
-                        Regex.IsMatch(nextLine, @"^### |^## "))
-                    {
-                        break;
-                    }
-
-                    rowText += " " + nextLine;
+                    break;
                 }
 
-                var tarballUrl =
-                    ExtractTarballUrl(rowText, packageName, version);
-                var dependencies = ExtractDependencies(rowText);
+                if (!string.IsNullOrEmpty(line))
+                {
+                    section.Append(line).Append(' ');
+                }
+            }
+
+            var sectionText = section.ToString();
+            var matches = VersionRowRegex.Matches(sectionText);
+            var versions = new List<GooglePackageVersion>(matches.Count);
+
+            for (int i = 0; i < matches.Count; i++)
+            {
+                var match = matches[i];
+                var dependencyStart = match.Index + match.Length;
+                var dependencyEnd = i + 1 < matches.Count
+                    ? matches[i + 1].Index
+                    : sectionText.Length;
+                var dependencyText = sectionText.Substring(
+                    dependencyStart,
+                    dependencyEnd - dependencyStart
+                );
 
                 versions.Add(new GooglePackageVersion
                 {
-                    Version = version,
-                    TarballUrl = tarballUrl,
-                    PublishDate = date,
-                    MinUnityVersion = minUnity,
-                    Dependencies = dependencies
+                    Version = match.Groups["version"].Value,
+                    TarballUrl = match.Groups["tarball"].Value,
+                    PublishDate = match.Groups["date"].Value,
+                    MinUnityVersion = match.Groups["unity"].Value,
+                    Dependencies = ExtractDependencies(
+                        dependencyText,
+                        packageName
+                    )
                 });
             }
 
             return versions;
         }
 
-        private static string ExtractTarballUrl(
-            string rowText, string packageName, string version)
-        {
-            var match = TarballLinkRegex.Match(rowText);
-            if (match.Success) return match.Groups[1].Value;
-
-            return
-                $"{TarballBasePattern}{packageName}/{packageName}-{version}.tgz";
-        }
-
         private static List<GooglePackageDependency> ExtractDependencies(
-            string rowText)
+            string rowText,
+            string packageName)
         {
             var dependencies = new List<GooglePackageDependency>();
             var matches = DependencyLinkRegex.Matches(rowText);
@@ -303,8 +320,9 @@ namespace Com.Hapiga.Scheherazade.Common.DependenciesDownloader.Editor
             foreach (Match match in matches)
             {
                 var depName = match.Groups[1].Value;
-                var depUrl = match.Groups[2].Value;
+                if (depName == packageName) continue;
 
+                var depUrl = match.Groups[2].Value;
                 var versionMatch = DepVersionRegex.Match(depUrl);
                 var depVersion = versionMatch.Success
                     ? versionMatch.Groups[1].Value

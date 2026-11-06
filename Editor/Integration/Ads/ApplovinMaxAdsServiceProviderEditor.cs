@@ -3,12 +3,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
-using Com.Hapiga.Scheherazade.Common.Integration.Ads;
+using Com.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Integration.Ads;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Integration
+namespace Com.Scheherazade.Integration
 {
     [CustomEditor(typeof(ApplovinMaxAdsServiceProvider))]
     internal sealed class ApplovinMaxAdsServiceProviderEditor : UnityEditor.Editor

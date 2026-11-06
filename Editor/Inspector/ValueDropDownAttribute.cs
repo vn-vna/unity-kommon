@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEditor;
 
-namespace Com.Hapiga.Scheherazade.Common.Inspector
+namespace Com.Scheherazade.Common.Inspector
 {
     public class ValueDropDownAttribute : PropertyAttribute
     {

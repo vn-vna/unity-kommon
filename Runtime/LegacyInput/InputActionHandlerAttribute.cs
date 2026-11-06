@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
     /// <summary>
     /// Attribute to mark methods as input action handlers.

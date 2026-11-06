@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     public sealed class NoBuildSettings : ScriptableObject
     {
@@ -34,6 +34,13 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         )]
         public List<FlagDefinition> flagDefinitions = new();
 
+        [Header("Toolbar")]
+        [Tooltip(
+            "Toolbar dropdown label. Supported placeholders: "
+            + "{scene-set}, {define-set}, {platform}, "
+            + "{scene-count}, {define-count}.")]
+        public string toolbarLabelTemplate = "NoBuild";
+
         [Header("Active State")]
         [Tooltip("Index of the currently active scene set (-1 = none).")]
         public int activeSceneSetIndex = -1;
@@ -45,13 +52,37 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         // ── Properties
         // ══════════════════════════════════════════════════
 
+        public int SelectedSceneSetIndex
+        {
+            get => NoBuildEditorState.GetIndex(this, "Scenes", activeSceneSetIndex);
+            set
+            {
+                if (string.IsNullOrEmpty(UnityEditor.AssetDatabase.GetAssetPath(this))) activeSceneSetIndex = value;
+                NoBuildEditorState.SetIndex(this, "Scenes", value);
+            }
+        }
+
+        public int SelectedDefineSetIndex
+        {
+            get => NoBuildEditorState.GetIndex(this,
+                "Defines." + UnityEditor.EditorUserBuildSettings.selectedBuildTargetGroup,
+                activeScriptDefinitionSetIndex);
+            set
+            {
+                if (string.IsNullOrEmpty(UnityEditor.AssetDatabase.GetAssetPath(this))) activeScriptDefinitionSetIndex = value;
+                NoBuildEditorState.SetIndex(this,
+                    "Defines." + UnityEditor.EditorUserBuildSettings.selectedBuildTargetGroup, value);
+            }
+        }
+
         public SceneSet ActiveSceneSet
         {
             get
             {
-                if (activeSceneSetIndex < 0 || activeSceneSetIndex >= sceneSets.Count)
+                int index = SelectedSceneSetIndex;
+                if (index < 0 || index >= sceneSets.Count)
                     return null;
-                return sceneSets[activeSceneSetIndex];
+                return sceneSets[index];
             }
         }
 
@@ -59,10 +90,57 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
         {
             get
             {
-                if (activeScriptDefinitionSetIndex < 0
-                    || activeScriptDefinitionSetIndex >= scriptDefinitionSets.Count)
+                int index = SelectedDefineSetIndex;
+                if (index < 0 || index >= scriptDefinitionSets.Count)
                     return null;
-                return scriptDefinitionSets[activeScriptDefinitionSetIndex];
+                return scriptDefinitionSets[index];
+            }
+        }
+
+        private void OnValidate()
+        {
+            MigrateSceneReferences();
+        }
+
+        private void MigrateSceneReferences()
+        {
+            if (sceneSets == null) return;
+
+            foreach (SceneSet sceneSet in sceneSets)
+            {
+                if (sceneSet?.scenes == null
+                    || sceneSet.combinations == null)
+                {
+                    continue;
+                }
+
+                foreach (SceneCombination combination
+                    in sceneSet.combinations)
+                {
+                    if (combination?.sceneReferences == null)
+                    {
+                        continue;
+                    }
+
+                    for (int i = 0;
+                        i < combination.sceneReferences.Count;
+                        i++)
+                    {
+                        SceneReference reference =
+                            combination.sceneReferences[i];
+                        if (reference.scene != null
+                            || reference.sceneIndex < 0
+                            || reference.sceneIndex
+                            >= sceneSet.scenes.Count)
+                        {
+                            continue;
+                        }
+
+                        reference.scene = sceneSet.scenes[
+                            reference.sceneIndex]?.scene;
+                        combination.sceneReferences[i] = reference;
+                    }
+                }
             }
         }
     }

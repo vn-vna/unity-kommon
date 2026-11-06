@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Com.Hapiga.Scheherazade.Common.Achievement
+namespace Com.Scheherazade.Common.Achievement
 {
     public interface IAchievementProvider
     {

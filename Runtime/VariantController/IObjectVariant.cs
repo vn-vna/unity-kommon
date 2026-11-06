@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.MVOC
+namespace Com.Scheherazade.MVOC
 {
     public interface IObjectVariant<TIndex, TVariant>
         where TVariant : IObjectVariant<TIndex, TVariant>

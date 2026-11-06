@@ -1,8 +1,8 @@
 using System;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Leaderboard
+namespace Com.Scheherazade.Common.Leaderboard
 {
     [SingletonScriptableConfig(
         ScriptableLoadSource.Resources,

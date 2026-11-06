@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.Integration
+namespace Com.Scheherazade.Common.Integration
 {
     public interface IIntegrationModule
     {

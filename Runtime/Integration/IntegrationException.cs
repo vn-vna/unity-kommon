@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration
+namespace Com.Scheherazade.Common.Integration
 {
     /// <summary>
     /// Base exception for all integration facade errors.

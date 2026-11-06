@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.MVOC
+namespace Com.Scheherazade.MVOC
 {
 
     public abstract class VariantController<TIndex, TVariant> : MonoBehaviour

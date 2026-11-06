@@ -1,12 +1,12 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common;
+using Com.Scheherazade.Common.Logging;
 using Newtonsoft.Json;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.Segmentation
+namespace Com.Scheherazade.Common.Integration.Segmentation
 {
     [CreateAssetMenu(
         fileName = "CachedSegmentationProvider",

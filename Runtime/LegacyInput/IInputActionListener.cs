@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.LegacyInput
+namespace Com.Scheherazade.Common.LegacyInput
 {
     /// <summary>
     /// Interface for input action listeners.

@@ -4,11 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Singleton;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Singleton;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common
+namespace Com.Scheherazade.Common
 {
     [AddComponentMenu("Scheherazade/Cmd/CLI Startup Options")]
     public class CliStartupOptions :

@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 
-using Com.Hapiga.Scheherazade.Common.Chrono;
+using Com.Scheherazade.Common.Chrono;
 
 using UnityEngine;
 
-namespace Com.Hapiga.Schehrazade.IS
+namespace Com.Scheherazade.IS
 {
     public interface IItemTraits
     {

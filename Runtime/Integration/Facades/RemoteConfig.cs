@@ -2,10 +2,10 @@
 using System.Collections;
 using System.Threading;
 using System.Threading.Tasks;
-using Com.Hapiga.Scheherazade.Common.Logging;
-using Com.Hapiga.Scheherazade.Common.Threading;
+using Com.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Threading;
 
-namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
+namespace Com.Scheherazade.Common.Integration.RemoteConfig
 {
     /// <summary>
     /// Static facade over the registered <see cref="IRemoteConfigManager"/>.
@@ -35,6 +35,23 @@ namespace Com.Hapiga.Scheherazade.Common.Integration.RemoteConfig
         public static T Get<T>() where T : class, IRemoteConfigData
         {
             return Manager?.Config as T;
+        }
+
+        /// <summary>
+        /// Gets the provider that supplied the currently resolved value for a config key.
+        /// Returns false when the key currently uses its configured default.
+        /// </summary>
+        public static bool TryGetSourceProvider(
+            string key,
+            out IRemoteConfigProvider provider)
+        {
+            if (Manager != null)
+            {
+                return Manager.TryGetSourceProvider(key, out provider);
+            }
+
+            provider = null;
+            return false;
         }
 
         #endregion

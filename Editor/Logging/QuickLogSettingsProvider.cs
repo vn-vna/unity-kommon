@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Logging.Editor
+namespace Com.Scheherazade.Common.Logging.Editor
 {
     internal sealed class QuickLogSettingsProvider : SettingsProvider
     {

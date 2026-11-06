@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Achievement;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
-using Com.Hapiga.Scheherazade.Common.Logging;
+using Com.Scheherazade.Common.Achievement;
+using Com.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Logging;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Achievement.Editor
+namespace Com.Scheherazade.Common.Achievement.Editor
 {
     internal sealed class AchievementSettingsProvider : SettingsProvider
     {

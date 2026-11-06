@@ -1,0 +1,19 @@
+{
+  "name": "Com.Scheherazade.DebugCaller",
+  "rootNamespace": "Com.Scheherazade.Common.DebugCaller",
+  "references": [
+    "Com.Scheherazade.Common",
+    "StompyRobot.SRDebugger"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "!DISABLE_SRDEBUGGER"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -3,12 +3,14 @@
 // ═══════════════════════════════════════════════════════════
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using Com.Hapiga.Scheherazade.Common.Editor.Toolkit;
+using Com.Scheherazade.Common.Editor;
+using Com.Scheherazade.Common.Editor.Toolkit;
 using UnityEditor;
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
+namespace Com.Scheherazade.Common.NoBuild.Editor
 {
     /// <summary>
     /// Reusable popup that displays all registered build name placeholders
@@ -35,26 +37,33 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
             ("{time}",             "HHmmss"),
             ("{datetime}",         "yyyy-MM-dd_HHmmss"),
             ("{flags}",           "All flag definitions concatenated"),
-            ("{flag-&lt;name&gt;}",   "Single flag by name (e.g., {flag-Cheats})"),
-            ("{flag-&lt;N&gt;}",      "Single flag by index (e.g., {flag-0})"),
         };
 
         public static void Show(Rect activatorRect)
         {
-            PopupWindow.Show(activatorRect, new GuideContent());
+            CustomPopupDropdown.Show(
+                activatorRect,
+                new GuideContent()
+            );
         }
 
         public static void Show(Rect activatorRect,
-            Action<string> onPlaceholderClicked)
+            Action<string> onPlaceholderClicked, NoBuildSettings settings = null)
         {
-            PopupWindow.Show(activatorRect,
-                new GuideContent { OnPlaceholderClicked =
-                    onPlaceholderClicked });
+            CustomPopupDropdown.Show(
+                activatorRect,
+                new GuideContent
+                {
+                    OnPlaceholderClicked = onPlaceholderClicked,
+                    Settings = settings
+                }
+            );
         }
 
         private sealed class GuideContent : PopupWindowContent
         {
             public Action<string> OnPlaceholderClicked;
+            public NoBuildSettings Settings;
             private Vector2 _scroll;
             private string _filter = "";
 
@@ -69,9 +78,19 @@ namespace Com.Hapiga.Scheherazade.Common.NoBuild.Editor
                 GUILayout.Space(4);
                 _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
+                IEnumerable<(string key, string description)> entries = BuiltIn;
+                if (Settings?.flagDefinitions != null)
+                {
+                    entries = entries.Concat(Settings.flagDefinitions
+                        .Where(flag => flag != null && !string.IsNullOrWhiteSpace(flag.id))
+                        .Select(flag => ("{flag-" + flag.id + "}", "Flag ID: " + flag.id + " · " + flag.name)));
+                }
+                entries = entries.Concat(BuildNameResolver.Resolvers.Keys
+                    .Where(key => !BuiltIn.Any(entry => entry.key == "{" + key + "}"))
+                    .Select(key => ("{" + key + "}", "Registered placeholder")));
                 var filtered = string.IsNullOrEmpty(_filter)
-                    ? BuiltIn
-                    : BuiltIn.Where(x =>
+                    ? entries
+                    : entries.Where(x =>
                         x.key.IndexOf(_filter, StringComparison.OrdinalIgnoreCase) >= 0 ||
                         x.description.IndexOf(_filter, StringComparison.OrdinalIgnoreCase) >= 0);
 

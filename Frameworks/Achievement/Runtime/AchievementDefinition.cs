@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Achievement
+namespace Com.Scheherazade.Common.Achievement
 {
     public class AchievementDefinition : ScriptableObject
     {

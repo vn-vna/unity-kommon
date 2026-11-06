@@ -1,6 +1,6 @@
 using System;
 
-namespace Com.Hapiga.Scheherazade.Common.MBA
+namespace Com.Scheherazade.Common.MBA
 {
     public class TinyGridData
     {

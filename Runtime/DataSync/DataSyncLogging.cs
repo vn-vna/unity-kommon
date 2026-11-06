@@ -1,4 +1,4 @@
-namespace Com.Hapiga.Scheherazade.Common.DataSync
+namespace Com.Scheherazade.Common.DataSync
 {
     /// <summary>
     /// Shared runtime flag that gates verbose (debug) logging across

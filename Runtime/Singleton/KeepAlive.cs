@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Com.Hapiga.Scheherazade.Common.Singleton
+namespace Com.Scheherazade.Common.Singleton
 {
     [AddComponentMenu("Scheherazade/Common/Dont Destroy On Load")]
     public class KeepAliveComponent : MonoBehaviour
