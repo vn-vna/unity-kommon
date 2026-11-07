@@ -108,6 +108,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public int GravityPerStep;
         public int MaxFallSpeed;
         public int SlideChance;          // = (1 - friction) * 65536
+        public SandContactSlip ContactSlip;
         public bool EnableVerticalSettle;
         public int SettleBatchSize;
         public bool PreventTemporaryEdgeVacancies;
@@ -295,6 +296,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 gravityPerStep = settings.gravityPerStep,
                 maxFallSpeed = settings.maxFallSpeed,
                 slideChance = settings.slideChance,
+                contactSlip = settings.contactSlip,
                 preventTemporaryEdgeVacancies =
                     settings.preventTemporaryEdgeVacancies,
                 enableLateralMixing = settings.enableLateralMixing,

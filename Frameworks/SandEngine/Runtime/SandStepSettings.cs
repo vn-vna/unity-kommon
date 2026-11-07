@@ -10,6 +10,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public readonly int gravityPerStep;
         public readonly int maxFallSpeed;
         public readonly int slideChance;
+        public readonly SandContactSlip contactSlip;
         public readonly bool preventTemporaryEdgeVacancies;
         public readonly bool enableLateralMixing;
         public readonly int lateralMixChance;
@@ -24,7 +25,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             int constantFallSpeed, int gravityPerStep, int maxFallSpeed, int slideChance,
             bool preventTemporaryEdgeVacancies, bool enableLateralMixing,
             int lateralMixChance, int lateralMixPasses, int mixingSeed,
-            int gravityX, int gravityY, int simulationSeed = 0, bool enableVerticalSettle = false)
+            int gravityX, int gravityY, int simulationSeed = 0, bool enableVerticalSettle = false,
+            SandContactSlip contactSlip = default)
         {
             this.width = width;
             this.height = height;
@@ -33,6 +35,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             this.gravityPerStep = gravityPerStep;
             this.maxFallSpeed = maxFallSpeed;
             this.slideChance = slideChance;
+            this.contactSlip = contactSlip;
             this.preventTemporaryEdgeVacancies = preventTemporaryEdgeVacancies;
             this.enableLateralMixing = enableLateralMixing;
             this.lateralMixChance = lateralMixChance;

@@ -1,0 +1,7 @@
+{
+    "name": "Com.Scheherazade.ConveyorSystem.PlayModeTests",
+    "references": ["Com.Scheherazade.ConveyorSystem"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

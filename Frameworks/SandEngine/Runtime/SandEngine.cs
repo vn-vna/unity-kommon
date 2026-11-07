@@ -252,6 +252,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public ISandBackend Backend { get; }
         /// <summary>Borrowed live settings; backend ticks receive value snapshots.</summary>
         public ISandEngineSettings Settings { get; }
+        private bool ImmediateSettlingEnabled => !(Settings is ISandSettlingSettings policy) || policy.EnableImmediateSettling;
 
         protected readonly List<CollectionCandidate> _nearestCollectionCandidates =
             new List<CollectionCandidate>();
@@ -406,7 +407,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 GravityPerStep = Settings.GravityPerStep,
                 MaxFallSpeed = Settings.MaxFallSpeed,
                 SlideChance = (int)((1f - Settings.SlideFriction) * 65536f),
-                EnableVerticalSettle = true,
+                ContactSlip = SandContactSlip.FromSettings(Settings as ISandContactSlipSettings),
+                EnableVerticalSettle = ImmediateSettlingEnabled,
                 SettleBatchSize = Settings.SettleBatchSize,
                 PreventTemporaryEdgeVacancies =
                     Settings.PreventTemporaryEdgeVacancies,
@@ -940,7 +942,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             _repairDirectionalGravity = HasDirectionalGravity;
             _collectionVacancyDirections.Clear();
             _collectionRepairVacancies.Clear();
-            _repairCollectionVacancies = SandSettingsLifetime.IsAvailable(Settings);
+            _repairCollectionVacancies = SandSettingsLifetime.IsAvailable(Settings) && ImmediateSettlingEnabled;
             if (!_repairCollectionVacancies)
             {
                 return;

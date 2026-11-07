@@ -3,7 +3,6 @@
   "rootNamespace": "Com.Scheherazade.Common.DebugCaller",
   "references": [
     "Com.Scheherazade.Common",
-    "StompyRobot.SRDebugger",
     "Unity.TextMeshPro",
     "Unity.ugui"
   ],
@@ -13,9 +12,7 @@
   "overrideReferences": false,
   "precompiledReferences": [],
   "autoReferenced": true,
-  "defineConstraints": [
-    "!DISABLE_SRDEBUGGER"
-  ],
+  "defineConstraints": [],
   "versionDefines": [],
   "noEngineReferences": false
 }

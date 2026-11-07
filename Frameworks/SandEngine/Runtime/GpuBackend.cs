@@ -47,6 +47,13 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         private static readonly int GravityPerStepId = Shader.PropertyToID("_GravityPerStep");
         private static readonly int MaxFallSpeedId = Shader.PropertyToID("_MaxFallSpeed");
         private static readonly int SlideChanceId = Shader.PropertyToID("_SlideChance");
+        private static readonly int UseContactSlipId = Shader.PropertyToID("_UseContactSlip");
+        private static readonly int SandSlipId = Shader.PropertyToID("_SandSlipChance");
+        private static readonly int FixedSandSlipId = Shader.PropertyToID("_FixedSandSlipChance");
+        private static readonly int WallSlipId = Shader.PropertyToID("_WallSlipChance");
+        private static readonly int FrictionlessWallSlipId = Shader.PropertyToID("_FrictionlessWallSlipChance");
+        private static readonly int MinimumSlideSpeedId = Shader.PropertyToID("_MinimumSlideSpeed");
+        private static readonly int SupportSearchDistanceId = Shader.PropertyToID("_SupportSearchDistance");
         private static readonly int PreventTemporaryEdgeVacanciesId =
             Shader.PropertyToID(
                 "_PreventTemporaryEdgeVacancies"
@@ -675,6 +682,13 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             _shader.SetInt(GravityPerStepId, settings.gravityPerStep);
             _shader.SetInt(MaxFallSpeedId, settings.maxFallSpeed);
             _shader.SetInt(SlideChanceId, settings.slideChance);
+            _shader.SetInt(UseContactSlipId, settings.contactSlip.enabled ? 1 : 0);
+            _shader.SetInt(SandSlipId, settings.contactSlip.sand);
+            _shader.SetInt(FixedSandSlipId, settings.contactSlip.fixedSand);
+            _shader.SetInt(WallSlipId, settings.contactSlip.wall);
+            _shader.SetInt(FrictionlessWallSlipId, settings.contactSlip.frictionlessWall);
+            _shader.SetInt(MinimumSlideSpeedId, settings.contactSlip.minimumSlideSpeed);
+            _shader.SetInt(SupportSearchDistanceId, settings.contactSlip.supportSearchDistance);
             _shader.SetInt("_EnableVerticalSettle", settings.enableVerticalSettle ? 1 : 0);
             _shader.SetInt(
                 PreventTemporaryEdgeVacanciesId,

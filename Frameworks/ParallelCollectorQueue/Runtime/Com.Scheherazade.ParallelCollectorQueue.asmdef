@@ -1,0 +1,8 @@
+{
+    "name": "Com.Scheherazade.ParallelCollectorQueue",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.ParallelCollectorQueue",
+    "references": [],
+    "noEngineReferences": true,
+    "allowUnsafeCode": false,
+    "autoReferenced": true
+}

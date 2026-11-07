@@ -7,7 +7,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
 {
     internal static class SandAlgorithmCore
     {
-        public const int AlgorithmVersion = 16;
+        public const int AlgorithmVersion = 20;
         public const int TypeMask = 0xFF;
         public const int VelocityShift = 8;
         public const int VelocityMask = 0x0000FF00;
@@ -69,7 +69,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 gravityDirection.x,
                 gravityDirection.y,
                 simulationSeed,
-                stepParams.EnableVerticalSettle
+                stepParams.EnableVerticalSettle,
+                stepParams.ContactSlip
             );
         }
 
@@ -928,12 +929,20 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             }
 
             int traveled = GetGravityDistance(sourceIndex, targetIndex, settings);
+            bool lateralSlide = traveled == 0;
+            if (lateralSlide)
+            {
+                // A resolved supported ledge move has no gravity-axis distance,
+                // but must still transfer its grain (including on fixed artwork).
+                traveled = Math.Abs(targetIndex % settings.width - sourceIndex % settings.width)
+                    + Math.Abs(targetIndex / settings.width - sourceIndex / settings.width);
+            }
             if (traveled <= 0)
             {
                 return 0;
             }
 
-            return WithVelocity(sourceCell, traveled > 255 ? 255 : traveled);
+            return SandCell.WithFrictionlessSliding(WithVelocity(sourceCell, traveled > 255 ? 255 : traveled), lateralSlide);
         }
 
         private static void BuildProjectedStates(
@@ -1361,7 +1370,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 settings
             );
             return sourceIndex >= 0
-                ? WithVelocity(current[sourceIndex], 1)
+                ? SandCell.WithFrictionlessSliding(WithVelocity(current[sourceIndex], 1), false)
                 : 0;
         }
 
@@ -1686,6 +1695,11 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             int perpendicularY = settings.gravityX;
             int downX = sourceX + settings.gravityX;
             int downY = sourceY + settings.gravityY;
+            bool frictionless = HasFrictionlessSupport(current, sourceX, sourceY, settings);
+            int chance = GetContactSlideChance(current, sourceX, sourceY, settings, frictionless);
+            if (!CanSlide(sourceX, sourceY, chance, settings.mixingSeed ^ settings.simulationSeed)) return false;
+            if (settings.contactSlip.enabled)
+                fallSpeed = Math.Max(fallSpeed, settings.contactSlip.minimumSlideSpeed);
             bool canSlidePositive = IsEmpty(
                 current,
                 downX + perpendicularX,
@@ -1699,17 +1713,12 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 settings
             );
 
-            if ((!canSlidePositive && !canSlideNegative)
-                || !CanSlide(
-                    sourceX,
-                    sourceY,
-                    settings.slideChance,
-                    settings.mixingSeed ^ settings.simulationSeed
-                ))
+            if (!canSlidePositive && !canSlideNegative)
             {
-                return false;
+                if (settings.contactSlip.enabled && settings.contactSlip.supportSearchDistance > 0)
+                    return TryTraverseSupportedLedge(current, sourceX, sourceY, fallSpeed, settings, out targetX, out targetY);
+                return frictionless && TryTraverseFrictionlessLedge(current, sourceX, sourceY, fallSpeed, settings, out targetX, out targetY);
             }
-
             int direction = ResolveSlideDirection(
                 sourceX,
                 sourceY,
@@ -1717,6 +1726,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 canSlideNegative,
                 settings
             );
+            if (settings.contactSlip.enabled && settings.contactSlip.supportSearchDistance > 0)
+                return TryFollowSupportedSlope(current, sourceX, sourceY, direction, fallSpeed, settings, out targetX, out targetY);
             int upstreamX = sourceX - settings.gravityX;
             int upstreamY = sourceY - settings.gravityY;
             if (settings.enableVerticalSettle
@@ -1747,7 +1758,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 perpendicularY,
                 direction,
                 fallSpeed,
-                settings
+                settings,
+                frictionless
             );
             if (slideSteps == 0)
             {
@@ -1759,6 +1771,133 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             targetY = sourceY
                 + (settings.gravityY + direction * perpendicularY) * slideSteps;
             return true;
+        }
+
+        private static bool HasFrictionlessSupport(SandIntBuffer current, int x, int y, SandStepSettings settings)
+        {
+            int supportX = x + settings.gravityX, supportY = y + settings.gravityY;
+            if (!InBounds(supportX, supportY, settings)) return false;
+            int support = current[supportY * settings.width + supportX];
+            return SandCell.IsFrictionlessWall(support)
+                || (support & TypeMask) == (int)ElementType.Sand
+                    && SandCell.IsFrictionlessSliding(current[y * settings.width + x]);
+        }
+
+        private static int GetContactSlideChance(SandIntBuffer current, int x, int y, SandStepSettings settings, bool frictionless)
+        {
+            if (!settings.contactSlip.enabled) return frictionless ? 65536 : settings.slideChance;
+            int sx = x + settings.gravityX, sy = y + settings.gravityY;
+            if (!InBounds(sx, sy, settings)) return settings.contactSlip.wall;
+            int support = current[sy * settings.width + sx];
+            if (SandCell.IsFrictionlessWall(support)) return settings.contactSlip.frictionlessWall;
+            if (SandCell.IsFixedSandWall(support)) return settings.contactSlip.fixedSand;
+            if ((support & TypeMask) == (int)ElementType.Sand) return settings.contactSlip.sand;
+            return settings.contactSlip.wall;
+        }
+
+        private static bool TryTraverseFrictionlessLedge(
+            SandIntBuffer current, int x, int y, int speed, SandStepSettings settings,
+            out int targetX, out int targetY
+        )
+        {
+            int positive = FindFrictionlessExit(current, x, y, 1, settings);
+            int negative = FindFrictionlessExit(current, x, y, -1, settings);
+            targetX = x;
+            targetY = y;
+            if (positive == 0 && negative == 0) return false;
+            int side = positive == 0 ? -1 : negative == 0 ? 1
+                : positive < negative ? 1 : negative < positive ? -1
+                : GetRandomizedSide(x, y, settings, SlideDirectionSalt);
+            int distance = side > 0 ? positive : negative;
+            int travel = Math.Min(Math.Max(1, speed), distance - 1);
+            if (travel <= 0) return false;
+            targetX = x + side * settings.gravityY * travel;
+            targetY = y + side * settings.gravityX * travel;
+            return true;
+        }
+
+        private static bool TryTraverseSupportedLedge(
+            SandIntBuffer current, int x, int y, int speed, SandStepSettings settings,
+            out int targetX, out int targetY
+        )
+        {
+            int positive = FindSupportedExit(current, x, y, 1, settings);
+            int negative = FindSupportedExit(current, x, y, -1, settings);
+            targetX = x;
+            targetY = y;
+            if (positive == 0 && negative == 0) return false;
+            int side = positive == 0 ? -1 : negative == 0 ? 1
+                : positive < negative ? 1 : negative < positive ? -1
+                : GetRandomizedSide(x, y, settings, SlideDirectionSalt);
+            return TryFollowSupportedSlope(current, x, y, side, speed, settings, out targetX, out targetY);
+        }
+
+        private static int FindSupportedExit(SandIntBuffer current, int x, int y, int side, SandStepSettings settings)
+        {
+            for (int distance = 1; distance <= settings.contactSlip.supportSearchDistance; distance++)
+            {
+                int probeX = x + side * settings.gravityY * distance;
+                int probeY = y + side * settings.gravityX * distance;
+                if (!IsEmpty(current, probeX, probeY, settings)) return 0;
+                int downX = probeX + settings.gravityX, downY = probeY + settings.gravityY;
+                if (IsEmpty(current, downX, downY, settings)) return distance;
+                if (!InBounds(downX, downY, settings)) return 0;
+                // Every crossed contact must permit sliding; zero-slip materials remain barriers.
+                int chance = GetContactSlideChance(current, probeX, probeY, settings, false);
+                if (!CanSlide(probeX, probeY, chance, settings.mixingSeed ^ settings.simulationSeed)) return 0;
+            }
+            return 0;
+        }
+
+        private static bool TryFollowSupportedSlope(
+            SandIntBuffer current, int x, int y, int side, int speed, SandStepSettings settings,
+            out int targetX, out int targetY
+        )
+        {
+            targetX = x;
+            targetY = y;
+            for (int step = 0; step < speed; step++)
+            {
+                int downX = targetX + settings.gravityX, downY = targetY + settings.gravityY;
+                if (IsEmpty(current, downX, downY, settings))
+                {
+                    targetX = downX;
+                    targetY = downY;
+                    continue;
+                }
+                int chance = GetContactSlideChance(current, targetX, targetY, settings, false);
+                if (!CanSlide(targetX, targetY, chance, settings.mixingSeed ^ settings.simulationSeed)) break;
+                int nextX = downX + side * settings.gravityY, nextY = downY + side * settings.gravityX;
+                if (!IsEmpty(current, nextX, nextY, settings))
+                {
+                    if (FindSupportedExit(current, targetX, targetY, side, settings) == 0) break;
+                    nextX = targetX + side * settings.gravityY;
+                    nextY = targetY + side * settings.gravityX;
+                }
+                targetX = nextX;
+                targetY = nextY;
+            }
+            return targetX != x || targetY != y;
+        }
+
+        private static int FindFrictionlessExit(SandIntBuffer current, int x, int y, int side, SandStepSettings settings)
+        {
+            int limit = settings.gravityX == 0 ? settings.width : settings.height;
+            for (int distance = 1; distance < limit; distance++)
+            {
+                int probeX = x + side * settings.gravityY * distance;
+                int probeY = y + side * settings.gravityX * distance;
+                if (!IsEmpty(current, probeX, probeY, settings)) return 0;
+                int downX = probeX + settings.gravityX, downY = probeY + settings.gravityY;
+                if (IsEmpty(current, downX, downY, settings)) return distance;
+                if (!InBounds(downX, downY, settings)) return 0;
+                int support = current[downY * settings.width + downX];
+                // The path itself must remain empty, but sand underneath must
+                // not prop a sparse chain up an otherwise frictionless slope.
+                // Continue looking over that support for a genuine downhill exit.
+                if (!SandCell.IsFrictionlessWall(support) && (support & TypeMask) != (int)ElementType.Sand) return 0;
+            }
+            return 0;
         }
 
         private static int ResolveSlideDirection(
@@ -1790,7 +1929,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
             int perpendicularY,
             int direction,
             int fallSpeed,
-            SandStepSettings settings
+            SandStepSettings settings,
+            bool frictionless
         )
         {
             int slideSteps = 0;
@@ -1813,7 +1953,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 int edgeX = targetX + settings.gravityX;
                 int edgeY = targetY + settings.gravityY;
                 bool edgeIsEmpty = IsEmpty(current, edgeX, edgeY, settings);
-                if (edgeIsEmpty && settings.preventTemporaryEdgeVacancies && !surfaceAvalanche)
+                if (edgeIsEmpty && settings.preventTemporaryEdgeVacancies && !surfaceAvalanche && !frictionless)
                 {
                     break;
                 }

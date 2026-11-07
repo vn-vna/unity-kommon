@@ -17,6 +17,8 @@
 #define VELOCITY_MASK 0x0000FF00
 #define SAND_TYPE 1
 #define WALL_TYPE 2
+#define FRICTIONLESS_WALL_MASK 0x00000100
+#define FRICTIONLESS_SLIDE_MASK 0x80000000
 #define HEADSPACE_ROOT_BIT 8
 #define PROJECTED_OCCUPIED 0
 #define PROJECTED_UNVISITED_EMPTY 1
@@ -48,6 +50,13 @@ int _ConstantFallSpeed;
 int _GravityPerStep;
 int _MaxFallSpeed;
 int _SlideChance;
+int _UseContactSlip;
+int _SandSlipChance;
+int _FixedSandSlipChance;
+int _WallSlipChance;
+int _FrictionlessWallSlipChance;
+int _MinimumSlideSpeed;
+int _SupportSearchDistance;
 int _PreventTemporaryEdgeVacancies;
 int _LateralMixChance;
 int _MixingSeed;
@@ -154,10 +163,10 @@ int GetFreeRun(int sourceX, int sourceY, int fallSpeed)
     return freeRun;
 }
 
-bool CanSlide(int x, int y)
+bool CanSlide(int x, int y, int chance)
 {
     return (MixHash(x, y, _MixingSeed ^ _SimulationSeed, 362437u) & 0xFFFFu)
-        < (uint)_SlideChance;
+        < (uint)chance;
 }
 
 int ResolveSlideDirection(
@@ -188,7 +197,8 @@ int GetSlideSteps(
     int perpendicularX,
     int perpendicularY,
     int direction,
-    int fallSpeed
+    int fallSpeed,
+    bool frictionless
 )
 {
     int slideSteps = 0;
@@ -208,7 +218,7 @@ int GetSlideSteps(
         int edgeX = targetX + _GravityX;
         int edgeY = targetY + _GravityY;
         bool edgeIsEmpty = IsEmpty(edgeX, edgeY);
-        if (edgeIsEmpty && _PreventTemporaryEdgeVacancies != 0 && !surfaceAvalanche)
+        if (edgeIsEmpty && _PreventTemporaryEdgeVacancies != 0 && !surfaceAvalanche && !frictionless)
         {
             break;
         }
@@ -226,6 +236,116 @@ int GetSlideSteps(
     return slideSteps;
 }
 
+bool HasFrictionlessSupport(int x, int y)
+{
+    int sx = x + _GravityX, sy = y + _GravityY;
+    if (!IsInBounds(sx, sy)) return false;
+    int cell = _Current[sy * _Width + sx];
+    return ((cell & TYPE_MASK) == WALL_TYPE && (cell & FRICTIONLESS_WALL_MASK) != 0)
+        || ((cell & TYPE_MASK) == SAND_TYPE && (_Current[y * _Width + x] & FRICTIONLESS_SLIDE_MASK) != 0);
+}
+
+int GetContactSlideChance(int x, int y, bool frictionless)
+{
+    if (_UseContactSlip == 0) return frictionless ? 65536 : _SlideChance;
+    int sx = x + _GravityX, sy = y + _GravityY;
+    if (!IsInBounds(sx, sy)) return _WallSlipChance;
+    int support = _Current[sy * _Width + sx];
+    if ((support & TYPE_MASK) == WALL_TYPE)
+    {
+        if ((support & FRICTIONLESS_WALL_MASK) != 0) return _FrictionlessWallSlipChance;
+        if ((support & 0x00000200) != 0) return _FixedSandSlipChance;
+        return _WallSlipChance;
+    }
+    return (support & TYPE_MASK) == SAND_TYPE ? _SandSlipChance : _WallSlipChance;
+}
+
+int FindFrictionlessExit(int x, int y, int side)
+{
+    int limit = _GravityX == 0 ? _Width : _Height;
+    for (int distance = 1; distance < limit; distance++)
+    {
+        int px = x + side * _GravityY * distance;
+        int py = y + side * _GravityX * distance;
+        if (!IsEmpty(px, py)) return 0;
+        if (IsEmpty(px + _GravityX, py + _GravityY)) return distance;
+        int downX = px + _GravityX, downY = py + _GravityY;
+        if (!IsInBounds(downX, downY)) return 0;
+        int support = _Current[downY * _Width + downX];
+        bool frictionlessWall = (support & TYPE_MASK) == WALL_TYPE && (support & FRICTIONLESS_WALL_MASK) != 0;
+        if (!frictionlessWall && (support & TYPE_MASK) != SAND_TYPE) return 0;
+    }
+    return 0;
+}
+
+int GetFrictionlessLedgeTravel(int x, int y, int speed)
+{
+    int positive = FindFrictionlessExit(x, y, 1);
+    int negative = FindFrictionlessExit(x, y, -1);
+    if (positive == 0 && negative == 0) return 0;
+    int side = positive == 0 ? -1 : negative == 0 ? 1
+        : positive < negative ? 1 : negative < positive ? -1
+        : ResolveSlideDirection(x, y, true, true);
+    int distance = side > 0 ? positive : negative;
+    int travel = min(max(1, speed), distance - 1);
+    return side * travel;
+}
+
+int FindSupportedExit(int x, int y, int side)
+{
+    for (int distance = 1; distance <= _SupportSearchDistance; distance++)
+    {
+        int px = x + side * _GravityY * distance;
+        int py = y + side * _GravityX * distance;
+        if (!IsEmpty(px, py)) return 0;
+        int downX = px + _GravityX, downY = py + _GravityY;
+        if (IsEmpty(downX, downY)) return distance;
+        if (!IsInBounds(downX, downY)) return 0;
+        if (!CanSlide(px, py, GetContactSlideChance(px, py, false))) return 0;
+    }
+    return 0;
+}
+
+bool TryFollowSupportedSlope(int x, int y, int side, int speed, out int targetX, out int targetY)
+{
+    targetX = x;
+    targetY = y;
+    for (int step = 0; step < speed; step++)
+    {
+        int downX = targetX + _GravityX, downY = targetY + _GravityY;
+        if (IsEmpty(downX, downY))
+        {
+            targetX = downX;
+            targetY = downY;
+            continue;
+        }
+        if (!CanSlide(targetX, targetY, GetContactSlideChance(targetX, targetY, false))) break;
+        int nextX = downX + side * _GravityY, nextY = downY + side * _GravityX;
+        if (!IsEmpty(nextX, nextY))
+        {
+            if (FindSupportedExit(targetX, targetY, side) == 0) break;
+            nextX = targetX + side * _GravityY;
+            nextY = targetY + side * _GravityX;
+        }
+        targetX = nextX;
+        targetY = nextY;
+    }
+    return targetX != x || targetY != y;
+}
+
+bool TryTraverseSupportedLedge(int x, int y, int speed, out int targetX, out int targetY)
+{
+    targetX = x;
+    targetY = y;
+    int positive = FindSupportedExit(x, y, 1);
+    int negative = FindSupportedExit(x, y, -1);
+    if (positive == 0 && negative == 0) return false;
+    int side = positive == 0 ? -1 : negative == 0 ? 1
+        : positive < negative ? 1 : negative < positive ? -1
+        : ResolveSlideDirection(x, y, true, true);
+    return TryFollowSupportedSlope(x, y, side, speed, targetX, targetY);
+}
+
 bool TrySlide(
     int sourceX,
     int sourceY,
@@ -240,6 +360,9 @@ bool TrySlide(
     int perpendicularY = _GravityX;
     int downX = sourceX + _GravityX;
     int downY = sourceY + _GravityY;
+    bool frictionless = HasFrictionlessSupport(sourceX, sourceY);
+    if (!CanSlide(sourceX, sourceY, GetContactSlideChance(sourceX, sourceY, frictionless))) return false;
+    if (_UseContactSlip != 0) fallSpeed = max(fallSpeed, _MinimumSlideSpeed);
     bool canSlidePositive = IsEmpty(
         downX + perpendicularX,
         downY + perpendicularY
@@ -250,7 +373,19 @@ bool TrySlide(
     );
 
     bool resolved = false;
-    if ((canSlidePositive || canSlideNegative) && CanSlide(sourceX, sourceY))
+    if (!canSlidePositive && !canSlideNegative)
+    {
+        if (_UseContactSlip != 0 && _SupportSearchDistance > 0)
+            return TryTraverseSupportedLedge(sourceX, sourceY, fallSpeed, targetX, targetY);
+        if (frictionless)
+        {
+            int travel = GetFrictionlessLedgeTravel(sourceX, sourceY, fallSpeed);
+            targetX = sourceX + _GravityY * travel;
+            targetY = sourceY + _GravityX * travel;
+            resolved = travel != 0;
+        }
+    }
+    else
     {
         int direction = ResolveSlideDirection(
             sourceX,
@@ -258,6 +393,8 @@ bool TrySlide(
             canSlidePositive,
             canSlideNegative
         );
+        if (_UseContactSlip != 0 && _SupportSearchDistance > 0)
+            return TryFollowSupportedSlope(sourceX, sourceY, direction, fallSpeed, targetX, targetY);
         int upstreamX = sourceX - _GravityX;
         int upstreamY = sourceY - _GravityY;
         if (_EnableVerticalSettle != 0 && (_Current[sourceY * _Width + sourceX] & UNSETTLED_MASK) == 0 && IsInBounds(downX, downY)
@@ -279,7 +416,8 @@ bool TrySlide(
             perpendicularX,
             perpendicularY,
             direction,
-            fallSpeed
+            fallSpeed,
+            frictionless
         );
         if (slideSteps > 0)
         {
@@ -739,7 +877,7 @@ int GetCascadeIncomingCell(int targetIndex)
     int incomingCell = 0;
     if (sourceIndex >= 0)
     {
-        incomingCell = WithVelocity(_Current[sourceIndex], 1);
+        incomingCell = WithVelocity(_Current[sourceIndex], 1) & ~FRICTIONLESS_SLIDE_MASK;
     }
 
     return incomingCell;
@@ -760,12 +898,22 @@ int GetIncomingCell(int targetIndex)
             {
                 int sourceCell = _Current[sourceIndex];
                 int traveled = GetGravityDistance(sourceIndex, targetIndex);
+                int sx = 0, sy = 0;
+                GetCoordinates(sourceIndex, sx, sy);
+                bool lateralSlide = traveled == 0;
+                if (lateralSlide)
+                {
+                    int tx = 0, ty = 0;
+                    GetCoordinates(targetIndex, tx, ty);
+                    traveled = abs(tx - sx) + abs(ty - sy);
+                }
                 if ((sourceCell & TYPE_MASK) == SAND_TYPE && traveled > 0)
                 {
                     incomingCell = WithVelocity(
                         sourceCell,
                         traveled > 255 ? 255 : traveled
                     );
+                    incomingCell = lateralSlide ? incomingCell | FRICTIONLESS_SLIDE_MASK : incomingCell & ~FRICTIONLESS_SLIDE_MASK;
                 }
             }
         }

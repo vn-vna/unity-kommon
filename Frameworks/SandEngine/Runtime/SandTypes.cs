@@ -49,6 +49,28 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public const int VelocityShift = 8;
         public const uint VelocityMask = 0x0000FF00u;
 
+        // Walls have no velocity. Bit 8 is their material flag; Sand still uses
+        // the complete velocity byte unchanged. Existing wall/color encodings stay valid.
+        public const int FrictionlessWallMask = 0x00000100;
+        public static bool IsFrictionlessWall(int cell) => GetElementType(cell) == ElementType.Wall
+            && (cell & FrictionlessWallMask) != 0;
+        public static int PackWall(bool frictionless = false, int payload = 0) =>
+            Pack(ElementType.Wall, frictionless ? 1 : 0, payload);
+
+        // A separate wall-only material bit distinguishes uncut artwork from ordinary solids.
+        public const int FixedSandWallMask = 0x00000200;
+        public static bool IsFixedSandWall(int cell) => GetElementType(cell) == ElementType.Wall
+            && (cell & FixedSandWallMask) != 0;
+        public static int PackFixedSandWall(int payload) => Pack(ElementType.Wall, 2, payload);
+
+        // Bit 31 remembers a bounded supported sideways slide while it crosses sand
+        // support. Clear it on the next gravity-axis move; color is unaffected.
+        public const int FrictionlessSlideMask = unchecked((int)0x80000000);
+        public static bool IsFrictionlessSliding(int cell) => GetElementType(cell) == ElementType.Sand
+            && (cell & FrictionlessSlideMask) != 0;
+        public static int WithFrictionlessSliding(int cell, bool sliding) => sliding
+            ? cell | FrictionlessSlideMask : cell & ~FrictionlessSlideMask;
+
         public const int PayloadShift = 16;
         public const uint PayloadMask = 0xFFFF0000u;
 

@@ -1,0 +1,8 @@
+{
+    "name": "Com.Scheherazade.ParallelCollectorQueue.ConsumerTests",
+    "references": ["Com.Scheherazade.ParallelCollectorQueue"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

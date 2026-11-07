@@ -218,7 +218,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine.Pla
                 secondIntents = _next.GetArrayForStep(), reconciliationQueue = _reconciliation.GetArrayForStep(),
                 width = settings.width, height = settings.height, disableGravity = settings.disableGravity,
                 constantFallSpeed = settings.constantFallSpeed, gravityPerStep = settings.gravityPerStep,
-                maxFallSpeed = settings.maxFallSpeed, slideChance = settings.slideChance,
+                maxFallSpeed = settings.maxFallSpeed, slideChance = settings.slideChance, contactSlip = settings.contactSlip,
                 preventTemporaryEdgeVacancies = settings.preventTemporaryEdgeVacancies,
                 enableLateralMixing = settings.enableLateralMixing, lateralMixChance = settings.lateralMixChance,
                 lateralMixPasses = settings.lateralMixPasses, mixingSeed = settings.mixingSeed,

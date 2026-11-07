@@ -1,0 +1,8 @@
+{
+  "name": "Com.Scheherazade.PuzzleLevels.EditorTests",
+  "rootNamespace": "Com.Scheherazade.Common.Frameworks.PuzzleLevels.Tests",
+  "references": ["Com.Scheherazade.PuzzleLevels", "Com.Scheherazade.PuzzleLevels.Editor", "Com.Scheherazade.Common"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

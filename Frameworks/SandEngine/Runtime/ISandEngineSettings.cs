@@ -47,6 +47,16 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         void GetRandomVariantRange(int logicalColor, out int minimum, out int maximum);
     }
 
+    /// <summary>
+    /// Optional instant-compaction/cascade and collection-repair policy. Settings
+    /// without this capability retain the existing immediate-settling behavior.
+    /// Ordinary gravity, friction and explicitly enabled batch collapse are independent.
+    /// </summary>
+    public interface ISandSettlingSettings
+    {
+        bool EnableImmediateSettling { get; }
+    }
+
     /// <summary>Preserves Unity asset null semantics through neutral interfaces.</summary>
     internal static class SandSettingsLifetime
     {

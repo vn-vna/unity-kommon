@@ -28,6 +28,23 @@ Unity-free or standalone UPM distribution. No local version defines are needed:
   even when GPU is selected.
 - Packed `SandCell`, `SandViewCell`, `ElementType`, `StepParams`, backend,
   scheduling and view contracts retain their existing layouts and semantics.
+- `SandCell.PackWall(frictionless: true, payload: colorByte)` marks a zero-friction
+  wall; `IsFrictionlessWall` reads the material. Type remains Wall (2); bit 8 in
+  the otherwise unused wall velocity byte holds the flag. Sand velocity/color
+  encoding is unchanged. These walls bypass slide friction/edge-vacancy guards
+  and allow speed-bounded travel across clear rasterized ledges toward a downhill
+  exit. The empty path may pass above sand support. A transient Sand payload bit31
+  remembers a wall-started lateral slide across multiple bounded ticks; ordinary
+  gravity-axis moves clear it. This prevents sand support from aborting a partly
+  completed slide. Color/variant, velocity, multiplier and gravity bits are separate.
+  They never permit tunneling through occupied cells or draining a closed floor.
+  A consumer must still accept grains at the bottom to prevent backpressure.
+- Optionally implement `ISandSettlingSettings` and return false from
+  `EnableImmediateSettling` to disable per-tick instant settling and collection
+  vacancy compaction. Ordinary gravity/slide motion remains speed-bounded;
+  explicit batch collapse is independent. Settings without this interface keep
+  legacy immediate settling. Direct backend callers still control
+  `StepParams.EnableVerticalSettle` themselves.
 - Seed/edit using `WriteCells`, `WriteCellsWithVariantVariation`, `DrawStamp`,
   `TryEmitSand`, `Clear`, `Resize`, and backend `SetCell`. Authoritative backend
   mutations preserve counts and view dirtiness. Do not write borrowed arrays.

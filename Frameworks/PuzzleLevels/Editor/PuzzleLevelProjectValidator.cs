@@ -47,6 +47,10 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
 
         public void OnPreprocessBuild(BuildReport report)
         {
+            // Installing an optional framework must not require a singleton in games that do not use it.
+            // Partial configurations still validate, so a missing manager cannot hide broken setup.
+            if (!HasPuzzleLevelAssets()) return;
+
             ValidationResult result = ValidateProject();
             LogWarnings(result);
             if (result.Errors.Count == 0)
@@ -79,6 +83,21 @@ namespace Com.Scheherazade.Common.Frameworks.PuzzleLevels.Editor
         #endregion
 
         #region Private Methods
+
+        private static bool HasPuzzleLevelAssets()
+        {
+            foreach (Type type in TypeCache.GetTypesDerivedFrom<ScriptableObject>())
+            {
+                if (type.IsAbstract || type.ContainsGenericParameters
+                    || type.Namespace == null
+                    || (type.Namespace != "Com.Scheherazade.Common.Frameworks.PuzzleLevels"
+                        && !type.Namespace.StartsWith(
+                            "Com.Scheherazade.Common.Frameworks.PuzzleLevels.",
+                            StringComparison.Ordinal))) continue;
+                if (AssetDatabase.FindAssets($"t:{type.Name}").Length > 0) return true;
+            }
+            return false;
+        }
 
         private static ValidationResult ValidateProject()
         {

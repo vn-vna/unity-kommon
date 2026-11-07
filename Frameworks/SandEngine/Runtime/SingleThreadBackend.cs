@@ -95,6 +95,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 gravityPerStep = settings.gravityPerStep,
                 maxFallSpeed = settings.maxFallSpeed,
                 slideChance = settings.slideChance,
+                contactSlip = settings.contactSlip,
                 preventTemporaryEdgeVacancies =
                     settings.preventTemporaryEdgeVacancies,
                 enableLateralMixing = settings.enableLateralMixing,

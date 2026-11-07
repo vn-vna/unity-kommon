@@ -1,7 +1,6 @@
 #if !PLA_CREATIVE_BUILD
 using System;
 using Com.Scheherazade.Common.Logging;
-using SRDebugger.Services;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -70,7 +69,6 @@ namespace Com.Scheherazade.Common.DebugCaller
         #region Private Fields
 
         private static DebugCaller _instance;
-        private static DebugCallerOptions _options;
 
         private DebugCallerGesture _gesture;
         private int _lastLoggedHoldSecond = -1;
@@ -124,10 +122,6 @@ namespace Com.Scheherazade.Common.DebugCaller
             DontDestroyOnLoad(gameObject);
             CreateGesture();
             LogTouchConfiguration();
-            if (DebugCallerState.IsEnabled)
-            {
-                EnsureDebuggerInitialized();
-            }
         }
 
         private void OnDestroy()
@@ -135,7 +129,6 @@ namespace Com.Scheherazade.Common.DebugCaller
             if (_instance == this)
             {
                 _instance = null;
-                _options = null;
             }
         }
 
@@ -172,7 +165,7 @@ namespace Com.Scheherazade.Common.DebugCaller
                 }
 
                 QuickLog.Info<DebugCaller>(
-                    "Gesture completed. Enabling debug mode and requesting SRDebugger."
+                    "Gesture completed. Enabling debug mode and requesting debugger."
                 );
                 EnableAndShowDebugger();
                 ResetProgressLogging();
@@ -243,7 +236,7 @@ namespace Com.Scheherazade.Common.DebugCaller
         public static void EnableAndShowDebugger()
         {
             DebugCallerState.Enable();
-            RequestDebugger();
+            RaiseDebuggerRequested();
         }
 
         #endregion
@@ -420,57 +413,6 @@ namespace Com.Scheherazade.Common.DebugCaller
                 extent,
                 cornerMinimumSizeInches
             );
-        }
-
-        private static void RequestDebugger()
-        {
-            RaiseDebuggerRequested();
-
-            IDebugService debugService = EnsureDebuggerInitialized();
-            if (debugService == null)
-            {
-                return;
-            }
-
-            try
-            {
-                debugService.ShowDebugPanel(false);
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception);
-            }
-        }
-
-        private static IDebugService EnsureDebuggerInitialized()
-        {
-            try
-            {
-                if (!SRDebug.IsInitialized)
-                {
-                    SRDebug.Init();
-                }
-
-                IDebugService debugService = SRDebug.Instance;
-                if (debugService == null)
-                {
-                    Debug.LogError("[DebugCaller] SRDebugger service is unavailable.");
-                    return null;
-                }
-
-                if (_options == null)
-                {
-                    _options = new DebugCallerOptions();
-                    debugService.AddOptionContainer(_options);
-                }
-
-                return debugService;
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception);
-                return null;
-            }
         }
 
         private static void RaiseDebuggerRequested()

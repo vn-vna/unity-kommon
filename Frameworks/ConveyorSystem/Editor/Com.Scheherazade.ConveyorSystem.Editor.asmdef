@@ -1,0 +1,7 @@
+{
+    "name": "Com.Scheherazade.ConveyorSystem.Editor",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.ConveyorSystem.Editor",
+    "references": ["Com.Scheherazade.ConveyorSystem"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": true
+}

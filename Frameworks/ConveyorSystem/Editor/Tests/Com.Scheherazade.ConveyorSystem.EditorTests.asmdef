@@ -1,0 +1,8 @@
+{
+    "name": "Com.Scheherazade.ConveyorSystem.EditorTests",
+    "references": ["Com.Scheherazade.ConveyorSystem", "Com.Scheherazade.ConveyorSystem.Editor"],
+    "includePlatforms": ["Editor"],
+    "autoReferenced": false,
+    "defineConstraints": ["UNITY_INCLUDE_TESTS"],
+    "optionalUnityReferences": ["TestAssemblies"]
+}

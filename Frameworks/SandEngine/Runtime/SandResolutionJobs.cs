@@ -35,6 +35,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public int gravityPerStep;
         public int maxFallSpeed;
         public int slideChance;
+        public SandContactSlip contactSlip;
         public bool preventTemporaryEdgeVacancies;
         public bool enableLateralMixing;
         public int lateralMixChance;
@@ -120,7 +121,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 gravityX,
                 gravityY,
                 simulationSeed,
-                enableVerticalSettle
+                enableVerticalSettle,
+                contactSlip
             );
         }
     }
@@ -394,6 +396,7 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
         public int gravityPerStep;
         public int maxFallSpeed;
         public int slideChance;
+        public SandContactSlip contactSlip;
         public bool preventTemporaryEdgeVacancies;
         public bool enableLateralMixing;
         public int lateralMixChance;
@@ -422,7 +425,8 @@ namespace Com.Scheherazade.Common.Frameworks.SandEngine
                 gravityX,
                 gravityY,
                 simulationSeed,
-                enableVerticalSettle
+                enableVerticalSettle,
+                contactSlip
             );
 
             for (int index = 0; index < firstIntents.Length; index++)

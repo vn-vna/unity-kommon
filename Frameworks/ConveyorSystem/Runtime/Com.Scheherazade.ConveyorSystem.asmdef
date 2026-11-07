@@ -1,0 +1,7 @@
+{
+    "name": "Com.Scheherazade.ConveyorSystem",
+    "rootNamespace": "Com.Scheherazade.Common.Frameworks.ConveyorSystem",
+    "references": [],
+    "autoReferenced": true,
+    "allowUnsafeCode": false
+}
